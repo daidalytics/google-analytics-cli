@@ -2204,21 +2204,21 @@ Standard CRUD test patterns. Tests must verify stream type validation (iOS only)
 | ~~3~~ | ~~WS-A3: Key Events~~ | ~~5~~ | ~~Core conversion tracking~~ **DONE** |
 | ~~4~~ | ~~WS-D1: Pivot Reports~~ | ~~1~~ | ~~Advanced reporting~~ **DONE** |
 | ~~5~~ | ~~WS-D3: Check Compatibility~~ | ~~1~~ | ~~Report validation~~ **DONE** |
-| 6 | WS-A4: MP Secrets | 5 | Server-side tracking |
-| 7 | WS-A5: Google Ads Links | 4 | Common integration |
+| ~~6~~ | ~~WS-A4: MP Secrets~~ | ~~5~~ | ~~Server-side tracking~~ **DONE** |
+| ~~7~~ | ~~WS-A5: Google Ads Links~~ | ~~4~~ | ~~Common integration~~ **DONE** |
 | ~~8~~ | ~~WS-A7: Account Summaries~~ | ~~1~~ | ~~Quick overview~~ **DONE** |
 | ~~9~~ | ~~WS-A8: Properties Patch~~ | ~~1~~ | ~~Completes property CRUD~~ **DONE** |
 | ~~10~~ | ~~WS-A9: Data Streams Patch~~ | ~~1~~ | ~~Completes data streams CRUD~~ **DONE** |
-| 11 | WS-D4: Audience Exports | 4 | Audience data workflows |
-| ~~12~~ | ~~WS-D5: Expose getMetadata~~ | ~~1~~ | ~~Developer utility~~ **DONE** |
+| ~~11~~ | ~~WS-D5: Expose getMetadata~~ | ~~1~~ | ~~Developer utility~~ **DONE** |
+| ~~12~~ | ~~WS-A6: Firebase Links~~ | ~~3~~ | ~~Firebase integration~~ **DONE** |
 | 13 | WS-A11: Change History | 1 | Audit / debugging |
 | 14 | WS-D2: Batch Reports | 1 | Efficiency for multi-report |
 | 15 | WS-A10: Data Retention | 2 | Compliance / governance |
-| 16 | WS-A6: Firebase Links | 3 | Firebase integration |
-| 17 | WS-A12: Access Reports | 2 | Compliance / auditing |
-| 18 | WS-A13: Accounts Delete | 1 | Completes accounts CRUD |
-| 19 | WS-A14: Acknowledge Data Collection | 1 | Property setup |
-| 20 | WS-A15: Data Sharing Settings | 1 | Account settings |
+| 16 | WS-A12: Access Reports | 2 | Compliance / auditing |
+| 17 | WS-A13: Accounts Delete | 1 | Completes accounts CRUD |
+| 18 | WS-A14: Acknowledge Data Collection | 1 | Property setup |
+| 19 | WS-A15: Data Sharing Settings | 1 | Account settings |
+| 20 | WS-D4: Audience Exports | 4 | Audience data workflows *(deprioritized)* |
 
 ### Tier 2 — Medium Value, Alpha
 

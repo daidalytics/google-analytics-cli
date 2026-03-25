@@ -35,6 +35,9 @@ class TestAgentGuide:
         assert "ga accounts list" in result.output
         assert "ga reports run" in result.output
         assert "ga config set" in result.output
+        assert "ga mp-secrets" in result.output
+        assert "ga google-ads-links" in result.output
+        assert "ga firebase-links" in result.output
 
     def test_guide_documents_upgrade(self):
         """Guide documents the upgrade command."""
@@ -114,6 +117,9 @@ class TestAgentGuideSection:
         assert "Custom Metrics" in result.output
         assert "Key Events" in result.output
         assert "Data Streams" in result.output
+        assert "Measurement Protocol Secrets" in result.output
+        assert "Google Ads Links" in result.output
+        assert "Firebase Links" in result.output
 
     def test_section_examples(self):
         """--section examples shows complete workflow examples."""
