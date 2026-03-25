@@ -195,6 +195,203 @@ def realtime_cmd(
         handle_error(e)
 
 
+@reports_app.command("pivot")
+def pivot_cmd(
+    property_id: Optional[str] = typer.Option(
+        None, "--property-id", "-p", help="Property ID (numeric)"
+    ),
+    metrics: str = typer.Option(..., "--metrics", "-m", help="Comma-separated metrics"),
+    dimensions: str = typer.Option(
+        ..., "--dimensions", "-d", help="Comma-separated dimensions (all used in pivots)"
+    ),
+    pivot_field: str = typer.Option(
+        ..., "--pivot-field", help="Dimension to pivot on (must be in --dimensions)"
+    ),
+    start_date: str = typer.Option("28daysAgo", "--start-date", help="Start date"),
+    end_date: str = typer.Option("yesterday", "--end-date", help="End date"),
+    limit: int = typer.Option(100, "--limit", "-l", help="Max rows per pivot group"),
+    output_format: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output format (json, table, compact)"
+    ),
+):
+    """Run a pivot report (cross-tabulation)."""
+    try:
+        effective_property = get_effective_value(property_id, "default_property_id")
+        require_options({"property_id": effective_property}, ["property_id"])
+        effective_format = get_effective_value(output_format, "output_format") or "table"
+
+        dim_list = [d.strip() for d in dimensions.split(",")]
+        pivot_field_clean = pivot_field.strip()
+
+        if pivot_field_clean not in dim_list:
+            raise typer.BadParameter(
+                f"--pivot-field '{pivot_field_clean}' must be one "
+                f"of the --dimensions: {', '.join(dim_list)}"
+            )
+
+        row_dims = [d for d in dim_list if d != pivot_field_clean]
+
+        data = get_data_client()
+
+        pivots = [
+            {"fieldNames": [pivot_field_clean], "limit": 5},
+        ]
+        if row_dims:
+            pivots.append({"fieldNames": row_dims, "limit": limit})
+
+        body = {
+            "metrics": [{"name": m.strip()} for m in metrics.split(",")],
+            "dimensions": [{"name": d} for d in dim_list],
+            "dateRanges": [{"startDate": start_date, "endDate": end_date}],
+            "pivots": pivots,
+        }
+
+        result = data.properties().runPivotReport(
+            property=f"properties/{effective_property}",
+            body=body,
+        ).execute()
+
+        if effective_format != "table":
+            output(result, effective_format)
+            return
+
+        rows, columns, headers = _transform_pivot_rows(result, pivot_field_clean)
+        if not rows:
+            info("No data returned.")
+        else:
+            output(rows, effective_format, columns=columns, headers=headers)
+
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        handle_error(e)
+
+
+def _transform_pivot_rows(
+    result: dict, pivot_field: str
+) -> tuple[list[dict], list[str], list[str]]:
+    """Transform pivot report response into flat rows for table display."""
+    pivot_headers = result.get("pivotHeaders", [])
+    dim_headers = [h.get("name", "") for h in result.get("dimensionHeaders", [])]
+    met_headers = [h.get("name", "") for h in result.get("metricHeaders", [])]
+
+    # Build pivot column values from pivot headers
+    pivot_values = []
+    if pivot_headers:
+        for group in pivot_headers[0].get("pivotDimensionHeaders", []):
+            vals = group.get("dimensionValues", [])
+            label = vals[0].get("value", "") if vals else ""
+            pivot_values.append(label)
+
+    # Non-pivot dimensions
+    row_dims = [d for d in dim_headers if d != pivot_field]
+
+    # Build column keys: row dims + pivot_value/metric combos
+    columns = list(row_dims)
+    headers = list(row_dims)
+    for pv in pivot_values:
+        for m in met_headers:
+            col_key = f"{pv}_{m}"
+            columns.append(col_key)
+            headers.append(f"{pv} / {m}")
+
+    rows = []
+    for row in result.get("rows", []):
+        entry = {}
+        # Fill row dimensions (skip the pivot field dimension)
+        dim_vals = row.get("dimensionValues", [])
+        for i, dname in enumerate(dim_headers):
+            if dname != pivot_field and i < len(dim_vals):
+                entry[dname] = dim_vals[i].get("value", "")
+
+        # Fill metric values per pivot group
+        met_vals = row.get("metricValues", [])
+        idx = 0
+        for pv in pivot_values:
+            for m in met_headers:
+                col_key = f"{pv}_{m}"
+                entry[col_key] = met_vals[idx].get("value", "") if idx < len(met_vals) else ""
+                idx += 1
+
+        rows.append(entry)
+
+    return rows, columns, headers
+
+
+@reports_app.command("check-compatibility")
+def check_compatibility_cmd(
+    property_id: Optional[str] = typer.Option(
+        None, "--property-id", "-p", help="Property ID (numeric)"
+    ),
+    metrics: Optional[str] = typer.Option(
+        None, "--metrics", "-m", help="Comma-separated metrics to check"
+    ),
+    dimensions: Optional[str] = typer.Option(
+        None, "--dimensions", "-d", help="Comma-separated dimensions to check"
+    ),
+    output_format: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output format (json, table, compact)"
+    ),
+):
+    """Check compatibility of dimensions and metrics."""
+    try:
+        effective_property = get_effective_value(property_id, "default_property_id")
+        require_options({"property_id": effective_property}, ["property_id"])
+        effective_format = get_effective_value(output_format, "output_format") or "table"
+
+        if not metrics and not dimensions:
+            raise typer.BadParameter(
+                "At least one of --metrics or --dimensions must be specified."
+            )
+
+        body = {}
+        if metrics:
+            body["metrics"] = [{"name": m.strip()} for m in metrics.split(",")]
+        if dimensions:
+            body["dimensions"] = [{"name": d.strip()} for d in dimensions.split(",")]
+
+        data = get_data_client()
+        result = data.properties().checkCompatibility(
+            property=f"properties/{effective_property}",
+            body=body,
+        ).execute()
+
+        if effective_format != "table":
+            output(result, effective_format)
+            return
+
+        # Build a flat list for table output
+        rows = []
+        for item in result.get("dimensionCompatibilities", []):
+            dim_meta = item.get("dimensionMetadata", {})
+            rows.append({
+                "type": "dimension",
+                "apiName": dim_meta.get("apiName", ""),
+                "uiName": dim_meta.get("uiName", ""),
+                "compatibility": item.get("compatibility", "UNKNOWN"),
+            })
+        for item in result.get("metricCompatibilities", []):
+            met_meta = item.get("metricMetadata", {})
+            rows.append({
+                "type": "metric",
+                "apiName": met_meta.get("apiName", ""),
+                "uiName": met_meta.get("uiName", ""),
+                "compatibility": item.get("compatibility", "UNKNOWN"),
+            })
+
+        output(
+            rows,
+            effective_format,
+            columns=["type", "apiName", "uiName", "compatibility"],
+            headers=["Type", "API Name", "UI Name", "Compatibility"],
+        )
+
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        handle_error(e)
+
+
 @reports_app.command("build")
 def build_cmd(
     property_id: Optional[str] = typer.Option(

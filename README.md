@@ -10,7 +10,9 @@ Manage GA4 accounts, properties, data streams, and run reports — all from your
 - **Account management** — List, inspect, and update GA4 accounts
 - **Property management** — List, create, inspect, and delete GA4 properties
 - **Data stream management** — List, create, inspect, and delete web, Android, and iOS data streams
-- **Reporting** — Run custom reports, real-time reports with live polling, and build reports interactively
+- **Custom dimensions & metrics** — List, create, update, and archive custom definitions
+- **Key events** — List, create, update, and delete key events (conversions)
+- **Reporting** — Run custom reports, pivot reports, real-time reports with live polling, check compatibility, and build reports interactively
 - **Flexible output** — Table (default), JSON, and compact output formats
 - **Self-update** — Check for and install updates via `ga upgrade`
 - **Shell completions** — Generate completion scripts for bash, zsh, and fish
@@ -127,8 +129,11 @@ export GA_CLI_SERVICE_ACCOUNT="/path/to/key.json"
 | `ga config` | `setup`, `get`, `set`, `unset`, `path`, `reset` | Manage CLI configuration |
 | `ga accounts` | `list`, `get`, `update` | List, inspect, and update GA4 accounts |
 | `ga properties` | `list`, `get`, `create`, `delete` | Manage GA4 properties |
+| `ga custom-dimensions` | `list`, `get`, `create`, `update`, `archive` | Manage custom dimensions |
+| `ga custom-metrics` | `list`, `get`, `create`, `update`, `archive` | Manage custom metrics |
 | `ga data-streams` | `list`, `get`, `create`, `delete` | Manage data streams |
-| `ga reports` | `run`, `realtime`, `build` | Run and build reports |
+| `ga key-events` | `list`, `get`, `create`, `update`, `delete` | Manage key events (conversions) |
+| `ga reports` | `run`, `pivot`, `check-compatibility`, `realtime`, `build` | Run and build reports |
 | `ga upgrade` | `--check`, `--force` | Check for and install updates |
 | `ga completions` | `bash`, `zsh`, `fish` | Generate shell completion scripts |
 

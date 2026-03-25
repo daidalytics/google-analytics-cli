@@ -11,14 +11,16 @@ AGENT_GUIDE = r"""# AI Agent Guide to GA CLI
 2. [Core Concepts](#core-concepts)
 3. [Configuration Management](#configuration-management)
 4. [Accounts & Properties](#accounts--properties)
-5. [Data Streams](#data-streams)
-6. [Reports](#reports)
-7. [Upgrade & Maintenance](#upgrade--maintenance)
-8. [Shell Completions](#shell-completions)
-9. [Environment Variables](#environment-variables)
-10. [Performance Optimization](#performance-optimization)
-11. [Troubleshooting](#troubleshooting)
-12. [Complete Examples](#complete-examples)
+5. [Custom Dimensions & Metrics](#custom-dimensions--metrics)
+6. [Key Events](#key-events)
+7. [Data Streams](#data-streams)
+8. [Reports](#reports)
+9. [Upgrade & Maintenance](#upgrade--maintenance)
+10. [Shell Completions](#shell-completions)
+11. [Environment Variables](#environment-variables)
+12. [Performance Optimization](#performance-optimization)
+13. [Troubleshooting](#troubleshooting)
+14. [Complete Examples](#complete-examples)
 
 ---
 
@@ -206,6 +208,124 @@ ga properties delete --property-id 987654321 --yes
 
 ---
 
+## Custom Dimensions & Metrics
+
+Custom dimensions and metrics extend GA4's built-in definitions with property-specific parameters.
+
+### Custom Dimensions
+
+#### List Custom Dimensions
+```bash
+ga custom-dimensions list --property-id 987654321 -o json
+```
+
+#### Get Custom Dimension Details
+```bash
+ga custom-dimensions get --property-id 987654321 --dimension-id DIMENSION_ID -o json
+```
+
+#### Create a Custom Dimension
+```bash
+ga custom-dimensions create \
+  --property-id 987654321 \
+  --parameter-name "page_type" \
+  --display-name "Page Type" \
+  --scope EVENT \
+  --description "Type of page viewed"
+```
+
+**Valid scopes**: `EVENT`, `USER`, `ITEM`
+
+#### Update a Custom Dimension
+```bash
+ga custom-dimensions update \
+  --property-id 987654321 \
+  --dimension-id DIMENSION_ID \
+  --display-name "New Name" \
+  --description "Updated description"
+```
+
+**Note**: `parameterName` and `scope` cannot be changed after creation.
+
+#### Archive a Custom Dimension
+```bash
+ga custom-dimensions archive -p 987654321 -d DIMENSION_ID --yes
+```
+
+### Custom Metrics
+
+#### List Custom Metrics
+```bash
+ga custom-metrics list --property-id 987654321 -o json
+```
+
+#### Create a Custom Metric
+```bash
+ga custom-metrics create \
+  --property-id 987654321 \
+  --parameter-name "revenue_per_user" \
+  --display-name "Revenue Per User" \
+  --scope EVENT \
+  --measurement-unit CURRENCY
+```
+
+**Valid measurement units**: `STANDARD`, `CURRENCY`, `FEET`, `METERS`, `KILOMETERS`, `MILES`, `MILLISECONDS`, `SECONDS`, `MINUTES`, `HOURS`
+
+#### Update a Custom Metric
+```bash
+ga custom-metrics update \
+  --property-id 987654321 \
+  --metric-id METRIC_ID \
+  --display-name "New Name" \
+  --measurement-unit METERS
+```
+
+#### Archive a Custom Metric
+```bash
+ga custom-metrics archive -p 987654321 -m METRIC_ID --yes
+```
+
+---
+
+## Key Events
+
+Key events (formerly "conversions") mark significant user actions you want to track.
+
+### List Key Events
+```bash
+ga key-events list --property-id 987654321 -o json
+```
+
+### Get Key Event Details
+```bash
+ga key-events get --property-id 987654321 --key-event-id KEY_EVENT_ID -o json
+```
+
+### Create a Key Event
+```bash
+ga key-events create \
+  --property-id 987654321 \
+  --event-name "purchase" \
+  --counting-method ONCE_PER_EVENT
+```
+
+**Valid counting methods**: `ONCE_PER_EVENT`, `ONCE_PER_SESSION`
+
+### Update a Key Event
+```bash
+ga key-events update \
+  --property-id 987654321 \
+  --key-event-id KEY_EVENT_ID \
+  --counting-method ONCE_PER_SESSION
+```
+
+### Delete a Key Event
+```bash
+ga key-events delete -p 987654321 -k KEY_EVENT_ID --yes
+```
+
+---
+
 ## Data Streams
 
 ### Stream Types
@@ -302,6 +422,32 @@ ga reports run \
 | `sessionDefaultChannelGroup` | Channel grouping |
 | `pagePath` | Page URL path |
 | `pageTitle` | Page title |
+
+### Pivot Reports
+```bash
+# Cross-tabulate sessions by device category across countries
+ga reports pivot \
+  --property-id 987654321 \
+  --metrics sessions,users \
+  --dimensions country,deviceCategory \
+  --pivot-field deviceCategory \
+  --start-date 7daysAgo \
+  -o json
+```
+
+**Note**: `--pivot-field` must be one of the `--dimensions`. The pivot field becomes column headers in table output.
+
+### Check Compatibility
+```bash
+# Verify dimensions and metrics can be used together before running a report
+ga reports check-compatibility \
+  --property-id 987654321 \
+  --metrics sessions,conversions \
+  --dimensions date,city \
+  -o json
+```
+
+**AI Agent Tip**: Use `check-compatibility` before building complex reports to avoid API errors from incompatible dimension/metric combinations.
 
 ### Date Formats
 - Relative: `today`, `yesterday`, `7daysAgo`, `30daysAgo`, `90daysAgo`
@@ -421,10 +567,13 @@ ga data-streams create --display-name "Web 2" --url "https://b.com"
 ```
 
 ### 4. Skip Confirmation Prompts
-Use `--yes` (`-y`) for delete operations in automated workflows:
+Use `--yes` (`-y`) for delete/archive operations in automated workflows:
 ```bash
 ga properties delete --property-id 987654321 --yes
 ga data-streams delete --property-id 987654321 --stream-id 123 --yes
+ga custom-dimensions archive -p 987654321 -d DIMENSION_ID --yes
+ga custom-metrics archive -p 987654321 -m METRIC_ID --yes
+ga key-events delete -p 987654321 -k KEY_EVENT_ID --yes
 ```
 
 ---
@@ -616,6 +765,33 @@ ga properties create -a ACCOUNT_ID --name "Name" [--timezone TZ] [--currency COD
 ga properties delete -p PROPERTY_ID --yes
 ```
 
+### Custom Dimensions
+```bash
+ga custom-dimensions list [-p PROPERTY_ID] -o json
+ga custom-dimensions get -p PROPERTY_ID -d DIMENSION_ID -o json
+ga custom-dimensions create -p PROPERTY_ID --parameter-name NAME --display-name NAME --scope EVENT|USER|ITEM
+ga custom-dimensions update -p PROPERTY_ID -d DIMENSION_ID [--display-name NAME] [--description TEXT]
+ga custom-dimensions archive -p PROPERTY_ID -d DIMENSION_ID --yes
+```
+
+### Custom Metrics
+```bash
+ga custom-metrics list [-p PROPERTY_ID] -o json
+ga custom-metrics get -p PROPERTY_ID -m METRIC_ID -o json
+ga custom-metrics create -p PROPERTY_ID --parameter-name NAME --display-name NAME --scope EVENT --measurement-unit UNIT
+ga custom-metrics update -p PROPERTY_ID -m METRIC_ID [--display-name NAME] [--measurement-unit UNIT]
+ga custom-metrics archive -p PROPERTY_ID -m METRIC_ID --yes
+```
+
+### Key Events
+```bash
+ga key-events list [-p PROPERTY_ID] -o json
+ga key-events get -p PROPERTY_ID -k KEY_EVENT_ID -o json
+ga key-events create -p PROPERTY_ID --event-name NAME [--counting-method ONCE_PER_EVENT|ONCE_PER_SESSION]
+ga key-events update -p PROPERTY_ID -k KEY_EVENT_ID --counting-method METHOD
+ga key-events delete -p PROPERTY_ID -k KEY_EVENT_ID --yes
+```
+
 ### Data Streams
 ```bash
 ga data-streams list [-p PROPERTY_ID] -o json
@@ -627,6 +803,8 @@ ga data-streams delete -p PROPERTY_ID -s STREAM_ID --yes
 ### Reports
 ```bash
 ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE --limit N -o json
+ga reports pivot [-p PROPERTY_ID] -m metrics -d dimensions --pivot-field FIELD [--start-date DATE] -o json
+ga reports check-compatibility [-p PROPERTY_ID] [-m metrics] [-d dimensions] -o json
 ga reports realtime [-p PROPERTY_ID] -m metrics [-d dimensions] [--interval SECONDS]
 ga reports build [-p PROPERTY_ID]  # Interactive — avoid in automation
 ```
@@ -651,6 +829,10 @@ ga completions fish
 | `--account-id` | `-a` | Account ID |
 | `--property-id` | `-p` | Property ID |
 | `--stream-id` | `-s` | Data Stream ID |
+| `--dimension-id` | `-d` | Custom dimension ID |
+| `--metric-id` | `-m` | Custom metric ID |
+| `--key-event-id` | `-k` | Key event ID |
+| `--event-name` | `-e` | Event name |
 | `--output` | `-o` | Output format |
 | `--metrics` | `-m` | Report metrics |
 | `--dimensions` | `-d` | Report dimensions |

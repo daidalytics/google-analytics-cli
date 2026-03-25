@@ -7,7 +7,10 @@ from .commands.agent_cmd import agent_app
 from .commands.auth_cmd import auth_app
 from .commands.completions_cmd import completions_app
 from .commands.config_cmd import config_app
+from .commands.custom_dimensions import custom_dimensions_app
+from .commands.custom_metrics import custom_metrics_app
 from .commands.data_streams import data_streams_app
+from .commands.key_events import key_events_app
 from .commands.properties import properties_app
 from .commands.reports import reports_app
 from .commands.upgrade_cmd import upgrade_app
@@ -23,7 +26,10 @@ app.add_typer(auth_app, name="auth")
 app.add_typer(config_app, name="config")
 app.add_typer(accounts_app, name="accounts")
 app.add_typer(properties_app, name="properties")
+app.add_typer(custom_dimensions_app, name="custom-dimensions")
+app.add_typer(custom_metrics_app, name="custom-metrics")
 app.add_typer(data_streams_app, name="data-streams")
+app.add_typer(key_events_app, name="key-events")
 app.add_typer(reports_app, name="reports")
 app.add_typer(agent_app, name="agent")
 app.add_typer(upgrade_app, name="upgrade")

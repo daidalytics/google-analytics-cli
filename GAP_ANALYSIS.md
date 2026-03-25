@@ -72,15 +72,15 @@ Comprehensive gap analysis of the GA CLI against the full Google Analytics Data 
 | `properties.runRealtimeReport` | **Implemented** | `ga reports realtime` |
 | `properties.getMetadata` | **Implemented** (internal only, used in `reports build`) | — |
 | `properties.batchRunReports` | Missing | — |
-| `properties.runPivotReport` | Missing | — |
+| `properties.runPivotReport` | **Implemented** | `ga reports pivot` |
 | `properties.batchRunPivotReports` | Missing | — |
-| `properties.checkCompatibility` | Missing | — |
+| `properties.checkCompatibility` | **Implemented** | `ga reports check-compatibility` |
 | `properties.audienceExports.create` | Missing | — |
 | `properties.audienceExports.query` | Missing | — |
 | `properties.audienceExports.get` | Missing | — |
 | `properties.audienceExports.list` | Missing | — |
 
-**Coverage: 3/11 methods (27%)**
+**Coverage: 5/11 methods (45%)**
 
 ### Admin API v1beta
 
@@ -110,14 +110,14 @@ Comprehensive gap analysis of the GA CLI against the full Google Analytics Data 
 | `dataStreams.delete` | **Implemented** | `ga data-streams delete` |
 | `dataStreams.patch` | Missing | — |
 | `measurementProtocolSecrets.*` (5 methods) | Missing | — |
-| `customDimensions.*` (5 methods) | Missing | — |
-| `customMetrics.*` (5 methods) | Missing | — |
-| `keyEvents.*` (5 methods) | Missing | — |
+| `customDimensions.*` (5 methods) | **Implemented** | `ga custom-dimensions list\|get\|create\|update\|archive` |
+| `customMetrics.*` (5 methods) | **Implemented** | `ga custom-metrics list\|get\|create\|update\|archive` |
+| `keyEvents.*` (5 methods) | **Implemented** | `ga key-events list\|get\|create\|update\|delete` |
 | `firebaseLinks.*` (3 methods) | Missing | — |
 | `googleAdsLinks.*` (4 methods) | Missing | — |
 | `conversionEvents.*` (5 methods) | Skipped (deprecated, replaced by keyEvents) | — |
 
-**Coverage: 10/~55 methods (18%)**
+**Coverage: 25/~55 methods (45%)**
 
 ---
 
@@ -2199,11 +2199,11 @@ Standard CRUD test patterns. Tests must verify stream type validation (iOS only)
 
 | Priority | Workstream | New Commands | Impact |
 |----------|-----------|-------------|--------|
-| 1 | WS-A1: Custom Dimensions | 5 | Core GA4 configuration management |
-| 2 | WS-A2: Custom Metrics | 5 | Core GA4 configuration management |
-| 3 | WS-A3: Key Events | 5 | Core conversion tracking |
-| 4 | WS-D1: Pivot Reports | 1 | Advanced reporting |
-| 5 | WS-D3: Check Compatibility | 1 | Report validation |
+| ~~1~~ | ~~WS-A1: Custom Dimensions~~ | ~~5~~ | ~~Core GA4 configuration management~~ **DONE** |
+| ~~2~~ | ~~WS-A2: Custom Metrics~~ | ~~5~~ | ~~Core GA4 configuration management~~ **DONE** |
+| ~~3~~ | ~~WS-A3: Key Events~~ | ~~5~~ | ~~Core conversion tracking~~ **DONE** |
+| ~~4~~ | ~~WS-D1: Pivot Reports~~ | ~~1~~ | ~~Advanced reporting~~ **DONE** |
+| ~~5~~ | ~~WS-D3: Check Compatibility~~ | ~~1~~ | ~~Report validation~~ **DONE** |
 | 6 | WS-A4: MP Secrets | 5 | Server-side tracking |
 | 7 | WS-A5: Google Ads Links | 4 | Common integration |
 | 8 | WS-A7: Account Summaries | 1 | Quick overview |

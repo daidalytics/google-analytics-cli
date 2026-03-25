@@ -412,6 +412,139 @@ class TestReportsBuild:
         assert "property-id" in result.output.lower()
 
 
+class TestCheckCompatibility:
+    SAMPLE_COMPAT_RESPONSE = {
+        "dimensionCompatibilities": [
+            {
+                "dimensionMetadata": {"apiName": "date", "uiName": "Date"},
+                "compatibility": "COMPATIBLE",
+            },
+            {
+                "dimensionMetadata": {"apiName": "city", "uiName": "City"},
+                "compatibility": "INCOMPATIBLE",
+            },
+        ],
+        "metricCompatibilities": [
+            {
+                "metricMetadata": {"apiName": "sessions", "uiName": "Sessions"},
+                "compatibility": "COMPATIBLE",
+            },
+        ],
+    }
+
+    def _mock_compat_client(self, response=None):
+        mock_client = MagicMock()
+        mock_client.properties.return_value.checkCompatibility.return_value.execute.return_value = (
+            response or self.SAMPLE_COMPAT_RESPONSE
+        )
+        return mock_client
+
+    def test_all_compatible_table(self):
+        all_compat = {
+            "dimensionCompatibilities": [
+                {
+                    "dimensionMetadata": {"apiName": "date", "uiName": "Date"},
+                    "compatibility": "COMPATIBLE",
+                },
+            ],
+            "metricCompatibilities": [
+                {
+                    "metricMetadata": {"apiName": "sessions", "uiName": "Sessions"},
+                    "compatibility": "COMPATIBLE",
+                },
+            ],
+        }
+        mock_client = self._mock_compat_client(response=all_compat)
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "reports", "check-compatibility",
+                    "-p", "111",
+                    "-m", "sessions",
+                    "-d", "date",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "COMPATIBLE" in result.output
+
+    def test_some_incompatible_table(self):
+        mock_client = self._mock_compat_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "reports", "check-compatibility",
+                    "-p", "111",
+                    "-m", "sessions",
+                    "-d", "date,city",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "INCOMPATIBLE" in result.output
+        assert "COMPATIBLE" in result.output
+
+    def test_json_output(self):
+        mock_client = self._mock_compat_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "reports", "check-compatibility",
+                    "-p", "111",
+                    "-m", "sessions",
+                    "-o", "json",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "dimensionCompatibilities" in result.output
+
+    def test_no_metrics_or_dimensions(self):
+        result = runner.invoke(
+            app,
+            ["reports", "check-compatibility", "-p", "111"],
+        )
+
+        assert result.exit_code != 0
+
+    def test_api_error(self):
+        from googleapiclient.errors import HttpError
+
+        mock_client = self._mock_compat_client()
+        mock_client.properties.return_value.checkCompatibility.return_value.execute.side_effect = (
+            HttpError(
+                resp=MagicMock(status=400),
+                content=b'{"error": {"message": "Bad request"}}',
+            )
+        )
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "reports", "check-compatibility",
+                    "-p", "111",
+                    "-m", "sessions",
+                ],
+            )
+
+        assert result.exit_code == 1
+
+
 class TestTransformReportRows:
     def test_transform_with_dimensions_and_metrics(self):
         from ga_cli.commands.reports import _transform_report_rows
