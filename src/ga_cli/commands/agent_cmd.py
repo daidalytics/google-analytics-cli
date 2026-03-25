@@ -141,6 +141,40 @@ ga completions bash|zsh|fish
 | `GA_CLI_CONFIG_DIR` | Override config directory |
 | `NO_COLOR` | Disable colored output |
 
+## Agent Workflow
+Typical discover → act pattern:
+```bash
+# 1. Discover: find the right IDs
+ACCT=$(ga accounts list -o json | jq -r '.[0].name' | grep -o '[0-9]*$')
+ga config set default_account_id "$ACCT"
+
+PROP=$(ga properties list -o json | jq -r '.[0].name' | grep -o '[0-9]*$')
+ga config set default_property_id "$PROP"
+
+# 2. Act: run reports, create resources, etc.
+ga reports run -m sessions,users -d date --start-date 7daysAgo -o json
+```
+
+### Extracting IDs from JSON output
+```bash
+# Account ID from account name "accounts/123456789"
+ga accounts list -o json | jq -r '.[].name' | grep -o '[0-9]*$'
+
+# Property ID
+ga properties list -o json | jq -r '.[].name' | grep -o '[0-9]*$'
+
+# Stream ID
+ga data-streams list -o json | jq -r '.[].name' | grep -o '[0-9]*$'
+```
+
+## Agent Best Practices
+- **Set defaults first** — eliminates repetitive `--account-id` / `--property-id` flags from every command
+- **Always use `-o json`** — structured output is easier to parse than tables
+- **Use `check-compatibility` before complex reports** — avoids API errors from incompatible metric/dimension combos
+- **Use `metadata` to discover available metrics/dimensions** — `ga reports metadata -p ID --search revenue -o json`
+- **Parallelize independent operations** — run creates/deletes concurrently with `&` and `wait`
+- **Avoid interactive commands** — skip `ga config setup` and `ga reports build`; use explicit flags instead
+
 ## Troubleshooting
 
 | Error | Cause | Fix |

@@ -22,6 +22,8 @@ class TestAgentGuide:
         assert "## Setup" in result.output
         assert "## Command Reference" in result.output
         assert "## Global Flags" in result.output
+        assert "## Agent Workflow" in result.output
+        assert "## Agent Best Practices" in result.output
         assert "## Troubleshooting" in result.output
         assert "## Environment Variables" in result.output
 
@@ -70,6 +72,13 @@ class TestAgentGuide:
 
         assert "GOOGLE_APPLICATION_CREDENTIALS" in result.output
         assert "NO_COLOR" in result.output
+
+    def test_guide_shows_jq_patterns(self):
+        """Guide includes jq patterns for extracting IDs."""
+        result = runner.invoke(app, ["agent", "guide"])
+
+        assert "jq" in result.output
+        assert "grep -o" in result.output
 
     def test_guide_lists_available_sections(self):
         """Guide tells agents about available deep-dive sections."""
