@@ -1,0 +1,65 @@
+[project]
+name = "ga-cli"
+version = "0.1.0"
+description = "Command-line interface for Google Analytics 4"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Gunnar Griese" }]
+keywords = ["google-analytics", "ga4", "cli", "analytics"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
+]
+dependencies = [
+    "typer[all]>=0.9.0",
+    "google-api-python-client>=2.0",
+    "google-auth-oauthlib>=1.0",
+    "google-auth>=2.0",
+    "rich>=13.0",
+    "questionary>=2.0",
+    "platformdirs>=4.0",
+    "packaging>=23.0",
+]
+
+[project.scripts]
+ga = "ga_cli.main:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ga_cli"]
+
+[project.urls]
+Homepage = "https://github.com/gunnargriese/ga-cli"
+Repository = "https://github.com/gunnargriese/ga-cli"
+Issues = "https://github.com/gunnargriese/ga-cli/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.9.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/ga_cli/commands/agent_cmd.py" = ["E501"]
