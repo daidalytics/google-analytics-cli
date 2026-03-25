@@ -61,11 +61,17 @@ ga accounts get -a ACCOUNT_ID [-o json]
 ga accounts update -a ACCOUNT_ID --name "Name"
 ```
 
+### Account Summaries
+```bash
+ga account-summaries list [-o json]
+```
+
 ### Properties
 ```bash
 ga properties list [-a ACCOUNT_ID] [-o json]
 ga properties get [-p PROPERTY_ID] [-o json]
 ga properties create -a ACCOUNT_ID --name "Name" [--timezone TZ] [--currency CODE]
+ga properties update -p PROPERTY_ID [--name NAME] [--timezone TZ] [--currency CODE] [--industry CAT]
 ga properties delete -p PROPERTY_ID --yes
 ```
 
@@ -102,6 +108,7 @@ ga key-events delete -p PROPERTY_ID -k KEY_EVENT_ID --yes
 ga data-streams list [-p PROPERTY_ID] [-o json]
 ga data-streams get -p PROPERTY_ID -s STREAM_ID [-o json]
 ga data-streams create -p PROPERTY_ID --display-name "Name" [--type TYPE] [--url URL] [--bundle-id ID]
+ga data-streams update -p PROPERTY_ID -s STREAM_ID [--display-name NAME]
 ga data-streams delete -p PROPERTY_ID -s STREAM_ID --yes
 ```
 Types: `WEB_DATA_STREAM` (requires `--url`), `ANDROID_APP_DATA_STREAM` / `IOS_APP_DATA_STREAM` (require `--bundle-id`)
@@ -111,6 +118,7 @@ Types: `WEB_DATA_STREAM` (requires `--url`), `ANDROID_APP_DATA_STREAM` / `IOS_AP
 ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE [--limit N] [-o json]
 ga reports pivot [-p PROPERTY_ID] -m metrics -d dimensions --pivot-field FIELD [--start-date DATE] [-o json]
 ga reports check-compatibility [-p PROPERTY_ID] [-m metrics] [-d dimensions] [-o json]
+ga reports metadata [-p PROPERTY_ID] [--type metrics|dimensions] [--search TEXT] [-o json]
 ga reports realtime [-p PROPERTY_ID] [-m metrics] [-d dimensions] [--interval SECONDS]
 ```
 Dates: `today`, `yesterday`, `7daysAgo`, `30daysAgo`, `90daysAgo`, or `YYYY-MM-DD`
@@ -197,10 +205,28 @@ ga reports realtime -p 987654321 -m activeUsers -d country -o json
 ga reports realtime -p 987654321 --interval 10  # Poll every 10s
 ```
 
+## Metadata
+Browse available metrics and dimensions for a property:
+```bash
+ga reports metadata -p 987654321 -o json                    # All metrics and dimensions
+ga reports metadata -p 987654321 --type metrics -o json     # Only metrics
+ga reports metadata -p 987654321 --search page -o json      # Search by name
+```
+
 **Note**: `ga reports build` requires interactive input — avoid in automation. Use `ga reports run` instead.
 """
 
-_SECTION_ADMIN = r"""# Admin — Custom Dimensions, Custom Metrics, Key Events & Data Streams
+_SECTION_ADMIN = r"""# Admin — Properties, Data Streams, Custom Dimensions, Custom Metrics & Key Events
+
+## Properties
+```bash
+ga properties list [-a ACCOUNT_ID] [-o json]
+ga properties get [-p PROPERTY_ID] [-o json]
+ga properties create -a ACCOUNT_ID --name "Name" [--timezone TZ] [--currency CODE]
+ga properties update -p PROPERTY_ID [--name NAME] [--timezone TZ] [--currency CODE] [--industry CAT]
+ga properties delete -p PROPERTY_ID --yes
+```
+- Updatable fields: `displayName`, `timeZone`, `currencyCode`, `industryCategory`
 
 ## Custom Dimensions
 ```bash
@@ -239,6 +265,7 @@ Counting methods: `ONCE_PER_EVENT`, `ONCE_PER_SESSION`
 ga data-streams list [-p PROPERTY_ID] [-o json]
 ga data-streams get -p PROPERTY_ID -s STREAM_ID [-o json]
 ga data-streams create -p PROPERTY_ID --display-name "Name" [--type TYPE] [--url URL] [--bundle-id ID]
+ga data-streams update -p PROPERTY_ID -s STREAM_ID [--display-name NAME]
 ga data-streams delete -p PROPERTY_ID -s STREAM_ID --yes
 ```
 | Type | Required Flag |

@@ -156,6 +156,57 @@ def create_cmd(
         handle_error(e)
 
 
+@data_streams_app.command("update")
+def update_cmd(
+    property_id: Optional[str] = typer.Option(
+        None, "--property-id", "-p", help="Property ID (numeric)"
+    ),
+    stream_id: str = typer.Option(
+        ..., "--stream-id", "-s", help="Data Stream ID"
+    ),
+    display_name: Optional[str] = typer.Option(
+        None, "--display-name", help="New display name"
+    ),
+    output_format: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output format (json, table, compact)"
+    ),
+):
+    """Update a data stream."""
+    try:
+        effective_property = get_effective_value(property_id, "default_property_id")
+        require_options({"property_id": effective_property}, ["property_id"])
+        effective_format = get_effective_value(output_format, "output_format") or "table"
+
+        field_map = {
+            "displayName": display_name,
+        }
+        body = {k: v for k, v in field_map.items() if v is not None}
+
+        if not body:
+            raise typer.BadParameter(
+                "At least one of --display-name must be specified."
+            )
+
+        update_mask = ",".join(body.keys())
+
+        admin = get_admin_client()
+        stream = (
+            admin.properties()
+            .dataStreams()
+            .patch(
+                name=f"properties/{effective_property}/dataStreams/{stream_id}",
+                body=body,
+                updateMask=update_mask,
+            )
+            .execute()
+        )
+        output(stream, effective_format)
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        handle_error(e)
+
+
 @data_streams_app.command("delete")
 def delete_cmd(
     property_id: Optional[str] = typer.Option(

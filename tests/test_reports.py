@@ -585,3 +585,146 @@ class TestTransformReportRows:
 
         assert len(rows) == 1
         assert rows[0] == {"activeUsers": "42"}
+
+
+SAMPLE_METADATA_FULL = {
+    "dimensions": [
+        {
+            "apiName": "date",
+            "uiName": "Date",
+            "category": "Time",
+            "customDefinition": False,
+        },
+        {
+            "apiName": "pagePath",
+            "uiName": "Page path",
+            "category": "Page / screen",
+            "customDefinition": False,
+        },
+    ],
+    "metrics": [
+        {
+            "apiName": "sessions",
+            "uiName": "Sessions",
+            "category": "Session",
+            "customDefinition": False,
+        },
+        {
+            "apiName": "pageViews",
+            "uiName": "Page views",
+            "category": "Page / screen",
+            "customDefinition": False,
+        },
+    ],
+}
+
+
+class TestMetadata:
+    def _mock_metadata_client(self, metadata=None):
+        mock_client = MagicMock()
+        mock_client.properties.return_value.getMetadata.return_value.execute.return_value = (
+            metadata or SAMPLE_METADATA_FULL
+        )
+        return mock_client
+
+    def test_metadata_all(self):
+        mock_client = self._mock_metadata_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "metadata", "-p", "111"]
+            )
+
+        assert result.exit_code == 0
+        assert "date" in result.output
+        assert "sessions" in result.output
+        assert "pagePath" in result.output
+        assert "pageViews" in result.output
+
+    def test_metadata_filter_metrics(self):
+        mock_client = self._mock_metadata_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "metadata", "-p", "111", "--type", "metrics"]
+            )
+
+        assert result.exit_code == 0
+        assert "sessions" in result.output
+        assert "date" not in result.output or "dimension" not in result.output
+
+    def test_metadata_filter_dimensions(self):
+        mock_client = self._mock_metadata_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "metadata", "-p", "111", "--type", "dimensions"]
+            )
+
+        assert result.exit_code == 0
+        assert "date" in result.output
+        # Should not contain metrics rows
+        assert "sessions" not in result.output
+
+    def test_metadata_search(self):
+        mock_client = self._mock_metadata_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "metadata", "-p", "111", "--search", "page"]
+            )
+
+        assert result.exit_code == 0
+        assert "pagePath" in result.output
+        assert "pageViews" in result.output
+        # "date" and "sessions" should be filtered out
+        assert "date" not in result.output
+
+    def test_metadata_json(self):
+        mock_client = self._mock_metadata_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "metadata", "-p", "111", "-o", "json"]
+            )
+
+        assert result.exit_code == 0
+        assert '"apiName"' in result.output
+
+    def test_metadata_api_error(self):
+        mock_client = MagicMock()
+        mock_client.properties.return_value.getMetadata.return_value.execute.side_effect = (
+            Exception("Permission denied")
+        )
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "metadata", "-p", "111"]
+            )
+
+        assert result.exit_code != 0
+
+    def test_metadata_empty_response(self):
+        mock_client = self._mock_metadata_client(metadata={"dimensions": [], "metrics": []})
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "metadata", "-p", "111"]
+            )
+
+        assert result.exit_code == 0
+        assert "No metadata" in result.output

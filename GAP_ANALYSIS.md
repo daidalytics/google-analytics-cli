@@ -70,7 +70,7 @@ Comprehensive gap analysis of the GA CLI against the full Google Analytics Data 
 |--------|--------|-------------|
 | `properties.runReport` | **Implemented** | `ga reports run` |
 | `properties.runRealtimeReport` | **Implemented** | `ga reports realtime` |
-| `properties.getMetadata` | **Implemented** (internal only, used in `reports build`) | — |
+| `properties.getMetadata` | **Implemented** | `ga reports metadata` |
 | `properties.batchRunReports` | Missing | — |
 | `properties.runPivotReport` | **Implemented** | `ga reports pivot` |
 | `properties.batchRunPivotReports` | Missing | — |
@@ -94,12 +94,12 @@ Comprehensive gap analysis of the GA CLI against the full Google Analytics Data 
 | `accounts.runAccessReport` | Missing | — |
 | `accounts.searchChangeHistoryEvents` | Missing | — |
 | `accounts.getDataSharingSettings` | Missing | — |
-| `accountSummaries.list` | Missing | — |
+| `accountSummaries.list` | **Implemented** | `ga account-summaries list` |
 | `properties.list` | **Implemented** | `ga properties list` |
 | `properties.get` | **Implemented** | `ga properties get` |
 | `properties.create` | **Implemented** | `ga properties create` |
 | `properties.delete` | **Implemented** | `ga properties delete` |
-| `properties.patch` | Missing | — |
+| `properties.patch` | **Implemented** | `ga properties update` |
 | `properties.acknowledgeUserDataCollection` | Missing | — |
 | `properties.runAccessReport` | Missing | — |
 | `properties.getDataRetentionSettings` | Missing | — |
@@ -108,7 +108,7 @@ Comprehensive gap analysis of the GA CLI against the full Google Analytics Data 
 | `dataStreams.get` | **Implemented** | `ga data-streams get` |
 | `dataStreams.create` | **Implemented** | `ga data-streams create` |
 | `dataStreams.delete` | **Implemented** | `ga data-streams delete` |
-| `dataStreams.patch` | Missing | — |
+| `dataStreams.patch` | **Implemented** | `ga data-streams update` |
 | `measurementProtocolSecrets.*` (5 methods) | Missing | — |
 | `customDimensions.*` (5 methods) | **Implemented** | `ga custom-dimensions list\|get\|create\|update\|archive` |
 | `customMetrics.*` (5 methods) | **Implemented** | `ga custom-metrics list\|get\|create\|update\|archive` |
@@ -117,7 +117,7 @@ Comprehensive gap analysis of the GA CLI against the full Google Analytics Data 
 | `googleAdsLinks.*` (4 methods) | Missing | — |
 | `conversionEvents.*` (5 methods) | Skipped (deprecated, replaced by keyEvents) | — |
 
-**Coverage: 25/~55 methods (45%)**
+**Coverage: 28/~55 methods (51%)**
 
 ---
 
@@ -2206,11 +2206,11 @@ Standard CRUD test patterns. Tests must verify stream type validation (iOS only)
 | ~~5~~ | ~~WS-D3: Check Compatibility~~ | ~~1~~ | ~~Report validation~~ **DONE** |
 | 6 | WS-A4: MP Secrets | 5 | Server-side tracking |
 | 7 | WS-A5: Google Ads Links | 4 | Common integration |
-| 8 | WS-A7: Account Summaries | 1 | Quick overview |
-| 9 | WS-A8: Properties Patch | 1 | Completes property CRUD |
-| 10 | WS-A9: Data Streams Patch | 1 | Completes data streams CRUD |
+| ~~8~~ | ~~WS-A7: Account Summaries~~ | ~~1~~ | ~~Quick overview~~ **DONE** |
+| ~~9~~ | ~~WS-A8: Properties Patch~~ | ~~1~~ | ~~Completes property CRUD~~ **DONE** |
+| ~~10~~ | ~~WS-A9: Data Streams Patch~~ | ~~1~~ | ~~Completes data streams CRUD~~ **DONE** |
 | 11 | WS-D4: Audience Exports | 4 | Audience data workflows |
-| 12 | WS-D5: Expose getMetadata | 1 | Developer utility |
+| ~~12~~ | ~~WS-D5: Expose getMetadata~~ | ~~1~~ | ~~Developer utility~~ **DONE** |
 | 13 | WS-A11: Change History | 1 | Audit / debugging |
 | 14 | WS-D2: Batch Reports | 1 | Efficiency for multi-report |
 | 15 | WS-A10: Data Retention | 2 | Compliance / governance |

@@ -28,6 +28,7 @@ def _mock_admin_client(streams=None, stream_detail=None):
     ds.get.return_value.execute.return_value = stream_detail or {}
     ds.create.return_value.execute.return_value = stream_detail or {}
     ds.delete.return_value.execute.return_value = {}
+    ds.patch.return_value.execute.return_value = stream_detail or {}
 
     return mock_client
 
@@ -377,5 +378,88 @@ class TestDataStreamsDelete:
         result = runner.invoke(
             app, ["data-streams", "delete", "-p", "111"]
         )
+
+        assert result.exit_code != 0
+
+
+class TestDataStreamsUpdate:
+    def test_update_display_name(self):
+        updated = {
+            "name": "properties/111/dataStreams/1001",
+            "type": "WEB_DATA_STREAM",
+            "displayName": "Renamed Stream",
+        }
+        mock_client = _mock_admin_client(stream_detail=updated)
+
+        with patch(
+            "ga_cli.commands.data_streams.get_admin_client",
+            return_value=mock_client,
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "data-streams", "update",
+                    "-p", "111",
+                    "-s", "1001",
+                    "--display-name", "Renamed Stream",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "Renamed Stream" in result.output
+        call_args = (
+            mock_client.properties.return_value.dataStreams.return_value.patch.call_args
+        )
+        assert call_args[1]["updateMask"] == "displayName"
+        assert call_args[1]["body"]["displayName"] == "Renamed Stream"
+
+    def test_update_no_fields(self):
+        result = runner.invoke(
+            app, ["data-streams", "update", "-p", "111", "-s", "1001"]
+        )
+
+        assert result.exit_code != 0
+
+    def test_update_json_output(self):
+        updated = {
+            "name": "properties/111/dataStreams/1001",
+            "displayName": "Updated",
+        }
+        mock_client = _mock_admin_client(stream_detail=updated)
+
+        with patch(
+            "ga_cli.commands.data_streams.get_admin_client",
+            return_value=mock_client,
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "data-streams", "update",
+                    "-p", "111", "-s", "1001",
+                    "--display-name", "Updated",
+                    "-o", "json",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert '"displayName"' in result.output
+
+    def test_update_api_error(self):
+        mock_client = MagicMock()
+        ds = mock_client.properties.return_value.dataStreams.return_value
+        ds.patch.return_value.execute.side_effect = Exception("API error")
+
+        with patch(
+            "ga_cli.commands.data_streams.get_admin_client",
+            return_value=mock_client,
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "data-streams", "update",
+                    "-p", "111", "-s", "1001",
+                    "--display-name", "Fail",
+                ],
+            )
 
         assert result.exit_code != 0

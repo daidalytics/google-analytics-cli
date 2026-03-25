@@ -8,8 +8,8 @@ Manage GA4 accounts, properties, data streams, and run reports — all from your
 
 - **Authentication** — OAuth 2.0 (browser-based) and service account support
 - **Account management** — List, inspect, and update GA4 accounts
-- **Property management** — List, create, inspect, and delete GA4 properties
-- **Data stream management** — List, create, inspect, and delete web, Android, and iOS data streams
+- **Property management** — List, create, inspect, update, and delete GA4 properties
+- **Data stream management** — List, create, inspect, update, and delete web, Android, and iOS data streams
 - **Custom dimensions & metrics** — List, create, update, and archive custom definitions
 - **Key events** — List, create, update, and delete key events (conversions)
 - **Reporting** — Run custom reports, pivot reports, real-time reports with live polling, check compatibility, and build reports interactively
@@ -128,12 +128,13 @@ export GA_CLI_SERVICE_ACCOUNT="/path/to/key.json"
 | `ga auth` | `login`, `logout`, `status` | Manage authentication |
 | `ga config` | `setup`, `get`, `set`, `unset`, `path`, `reset` | Manage CLI configuration |
 | `ga accounts` | `list`, `get`, `update` | List, inspect, and update GA4 accounts |
-| `ga properties` | `list`, `get`, `create`, `delete` | Manage GA4 properties |
+| `ga account-summaries` | `list` | Quick overview of all accounts and properties |
+| `ga properties` | `list`, `get`, `create`, `update`, `delete` | Manage GA4 properties |
 | `ga custom-dimensions` | `list`, `get`, `create`, `update`, `archive` | Manage custom dimensions |
 | `ga custom-metrics` | `list`, `get`, `create`, `update`, `archive` | Manage custom metrics |
-| `ga data-streams` | `list`, `get`, `create`, `delete` | Manage data streams |
+| `ga data-streams` | `list`, `get`, `create`, `update`, `delete` | Manage data streams |
 | `ga key-events` | `list`, `get`, `create`, `update`, `delete` | Manage key events (conversions) |
-| `ga reports` | `run`, `pivot`, `check-compatibility`, `realtime`, `build` | Run and build reports |
+| `ga reports` | `run`, `pivot`, `check-compatibility`, `metadata`, `realtime`, `build` | Run and build reports |
 | `ga upgrade` | `--check`, `--force` | Check for and install updates |
 | `ga completions` | `bash`, `zsh`, `fish` | Generate shell completion scripts |
 

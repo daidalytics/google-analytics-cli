@@ -392,6 +392,78 @@ def check_compatibility_cmd(
         handle_error(e)
 
 
+@reports_app.command("metadata")
+def metadata_cmd(
+    property_id: Optional[str] = typer.Option(
+        None, "--property-id", "-p", help="Property ID (numeric)"
+    ),
+    filter_type: Optional[str] = typer.Option(
+        None, "--type", "-t", help="Filter by 'metrics' or 'dimensions'"
+    ),
+    search: Optional[str] = typer.Option(
+        None, "--search", "-s", help="Filter names containing this string"
+    ),
+    output_format: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output format (json, table, compact)"
+    ),
+):
+    """Browse available metrics and dimensions for a property."""
+    try:
+        effective_property = get_effective_value(property_id, "default_property_id")
+        require_options({"property_id": effective_property}, ["property_id"])
+        effective_format = get_effective_value(output_format, "output_format") or "table"
+
+        data = get_data_client()
+        metadata = (
+            data.properties()
+            .getMetadata(name=f"properties/{effective_property}/metadata")
+            .execute()
+        )
+
+        rows = []
+
+        if filter_type != "metrics":
+            for d in metadata.get("dimensions", []):
+                rows.append({
+                    "type": "dimension",
+                    "apiName": d.get("apiName", ""),
+                    "uiName": d.get("uiName", ""),
+                    "category": d.get("category", ""),
+                    "custom": str(d.get("customDefinition", False)),
+                })
+
+        if filter_type != "dimensions":
+            for m in metadata.get("metrics", []):
+                rows.append({
+                    "type": "metric",
+                    "apiName": m.get("apiName", ""),
+                    "uiName": m.get("uiName", ""),
+                    "category": m.get("category", ""),
+                    "custom": str(m.get("customDefinition", False)),
+                })
+
+        if search:
+            search_lower = search.lower()
+            rows = [
+                r for r in rows
+                if search_lower in r["apiName"].lower()
+                or search_lower in r["uiName"].lower()
+            ]
+
+        if not rows:
+            info("No metadata found.")
+        else:
+            output(
+                rows,
+                effective_format,
+                columns=["type", "apiName", "uiName", "category", "custom"],
+                headers=["Type", "API Name", "UI Name", "Category", "Custom"],
+            )
+
+    except Exception as e:
+        handle_error(e)
+
+
 @reports_app.command("build")
 def build_cmd(
     property_id: Optional[str] = typer.Option(

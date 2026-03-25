@@ -2,6 +2,7 @@
 
 import typer
 
+from .commands.account_summaries import account_summaries_app
 from .commands.accounts import accounts_app
 from .commands.agent_cmd import agent_app
 from .commands.auth_cmd import auth_app
@@ -25,6 +26,7 @@ app = typer.Typer(
 app.add_typer(auth_app, name="auth")
 app.add_typer(config_app, name="config")
 app.add_typer(accounts_app, name="accounts")
+app.add_typer(account_summaries_app, name="account-summaries")
 app.add_typer(properties_app, name="properties")
 app.add_typer(custom_dimensions_app, name="custom-dimensions")
 app.add_typer(custom_metrics_app, name="custom-metrics")

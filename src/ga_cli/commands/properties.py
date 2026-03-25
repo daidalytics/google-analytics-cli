@@ -108,6 +108,66 @@ def create_cmd(
         handle_error(e)
 
 
+@properties_app.command("update")
+def update_cmd(
+    property_id: Optional[str] = typer.Option(
+        None, "--property-id", "-p", help="Property ID (numeric)"
+    ),
+    name: Optional[str] = typer.Option(
+        None, "--name", help="New display name"
+    ),
+    timezone: Optional[str] = typer.Option(
+        None, "--timezone", help="Reporting time zone (e.g., America/New_York)"
+    ),
+    currency: Optional[str] = typer.Option(
+        None, "--currency", help="Currency code (e.g., USD, EUR)"
+    ),
+    industry: Optional[str] = typer.Option(
+        None, "--industry", help="Industry category"
+    ),
+    output_format: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output format (json, table, compact)"
+    ),
+):
+    """Update a GA4 property."""
+    try:
+        effective_property = get_effective_value(property_id, "default_property_id")
+        require_options({"property_id": effective_property}, ["property_id"])
+        effective_format = get_effective_value(output_format, "output_format") or "table"
+
+        # Map CLI options to API field names
+        field_map = {
+            "displayName": name,
+            "timeZone": timezone,
+            "currencyCode": currency,
+            "industryCategory": industry,
+        }
+        body = {k: v for k, v in field_map.items() if v is not None}
+
+        if not body:
+            raise typer.BadParameter(
+                "At least one of --name, --timezone, --currency, or --industry must be specified."
+            )
+
+        update_mask = ",".join(body.keys())
+
+        admin = get_admin_client()
+        prop = (
+            admin.properties()
+            .patch(
+                name=f"properties/{effective_property}",
+                body=body,
+                updateMask=update_mask,
+            )
+            .execute()
+        )
+        output(prop, effective_format)
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        handle_error(e)
+
+
 @properties_app.command("delete")
 def delete_cmd(
     property_id: Optional[str] = typer.Option(

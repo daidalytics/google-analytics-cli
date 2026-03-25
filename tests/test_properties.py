@@ -24,6 +24,9 @@ def _mock_admin_client(properties=None, property_detail=None):
         property_detail or {}
     )
     mock_client.properties.return_value.delete.return_value.execute.return_value = {}
+    mock_client.properties.return_value.patch.return_value.execute.return_value = (
+        property_detail or {}
+    )
 
     return mock_client
 
@@ -291,3 +294,124 @@ class TestPropertiesDelete:
 
         assert result.exit_code != 0
         assert "property-id" in result.output.lower()
+
+
+class TestPropertiesUpdate:
+    def test_update_name(self):
+        updated = {
+            "name": "properties/111111",
+            "displayName": "Updated Name",
+            "timeZone": "America/New_York",
+            "currencyCode": "USD",
+        }
+        mock_client = _mock_admin_client(property_detail=updated)
+
+        with patch(
+            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                ["properties", "update", "-p", "111111", "--name", "Updated Name"],
+            )
+
+        assert result.exit_code == 0
+        assert "Updated Name" in result.output
+        call_args = mock_client.properties.return_value.patch.call_args
+        assert call_args[1]["updateMask"] == "displayName"
+        assert call_args[1]["body"]["displayName"] == "Updated Name"
+
+    def test_update_timezone(self):
+        updated = {"name": "properties/111111", "timeZone": "Europe/Berlin"}
+        mock_client = _mock_admin_client(property_detail=updated)
+
+        with patch(
+            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                ["properties", "update", "-p", "111111", "--timezone", "Europe/Berlin"],
+            )
+
+        assert result.exit_code == 0
+        call_args = mock_client.properties.return_value.patch.call_args
+        assert call_args[1]["updateMask"] == "timeZone"
+
+    def test_update_currency(self):
+        updated = {"name": "properties/111111", "currencyCode": "EUR"}
+        mock_client = _mock_admin_client(property_detail=updated)
+
+        with patch(
+            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                ["properties", "update", "-p", "111111", "--currency", "EUR"],
+            )
+
+        assert result.exit_code == 0
+        call_args = mock_client.properties.return_value.patch.call_args
+        assert call_args[1]["updateMask"] == "currencyCode"
+
+    def test_update_multiple_fields(self):
+        updated = {
+            "name": "properties/111111",
+            "displayName": "New",
+            "timeZone": "Europe/London",
+        }
+        mock_client = _mock_admin_client(property_detail=updated)
+
+        with patch(
+            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "properties", "update", "-p", "111111",
+                    "--name", "New",
+                    "--timezone", "Europe/London",
+                ],
+            )
+
+        assert result.exit_code == 0
+        call_args = mock_client.properties.return_value.patch.call_args
+        mask = call_args[1]["updateMask"]
+        assert "displayName" in mask
+        assert "timeZone" in mask
+
+    def test_update_no_fields(self):
+        result = runner.invoke(
+            app, ["properties", "update", "-p", "111111"]
+        )
+
+        assert result.exit_code != 0
+
+    def test_update_json_output(self):
+        updated = {"name": "properties/111111", "displayName": "Test"}
+        mock_client = _mock_admin_client(property_detail=updated)
+
+        with patch(
+            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                ["properties", "update", "-p", "111111", "--name", "Test", "-o", "json"],
+            )
+
+        assert result.exit_code == 0
+        assert '"displayName"' in result.output
+
+    def test_update_api_error(self):
+        mock_client = MagicMock()
+        mock_client.properties.return_value.patch.return_value.execute.side_effect = (
+            Exception("API error")
+        )
+
+        with patch(
+            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                ["properties", "update", "-p", "111111", "--name", "Fail"],
+            )
+
+        assert result.exit_code != 0
