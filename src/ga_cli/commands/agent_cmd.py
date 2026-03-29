@@ -150,6 +150,16 @@ ga annotations delete -p PROPERTY_ID -a ANNOTATION_ID --yes
 ```
 Mark dates on reports with contextual notes (e.g., launches, campaigns).
 
+### Calculated Metrics (alpha)
+```bash
+ga calculated-metrics list [-p PROPERTY_ID] [-o json]
+ga calculated-metrics get -p PROPERTY_ID -m METRIC_ID [-o json]
+ga calculated-metrics create -p PROPERTY_ID --calculated-metric-id ID --display-name NAME --formula FORMULA --metric-unit UNIT [--description TEXT]
+ga calculated-metrics update -p PROPERTY_ID -m METRIC_ID [--display-name NAME] [--formula FORMULA] [--metric-unit UNIT] [--description TEXT]
+ga calculated-metrics delete -p PROPERTY_ID -m METRIC_ID --yes
+```
+Metric units: `STANDARD`, `CURRENCY`, `FEET`, `METERS`, `KILOMETERS`, `MILES`, `MILLISECONDS`, `SECONDS`, `MINUTES`, `HOURS`
+
 ### Reports
 ```bash
 ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE [--limit N] [-o json]
@@ -387,6 +397,20 @@ ga annotations update -p PROPERTY_ID -a ANNOTATION_ID [--title TEXT] [--descript
 ga annotations delete -p PROPERTY_ID -a ANNOTATION_ID --yes
 ```
 - Updatable fields: `title`, `description`, `color`
+- Uses v1alpha Admin API
+
+## Calculated Metrics (alpha)
+Derived metrics defined by a formula over existing metrics (e.g., revenue per user).
+```bash
+ga calculated-metrics list [-p PROPERTY_ID] [-o json]
+ga calculated-metrics get -p PROPERTY_ID -m METRIC_ID [-o json]
+ga calculated-metrics create -p PROPERTY_ID --calculated-metric-id ID --display-name NAME --formula FORMULA --metric-unit UNIT [--description TEXT]
+ga calculated-metrics update -p PROPERTY_ID -m METRIC_ID [--display-name NAME] [--formula FORMULA] [--metric-unit UNIT] [--description TEXT]
+ga calculated-metrics delete -p PROPERTY_ID -m METRIC_ID --yes
+```
+- Formula syntax uses `{{metricName}}` placeholders, e.g., `"{{totalRevenue}} / {{totalUsers}}"`
+- Metric units: `STANDARD`, `CURRENCY`, `FEET`, `METERS`, `KILOMETERS`, `MILES`, `MILLISECONDS`, `SECONDS`, `MINUTES`, `HOURS`
+- `calculatedMetricId` and `metricUnit` cannot be changed after creation
 - Uses v1alpha Admin API
 """
 
