@@ -42,8 +42,8 @@ def list_cmd(
 
 @accounts_app.command("get")
 def get_cmd(
-    account_id: str = typer.Option(
-        ..., "--account-id", "-a", help="Account ID (numeric)"
+    account_id: Optional[str] = typer.Option(
+        None, "--account-id", "-a", help="Account ID (numeric)"
     ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
@@ -51,10 +51,12 @@ def get_cmd(
 ):
     """Get details for a specific account."""
     try:
+        effective_account = get_effective_value(account_id, "default_account_id")
+        require_options({"account_id": effective_account}, ["account_id"])
         effective_format = get_effective_value(output_format, "output_format") or "table"
 
         admin = get_admin_client()
-        account = admin.accounts().get(name=f"accounts/{account_id}").execute()
+        account = admin.accounts().get(name=f"accounts/{effective_account}").execute()
         output(account, effective_format)
     except Exception as e:
         handle_error(e)
@@ -62,8 +64,8 @@ def get_cmd(
 
 @accounts_app.command("update")
 def update_cmd(
-    account_id: str = typer.Option(
-        ..., "--account-id", "-a", help="Account ID (numeric)"
+    account_id: Optional[str] = typer.Option(
+        None, "--account-id", "-a", help="Account ID (numeric)"
     ),
     name: str = typer.Option(..., "--name", help="New display name"),
     output_format: Optional[str] = typer.Option(
@@ -72,13 +74,15 @@ def update_cmd(
 ):
     """Update a GA4 account."""
     try:
+        effective_account = get_effective_value(account_id, "default_account_id")
+        require_options({"account_id": effective_account}, ["account_id"])
         effective_format = get_effective_value(output_format, "output_format") or "table"
 
         admin = get_admin_client()
         account = (
             admin.accounts()
             .patch(
-                name=f"accounts/{account_id}",
+                name=f"accounts/{effective_account}",
                 body={"displayName": name},
                 updateMask="displayName",
             )
