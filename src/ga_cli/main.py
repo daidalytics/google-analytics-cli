@@ -2,6 +2,7 @@
 
 import typer
 
+from .commands.access_reports import access_reports_app
 from .commands.account_summaries import account_summaries_app
 from .commands.accounts import accounts_app
 from .commands.agent_cmd import agent_app
@@ -10,6 +11,7 @@ from .commands.completions_cmd import completions_app
 from .commands.config_cmd import config_app
 from .commands.custom_dimensions import custom_dimensions_app
 from .commands.custom_metrics import custom_metrics_app
+from .commands.data_retention import data_retention_app
 from .commands.data_streams import data_streams_app
 from .commands.firebase_links import firebase_links_app
 from .commands.google_ads_links import google_ads_links_app
@@ -33,7 +35,9 @@ app.add_typer(account_summaries_app, name="account-summaries")
 app.add_typer(properties_app, name="properties")
 app.add_typer(custom_dimensions_app, name="custom-dimensions")
 app.add_typer(custom_metrics_app, name="custom-metrics")
+app.add_typer(data_retention_app, name="data-retention")
 app.add_typer(data_streams_app, name="data-streams")
+app.add_typer(access_reports_app, name="access-reports")
 app.add_typer(firebase_links_app, name="firebase-links")
 app.add_typer(google_ads_links_app, name="google-ads-links")
 app.add_typer(key_events_app, name="key-events")
@@ -60,6 +64,7 @@ def main(
 
     if version:
         from . import __version__
+
         print(f"ga-cli {__version__}")
         raise typer.Exit()
 

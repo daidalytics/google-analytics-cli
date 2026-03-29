@@ -1371,9 +1371,9 @@ def update_cmd(
 
 ---
 
-### WS-A10: Data Retention Settings
+### WS-A10: Data Retention Settings ✅ DONE
 
-**Goal:** Add `ga properties data-retention get` and `ga properties data-retention update`.
+**Goal:** Add `ga data-retention get` and `ga data-retention update`.
 
 **API reference:**
 - `GET v1beta/{name=properties/*/dataRetentionSettings}`
@@ -1484,9 +1484,9 @@ def change_history_cmd(
 
 ---
 
-### WS-A12: Access Reports
+### WS-A12: Access Reports ✅ DONE
 
-**Goal:** Add `ga accounts access-report` and `ga properties access-report` to run data access reports.
+**Goal:** Add `ga access-reports run-account` and `ga access-reports run-property` to run data access reports.
 
 **API reference:**
 - `POST v1beta/{entity=accounts/*}:runAccessReport`
@@ -1494,11 +1494,12 @@ def change_history_cmd(
 
 Data access reports show who accessed GA data, when, and what they accessed. Useful for compliance and auditing.
 
-#### Files to modify
-- `src/ga_cli/commands/accounts.py` — add `access_report_cmd`
-- `src/ga_cli/commands/properties.py` — add `access_report_cmd`
-- `tests/test_accounts.py` — add `TestAccessReport` class
-- `tests/test_properties.py` — add `TestAccessReport` class
+#### Files created
+- `src/ga_cli/commands/access_reports.py` — `access_reports_app` with `run-account` and `run-property` commands
+- `tests/test_access_reports.py` — `TestAccessReportsRunAccount` and `TestAccessReportsRunProperty` classes
+
+#### Files modified
+- `src/ga_cli/main.py` — registered `access_reports_app` as `access-reports`
 
 #### Implementation details
 
@@ -1536,7 +1537,7 @@ The property version is identical but uses `entity=f"properties/{property_id}"`.
 
 ---
 
-### WS-A13: Accounts — Delete
+### WS-A13: Accounts — Delete ✅ DONE
 
 **Goal:** Add `ga accounts delete` for soft-deleting an account.
 
@@ -1571,9 +1572,9 @@ def delete_cmd(
 
 ---
 
-### WS-A14: Acknowledge User Data Collection
+### WS-A14: Acknowledge User Data Collection ✅ DONE
 
-**Goal:** Add `ga properties acknowledge-data-collection`.
+**Goal:** Add `ga properties acknowledge-udc`.
 
 **API reference:** `POST v1beta/{property=properties/*}:acknowledgeUserDataCollection`
 
@@ -1605,9 +1606,9 @@ def acknowledge_cmd(
 
 ---
 
-### WS-A15: Data Sharing Settings
+### WS-A15: Data Sharing Settings ✅ DONE
 
-**Goal:** Add `ga accounts data-sharing-settings` to view data sharing settings.
+**Goal:** Add `ga accounts get-data-sharing` to view data sharing settings.
 
 **API reference:** `GET v1beta/{name=accounts/*/dataSharingSettings}`
 
@@ -2213,11 +2214,11 @@ Standard CRUD test patterns. Tests must verify stream type validation (iOS only)
 | ~~12~~ | ~~WS-A6: Firebase Links~~ | ~~3~~ | ~~Firebase integration~~ **DONE** |
 | 13 | WS-A11: Change History | 1 | Audit / debugging |
 | 14 | WS-D2: Batch Reports | 1 | Efficiency for multi-report |
-| 15 | WS-A10: Data Retention | 2 | Compliance / governance |
-| 16 | WS-A12: Access Reports | 2 | Compliance / auditing |
-| 17 | WS-A13: Accounts Delete | 1 | Completes accounts CRUD |
-| 18 | WS-A14: Acknowledge Data Collection | 1 | Property setup |
-| 19 | WS-A15: Data Sharing Settings | 1 | Account settings |
+| ~~15~~ | ~~WS-A10: Data Retention~~ | ~~2~~ | ~~Compliance / governance~~ **DONE** |
+| ~~16~~ | ~~WS-A12: Access Reports~~ | ~~2~~ | ~~Compliance / auditing~~ **DONE** |
+| ~~17~~ | ~~WS-A13: Accounts Delete~~ | ~~1~~ | ~~Completes accounts CRUD~~ **DONE** |
+| ~~18~~ | ~~WS-A14: Acknowledge Data Collection~~ | ~~1~~ | ~~Property setup~~ **DONE** |
+| ~~19~~ | ~~WS-A15: Data Sharing Settings~~ | ~~1~~ | ~~Account settings~~ **DONE** |
 | 20 | WS-D4: Audience Exports | 4 | Audience data workflows *(deprioritized)* |
 
 ### Tier 2 — Medium Value, Alpha

@@ -10,16 +10,12 @@ from ..config.store import get_effective_value
 from ..utils import handle_error, info, output, require_options, success
 from ..utils.pagination import paginate_all
 
-properties_app = typer.Typer(
-    name="properties", help="Manage GA4 properties", no_args_is_help=True
-)
+properties_app = typer.Typer(name="properties", help="Manage GA4 properties", no_args_is_help=True)
 
 
 @properties_app.command("list")
 def list_cmd(
-    account_id: Optional[str] = typer.Option(
-        None, "--account-id", "-a", help="Account ID"
-    ),
+    account_id: Optional[str] = typer.Option(None, "--account-id", "-a", help="Account ID"),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -32,9 +28,11 @@ def list_cmd(
 
         admin = get_admin_client()
         properties = paginate_all(
-            lambda **kw: admin.properties()
-            .list(filter=f"parent:accounts/{effective_account}", **kw)
-            .execute(),
+            lambda **kw: (
+                admin.properties()
+                .list(filter=f"parent:accounts/{effective_account}", **kw)
+                .execute()
+            ),
             "properties",
             pageSize=200,
         )
@@ -65,11 +63,7 @@ def get_cmd(
         effective_format = get_effective_value(output_format, "output_format") or "table"
 
         admin = get_admin_client()
-        prop = (
-            admin.properties()
-            .get(name=f"properties/{effective_property}")
-            .execute()
-        )
+        prop = admin.properties().get(name=f"properties/{effective_property}").execute()
         output(prop, effective_format)
     except Exception as e:
         handle_error(e)
@@ -78,12 +72,8 @@ def get_cmd(
 @properties_app.command("create")
 def create_cmd(
     display_name: str = typer.Option(..., "--name", help="Property display name"),
-    account_id: Optional[str] = typer.Option(
-        None, "--account-id", "-a", help="Account ID"
-    ),
-    timezone: str = typer.Option(
-        "America/Los_Angeles", "--timezone", help="Reporting time zone"
-    ),
+    account_id: Optional[str] = typer.Option(None, "--account-id", "-a", help="Account ID"),
+    timezone: str = typer.Option("America/Los_Angeles", "--timezone", help="Reporting time zone"),
     currency: str = typer.Option("USD", "--currency", help="Currency code"),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
@@ -113,18 +103,14 @@ def update_cmd(
     property_id: Optional[str] = typer.Option(
         None, "--property-id", "-p", help="Property ID (numeric)"
     ),
-    name: Optional[str] = typer.Option(
-        None, "--name", help="New display name"
-    ),
+    name: Optional[str] = typer.Option(None, "--name", help="New display name"),
     timezone: Optional[str] = typer.Option(
         None, "--timezone", help="Reporting time zone (e.g., America/New_York)"
     ),
     currency: Optional[str] = typer.Option(
         None, "--currency", help="Currency code (e.g., USD, EUR)"
     ),
-    industry: Optional[str] = typer.Option(
-        None, "--industry", help="Industry category"
-    ),
+    industry: Optional[str] = typer.Option(None, "--industry", help="Industry category"),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -173,9 +159,7 @@ def delete_cmd(
     property_id: Optional[str] = typer.Option(
         None, "--property-id", "-p", help="Property ID (numeric)"
     ),
-    yes: bool = typer.Option(
-        False, "--yes", "-y", help="Skip confirmation prompt"
-    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
 ):
     """Delete a GA4 property (soft delete)."""
     try:
@@ -191,10 +175,50 @@ def delete_cmd(
                 raise typer.Exit()
 
         admin = get_admin_client()
-        admin.properties().delete(
-            name=f"properties/{effective_property}"
-        ).execute()
+        admin.properties().delete(name=f"properties/{effective_property}").execute()
         success(f"Property {effective_property} deleted.")
+    except typer.Exit:
+        raise
+    except Exception as e:
+        handle_error(e)
+
+
+_UDC_ACKNOWLEDGEMENT = (
+    "I acknowledge that I have the necessary privacy disclosures and rights "
+    "from my end users for the collection and processing of their data, "
+    "including the association of such data with the visitation information "
+    "Google Analytics collects from my site and/or app property."
+)
+
+
+@properties_app.command("acknowledge-udc")
+def acknowledge_udc_cmd(
+    property_id: Optional[str] = typer.Option(
+        None, "--property-id", "-p", help="Property ID (numeric)"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """Acknowledge user data collection for a property.
+
+    Required before Measurement Protocol secrets can be created.
+    """
+    try:
+        effective_property = get_effective_value(property_id, "default_property_id")
+        require_options({"property_id": effective_property}, ["property_id"])
+
+        if not yes:
+            info(f'You are about to acknowledge:\n\n  "{_UDC_ACKNOWLEDGEMENT}"\n')
+            confirmed = questionary.confirm("Proceed with acknowledgement?").ask()
+            if not confirmed:
+                info("Cancelled.")
+                raise typer.Exit()
+
+        admin = get_admin_client()
+        admin.properties().acknowledgeUserDataCollection(
+            property=f"properties/{effective_property}",
+            body={"acknowledgement": _UDC_ACKNOWLEDGEMENT},
+        ).execute()
+        success(f"User data collection acknowledged for property {effective_property}.")
     except typer.Exit:
         raise
     except Exception as e:

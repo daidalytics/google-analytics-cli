@@ -51,12 +51,8 @@ class TestPropertiesList:
     def test_list_with_flag(self):
         mock_client = _mock_admin_client(properties=SAMPLE_PROPERTIES)
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
-            result = runner.invoke(
-                app, ["properties", "list", "--account-id", "123456"]
-            )
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
+            result = runner.invoke(app, ["properties", "list", "--account-id", "123456"])
 
         assert result.exit_code == 0
         assert "My Website" in result.output
@@ -66,9 +62,7 @@ class TestPropertiesList:
         save_config(UserConfig(default_account_id="123456"))
         mock_client = _mock_admin_client(properties=SAMPLE_PROPERTIES)
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
             result = runner.invoke(app, ["properties", "list"])
 
         assert result.exit_code == 0
@@ -83,12 +77,8 @@ class TestPropertiesList:
     def test_list_json_output(self):
         mock_client = _mock_admin_client(properties=SAMPLE_PROPERTIES)
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
-            result = runner.invoke(
-                app, ["properties", "list", "-a", "123", "-o", "json"]
-            )
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
+            result = runner.invoke(app, ["properties", "list", "-a", "123", "-o", "json"])
 
         assert result.exit_code == 0
         assert '"displayName"' in result.output
@@ -96,9 +86,7 @@ class TestPropertiesList:
     def test_list_empty(self):
         mock_client = _mock_admin_client(properties=[])
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
             result = runner.invoke(app, ["properties", "list", "-a", "123"])
 
         assert result.exit_code == 0
@@ -107,9 +95,7 @@ class TestPropertiesList:
     def test_list_passes_correct_filter(self):
         mock_client = _mock_admin_client(properties=[])
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
             runner.invoke(app, ["properties", "list", "-a", "99999"])
 
         # Verify the filter was passed correctly
@@ -126,12 +112,8 @@ class TestPropertiesGet:
         }
         mock_client = _mock_admin_client(property_detail=detail)
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
-            result = runner.invoke(
-                app, ["properties", "get", "--property-id", "111111"]
-            )
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
+            result = runner.invoke(app, ["properties", "get", "--property-id", "111111"])
 
         assert result.exit_code == 0
         assert "My Website" in result.output
@@ -141,9 +123,7 @@ class TestPropertiesGet:
         detail = {"name": "properties/111111", "displayName": "My Website"}
         mock_client = _mock_admin_client(property_detail=detail)
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
             result = runner.invoke(app, ["properties", "get"])
 
         assert result.exit_code == 0
@@ -166,9 +146,7 @@ class TestPropertiesCreate:
         }
         mock_client = _mock_admin_client(property_detail=created)
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
             result = runner.invoke(
                 app,
                 [
@@ -194,9 +172,7 @@ class TestPropertiesCreate:
         }
         mock_client = _mock_admin_client(property_detail=created)
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
             result = runner.invoke(
                 app,
                 [
@@ -220,16 +196,12 @@ class TestPropertiesCreate:
         assert body["currencyCode"] == "EUR"
 
     def test_create_missing_name(self):
-        result = runner.invoke(
-            app, ["properties", "create", "--account-id", "123"]
-        )
+        result = runner.invoke(app, ["properties", "create", "--account-id", "123"])
 
         assert result.exit_code != 0
 
     def test_create_missing_account_id(self):
-        result = runner.invoke(
-            app, ["properties", "create", "--name", "Test"]
-        )
+        result = runner.invoke(app, ["properties", "create", "--name", "Test"])
 
         assert result.exit_code != 0
         assert "account-id" in result.output.lower()
@@ -248,9 +220,7 @@ class TestPropertiesDelete:
         ):
             mock_q.confirm.return_value.ask.return_value = True
 
-            result = runner.invoke(
-                app, ["properties", "delete", "--property-id", "111111"]
-            )
+            result = runner.invoke(app, ["properties", "delete", "--property-id", "111111"])
 
         assert result.exit_code == 0
         assert "deleted" in result.output.lower()
@@ -268,9 +238,7 @@ class TestPropertiesDelete:
         ):
             mock_q.confirm.return_value.ask.return_value = False
 
-            result = runner.invoke(
-                app, ["properties", "delete", "--property-id", "111111"]
-            )
+            result = runner.invoke(app, ["properties", "delete", "--property-id", "111111"])
 
         assert result.exit_code == 0
         assert "Cancelled" in result.output
@@ -279,12 +247,8 @@ class TestPropertiesDelete:
     def test_delete_skip_confirmation(self):
         mock_client = _mock_admin_client()
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
-            result = runner.invoke(
-                app, ["properties", "delete", "-p", "111111", "--yes"]
-            )
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
+            result = runner.invoke(app, ["properties", "delete", "-p", "111111", "--yes"])
 
         assert result.exit_code == 0
         assert "deleted" in result.output.lower()
@@ -306,9 +270,7 @@ class TestPropertiesUpdate:
         }
         mock_client = _mock_admin_client(property_detail=updated)
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
             result = runner.invoke(
                 app,
                 ["properties", "update", "-p", "111111", "--name", "Updated Name"],
@@ -324,9 +286,7 @@ class TestPropertiesUpdate:
         updated = {"name": "properties/111111", "timeZone": "Europe/Berlin"}
         mock_client = _mock_admin_client(property_detail=updated)
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
             result = runner.invoke(
                 app,
                 ["properties", "update", "-p", "111111", "--timezone", "Europe/Berlin"],
@@ -340,9 +300,7 @@ class TestPropertiesUpdate:
         updated = {"name": "properties/111111", "currencyCode": "EUR"}
         mock_client = _mock_admin_client(property_detail=updated)
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
             result = runner.invoke(
                 app,
                 ["properties", "update", "-p", "111111", "--currency", "EUR"],
@@ -360,15 +318,18 @@ class TestPropertiesUpdate:
         }
         mock_client = _mock_admin_client(property_detail=updated)
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
             result = runner.invoke(
                 app,
                 [
-                    "properties", "update", "-p", "111111",
-                    "--name", "New",
-                    "--timezone", "Europe/London",
+                    "properties",
+                    "update",
+                    "-p",
+                    "111111",
+                    "--name",
+                    "New",
+                    "--timezone",
+                    "Europe/London",
                 ],
             )
 
@@ -379,9 +340,7 @@ class TestPropertiesUpdate:
         assert "timeZone" in mask
 
     def test_update_no_fields(self):
-        result = runner.invoke(
-            app, ["properties", "update", "-p", "111111"]
-        )
+        result = runner.invoke(app, ["properties", "update", "-p", "111111"])
 
         assert result.exit_code != 0
 
@@ -389,9 +348,7 @@ class TestPropertiesUpdate:
         updated = {"name": "properties/111111", "displayName": "Test"}
         mock_client = _mock_admin_client(property_detail=updated)
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
             result = runner.invoke(
                 app,
                 ["properties", "update", "-p", "111111", "--name", "Test", "-o", "json"],
@@ -402,16 +359,81 @@ class TestPropertiesUpdate:
 
     def test_update_api_error(self):
         mock_client = MagicMock()
-        mock_client.properties.return_value.patch.return_value.execute.side_effect = (
-            Exception("API error")
+        mock_client.properties.return_value.patch.return_value.execute.side_effect = Exception(
+            "API error"
         )
 
-        with patch(
-            "ga_cli.commands.properties.get_admin_client", return_value=mock_client
-        ):
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
             result = runner.invoke(
                 app,
                 ["properties", "update", "-p", "111111", "--name", "Fail"],
             )
 
         assert result.exit_code != 0
+
+
+class TestPropertiesAcknowledgeUdc:
+    def test_acknowledge_with_confirmation(self):
+        mock_client = _mock_admin_client()
+        ack = mock_client.properties.return_value.acknowledgeUserDataCollection
+        ack.return_value.execute.return_value = {}
+
+        with (
+            patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client),
+            patch("ga_cli.commands.properties.questionary") as mock_q,
+        ):
+            mock_q.confirm.return_value.ask.return_value = True
+            result = runner.invoke(
+                app, ["properties", "acknowledge-udc", "--property-id", "111111"]
+            )
+
+        assert result.exit_code == 0
+        assert "acknowledged" in result.output.lower()
+        mock_client.properties.return_value.acknowledgeUserDataCollection.assert_called_once()
+
+    def test_acknowledge_cancelled(self):
+        mock_client = _mock_admin_client()
+
+        with (
+            patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client),
+            patch("ga_cli.commands.properties.questionary") as mock_q,
+        ):
+            mock_q.confirm.return_value.ask.return_value = False
+            result = runner.invoke(
+                app, ["properties", "acknowledge-udc", "--property-id", "111111"]
+            )
+
+        assert result.exit_code == 0
+        assert "Cancelled" in result.output
+        mock_client.properties.return_value.acknowledgeUserDataCollection.assert_not_called()
+
+    def test_acknowledge_skip_confirmation(self):
+        mock_client = _mock_admin_client()
+        ack = mock_client.properties.return_value.acknowledgeUserDataCollection
+        ack.return_value.execute.return_value = {}
+
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
+            result = runner.invoke(app, ["properties", "acknowledge-udc", "-p", "111111", "--yes"])
+
+        assert result.exit_code == 0
+        assert "acknowledged" in result.output.lower()
+        call_args = mock_client.properties.return_value.acknowledgeUserDataCollection.call_args
+        assert call_args[1]["property"] == "properties/111111"
+        assert "acknowledgement" in call_args[1]["body"]
+
+    def test_acknowledge_requires_property_id(self):
+        result = runner.invoke(app, ["properties", "acknowledge-udc"])
+
+        assert result.exit_code != 0
+        assert "property-id" in result.output.lower() or "missing" in result.output.lower()
+
+    def test_acknowledge_api_error(self):
+        mock_client = MagicMock()
+        ack = mock_client.properties.return_value.acknowledgeUserDataCollection
+        ack.return_value.execute.side_effect = Exception("Permission denied")
+
+        with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
+            result = runner.invoke(app, ["properties", "acknowledge-udc", "-p", "111111", "--yes"])
+
+        assert result.exit_code == 1
+        assert "Permission denied" in result.output

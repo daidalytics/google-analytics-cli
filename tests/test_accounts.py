@@ -10,7 +10,12 @@ from ga_cli.main import app
 runner = CliRunner()
 
 
-def _mock_admin_client(accounts=None, account_detail=None, account_patch_result=None):
+def _mock_admin_client(
+    accounts=None,
+    account_detail=None,
+    account_patch_result=None,
+    data_sharing_settings=None,
+):
     """Create a mock Admin API client with accounts methods."""
     mock_client = MagicMock()
 
@@ -20,13 +25,19 @@ def _mock_admin_client(accounts=None, account_detail=None, account_patch_result=
     }
 
     # accounts().get().execute()
-    mock_client.accounts.return_value.get.return_value.execute.return_value = (
-        account_detail or {}
-    )
+    mock_client.accounts.return_value.get.return_value.execute.return_value = account_detail or {}
 
     # accounts().patch().execute()
     mock_client.accounts.return_value.patch.return_value.execute.return_value = (
         account_patch_result or {}
+    )
+
+    # accounts().delete().execute()
+    mock_client.accounts.return_value.delete.return_value.execute.return_value = {}
+
+    # accounts().getDataSharingSettings().execute()
+    mock_client.accounts.return_value.getDataSharingSettings.return_value.execute.return_value = (
+        data_sharing_settings or {}
     )
 
     return mock_client
@@ -101,8 +112,8 @@ class TestAccountsList:
 
     def test_list_api_error(self):
         mock_client = MagicMock()
-        mock_client.accounts.return_value.list.return_value.execute.side_effect = (
-            Exception("API quota exceeded")
+        mock_client.accounts.return_value.list.return_value.execute.side_effect = Exception(
+            "API quota exceeded"
         )
 
         with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
@@ -145,9 +156,7 @@ class TestAccountsGet:
 
         assert result.exit_code == 0
         assert "My Account" in result.output
-        mock_client.accounts.return_value.get.assert_called_once_with(
-            name="accounts/123456"
-        )
+        mock_client.accounts.return_value.get.assert_called_once_with(name="accounts/123456")
 
     def test_get_json_output(self):
         detail = {
@@ -157,9 +166,7 @@ class TestAccountsGet:
         mock_client = _mock_admin_client(account_detail=detail)
 
         with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
-            result = runner.invoke(
-                app, ["accounts", "get", "--account-id", "123456", "-o", "json"]
-            )
+            result = runner.invoke(app, ["accounts", "get", "--account-id", "123456", "-o", "json"])
 
         assert result.exit_code == 0
         assert '"displayName"' in result.output
@@ -172,8 +179,8 @@ class TestAccountsGet:
 
     def test_get_api_error(self):
         mock_client = MagicMock()
-        mock_client.accounts.return_value.get.return_value.execute.side_effect = (
-            Exception("Account not found")
+        mock_client.accounts.return_value.get.return_value.execute.side_effect = Exception(
+            "Account not found"
         )
 
         with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
@@ -214,10 +221,14 @@ class TestAccountsUpdate:
             result = runner.invoke(
                 app,
                 [
-                    "accounts", "update",
-                    "--account-id", "123456",
-                    "--name", "New Name",
-                    "-o", "json",
+                    "accounts",
+                    "update",
+                    "--account-id",
+                    "123456",
+                    "--name",
+                    "New Name",
+                    "-o",
+                    "json",
                 ],
             )
 
@@ -239,8 +250,8 @@ class TestAccountsUpdate:
 
     def test_update_api_error(self):
         mock_client = MagicMock()
-        mock_client.accounts.return_value.patch.return_value.execute.side_effect = (
-            Exception("Permission denied")
+        mock_client.accounts.return_value.patch.return_value.execute.side_effect = Exception(
+            "Permission denied"
         )
 
         with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
@@ -341,9 +352,7 @@ class TestChangeHistory:
         mock_client = _mock_change_history_client()
 
         with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
-            result = runner.invoke(
-                app, ["accounts", "change-history", "--account-id", "123456"]
-            )
+            result = runner.invoke(app, ["accounts", "change-history", "--account-id", "123456"])
 
         assert result.exit_code == 0
         assert "admin@example" in result.output
@@ -385,9 +394,12 @@ class TestChangeHistory:
             result = runner.invoke(
                 app,
                 [
-                    "accounts", "change-history",
-                    "--account-id", "123456",
-                    "--resource-type", "PROPERTY",
+                    "accounts",
+                    "change-history",
+                    "--account-id",
+                    "123456",
+                    "--resource-type",
+                    "PROPERTY",
                 ],
             )
 
@@ -414,9 +426,7 @@ class TestChangeHistory:
         mock_client = _mock_change_history_client(response={"changeHistoryEvents": []})
 
         with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
-            result = runner.invoke(
-                app, ["accounts", "change-history", "--account-id", "123456"]
-            )
+            result = runner.invoke(app, ["accounts", "change-history", "--account-id", "123456"])
 
         assert result.exit_code == 0
         assert "No changes found" in result.output
@@ -424,14 +434,10 @@ class TestChangeHistory:
     def test_api_error(self):
         mock_client = MagicMock()
         mock_search = mock_client.accounts.return_value.searchChangeHistoryEvents
-        mock_search.return_value.execute.side_effect = (
-            Exception("Permission denied")
-        )
+        mock_search.return_value.execute.side_effect = Exception("Permission denied")
 
         with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
-            result = runner.invoke(
-                app, ["accounts", "change-history", "--account-id", "123456"]
-            )
+            result = runner.invoke(app, ["accounts", "change-history", "--account-id", "123456"])
 
         assert result.exit_code == 1
         assert "Permission denied" in result.output
@@ -443,11 +449,118 @@ class TestChangeHistory:
             patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client),
             patch("ga_cli.commands.accounts.get_effective_value") as mock_effective,
         ):
-            mock_effective.side_effect = (
-                lambda val, key: "999" if key == "default_account_id" else val
+            mock_effective.side_effect = lambda val, key: (
+                "999" if key == "default_account_id" else val
             )
             result = runner.invoke(app, ["accounts", "change-history"])
 
         assert result.exit_code == 0
         call_args = mock_client.accounts.return_value.searchChangeHistoryEvents.call_args
         assert call_args[1]["account"] == "accounts/999"
+
+
+class TestAccountsDelete:
+    def test_delete_with_confirmation(self):
+        mock_client = _mock_admin_client()
+
+        with (
+            patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client),
+            patch("ga_cli.commands.accounts.questionary") as mock_q,
+        ):
+            mock_q.confirm.return_value.ask.return_value = True
+            result = runner.invoke(app, ["accounts", "delete", "--account-id", "123456"])
+
+        assert result.exit_code == 0
+        assert "deleted" in result.output.lower()
+        mock_client.accounts.return_value.delete.assert_called_once_with(name="accounts/123456")
+
+    def test_delete_cancelled(self):
+        mock_client = _mock_admin_client()
+
+        with (
+            patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client),
+            patch("ga_cli.commands.accounts.questionary") as mock_q,
+        ):
+            mock_q.confirm.return_value.ask.return_value = False
+            result = runner.invoke(app, ["accounts", "delete", "--account-id", "123456"])
+
+        assert result.exit_code == 0
+        assert "Cancelled" in result.output
+        mock_client.accounts.return_value.delete.assert_not_called()
+
+    def test_delete_skip_confirmation(self):
+        mock_client = _mock_admin_client()
+
+        with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
+            result = runner.invoke(app, ["accounts", "delete", "-a", "123456", "--yes"])
+
+        assert result.exit_code == 0
+        assert "deleted" in result.output.lower()
+
+    def test_delete_requires_account_id(self):
+        result = runner.invoke(app, ["accounts", "delete"])
+
+        assert result.exit_code != 0
+        assert "account-id" in result.output.lower() or "missing" in result.output.lower()
+
+    def test_delete_api_error(self):
+        mock_client = MagicMock()
+        mock_client.accounts.return_value.delete.return_value.execute.side_effect = Exception(
+            "Permission denied"
+        )
+
+        with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
+            result = runner.invoke(app, ["accounts", "delete", "-a", "123456", "--yes"])
+
+        assert result.exit_code == 1
+        assert "Permission denied" in result.output
+
+
+SAMPLE_DATA_SHARING = {
+    "name": "accounts/123456/dataSharingSettings",
+    "sharingWithGoogleSupportEnabled": True,
+    "sharingWithGoogleAssignedSalesEnabled": False,
+    "sharingWithGoogleProductsEnabled": True,
+    "sharingWithOthersEnabled": False,
+}
+
+
+class TestAccountsGetDataSharing:
+    def test_get_table_output(self):
+        mock_client = _mock_admin_client(data_sharing_settings=SAMPLE_DATA_SHARING)
+
+        with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
+            result = runner.invoke(app, ["accounts", "get-data-sharing", "--account-id", "123456"])
+
+        assert result.exit_code == 0
+        mock_client.accounts.return_value.getDataSharingSettings.assert_called_once_with(
+            name="accounts/123456/dataSharingSettings"
+        )
+
+    def test_get_json_output(self):
+        mock_client = _mock_admin_client(data_sharing_settings=SAMPLE_DATA_SHARING)
+
+        with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["accounts", "get-data-sharing", "-a", "123456", "-o", "json"]
+            )
+
+        assert result.exit_code == 0
+        assert "sharingWithGoogleSupportEnabled" in result.output
+
+    def test_get_requires_account_id(self):
+        result = runner.invoke(app, ["accounts", "get-data-sharing"])
+
+        assert result.exit_code != 0
+        assert "account-id" in result.output.lower() or "missing" in result.output.lower()
+
+    def test_get_api_error(self):
+        mock_client = MagicMock()
+        get_dss = mock_client.accounts.return_value.getDataSharingSettings
+        get_dss.return_value.execute.side_effect = Exception("Not found")
+
+        with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
+            result = runner.invoke(app, ["accounts", "get-data-sharing", "-a", "999"])
+
+        assert result.exit_code == 1
+        assert "Not found" in result.output

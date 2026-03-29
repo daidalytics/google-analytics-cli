@@ -2,16 +2,15 @@
 
 from typing import Optional
 
+import questionary
 import typer
 
 from ..api.client import get_admin_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, info, output, require_options
+from ..utils import handle_error, info, output, require_options, success
 from ..utils.pagination import paginate_all
 
-accounts_app = typer.Typer(
-    name="accounts", help="Manage GA4 accounts", no_args_is_help=True
-)
+accounts_app = typer.Typer(name="accounts", help="Manage GA4 accounts", no_args_is_help=True)
 
 
 @accounts_app.command("list")
@@ -93,6 +92,79 @@ def update_cmd(
         handle_error(e)
 
 
+@accounts_app.command("delete")
+def delete_cmd(
+    account_id: Optional[str] = typer.Option(
+        None, "--account-id", "-a", help="Account ID (numeric)"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """Delete a GA4 account (soft delete, moves to trash)."""
+    try:
+        effective_account = get_effective_value(account_id, "default_account_id")
+        require_options({"account_id": effective_account}, ["account_id"])
+
+        if not yes:
+            confirmed = questionary.confirm(
+                f"Delete account {effective_account}? "
+                "All child resources (properties, streams, links) will be trashed."
+            ).ask()
+            if not confirmed:
+                info("Cancelled.")
+                raise typer.Exit()
+
+        admin = get_admin_client()
+        admin.accounts().delete(name=f"accounts/{effective_account}").execute()
+        success(f"Account {effective_account} deleted (moved to trash).")
+    except typer.Exit:
+        raise
+    except Exception as e:
+        handle_error(e)
+
+
+@accounts_app.command("get-data-sharing")
+def get_data_sharing_cmd(
+    account_id: Optional[str] = typer.Option(
+        None, "--account-id", "-a", help="Account ID (numeric)"
+    ),
+    output_format: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output format (json, table, compact)"
+    ),
+):
+    """Get data sharing settings for an account (read-only)."""
+    try:
+        effective_account = get_effective_value(account_id, "default_account_id")
+        require_options({"account_id": effective_account}, ["account_id"])
+        effective_format = get_effective_value(output_format, "output_format") or "table"
+
+        admin = get_admin_client()
+        settings = (
+            admin.accounts()
+            .getDataSharingSettings(name=f"accounts/{effective_account}/dataSharingSettings")
+            .execute()
+        )
+        output(
+            settings,
+            effective_format,
+            columns=[
+                "name",
+                "sharingWithGoogleSupportEnabled",
+                "sharingWithGoogleAssignedSalesEnabled",
+                "sharingWithGoogleProductsEnabled",
+                "sharingWithOthersEnabled",
+            ],
+            headers=[
+                "Resource Name",
+                "Google Support",
+                "Google Sales",
+                "Google Products",
+                "Others",
+            ],
+        )
+    except Exception as e:
+        handle_error(e)
+
+
 def _extract_resource_name(change: dict) -> str:
     """Extract a human-readable resource name from a change entry."""
     for key in ("resourceAfterChange", "resourceBeforeChange"):
@@ -110,13 +182,15 @@ def _flatten_change_events(events: list) -> list[dict]:
     rows = []
     for event in events:
         for change in event.get("changes", []):
-            rows.append({
-                "changeTime": event.get("changeTime", ""),
-                "actor": event.get("userActorEmail") or event.get("actorType", ""),
-                "resourceType": change.get("resource", ""),
-                "action": change.get("action", ""),
-                "resourceName": _extract_resource_name(change),
-            })
+            rows.append(
+                {
+                    "changeTime": event.get("changeTime", ""),
+                    "actor": event.get("userActorEmail") or event.get("actorType", ""),
+                    "resourceType": change.get("resource", ""),
+                    "action": change.get("action", ""),
+                    "resourceName": _extract_resource_name(change),
+                }
+            )
     return rows
 
 
@@ -165,12 +239,14 @@ def change_history_cmd(
 
         admin = get_admin_client()
         events = paginate_all(
-            lambda **kw: admin.accounts()
-            .searchChangeHistoryEvents(
-                account=f"accounts/{effective_account}",
-                body={**body, **kw},
-            )
-            .execute(),
+            lambda **kw: (
+                admin.accounts()
+                .searchChangeHistoryEvents(
+                    account=f"accounts/{effective_account}",
+                    body={**body, **kw},
+                )
+                .execute()
+            ),
             "changeHistoryEvents",
             pageSize=200,
         )
