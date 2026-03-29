@@ -23,7 +23,9 @@ from ..auth.service_account import get_service_account_credentials
 
 # Cached client instances (same pattern as GTM CLI)
 _cached_admin_client: Optional[Resource] = None
+_cached_admin_alpha_client: Optional[Resource] = None
 _cached_data_client: Optional[Resource] = None
+_cached_data_alpha_client: Optional[Resource] = None
 
 
 def _get_credentials() -> Credentials:
@@ -71,6 +73,24 @@ def get_admin_client() -> Resource:
     return _cached_admin_client
 
 
+def get_admin_alpha_client() -> Resource:
+    """Get an authenticated Analytics Admin API client (v1alpha).
+
+    Returns a googleapiclient Resource for analyticsadmin v1alpha.
+    Used for alpha-only resources: audiences, BigQuery links, channel groups,
+    calculated metrics, event rules, access bindings, annotations, etc.
+    """
+    global _cached_admin_alpha_client
+    if _cached_admin_alpha_client is None:
+        creds = _get_credentials()
+        _cached_admin_alpha_client = build(
+            "analyticsadmin",
+            "v1alpha",
+            credentials=creds,
+        )
+    return _cached_admin_alpha_client
+
+
 def get_data_client() -> Resource:
     """Get an authenticated Analytics Data API client.
 
@@ -94,8 +114,28 @@ def get_data_client() -> Resource:
     return _cached_data_client
 
 
+def get_data_alpha_client() -> Resource:
+    """Get an authenticated Analytics Data API client (v1alpha).
+
+    Returns a googleapiclient Resource for analyticsdata v1alpha.
+    Used for alpha-only methods: funnel reports, property quotas snapshot.
+    """
+    global _cached_data_alpha_client
+    if _cached_data_alpha_client is None:
+        creds = _get_credentials()
+        _cached_data_alpha_client = build(
+            "analyticsdata",
+            "v1alpha",
+            credentials=creds,
+        )
+    return _cached_data_alpha_client
+
+
 def clear_client_cache() -> None:
     """Clear cached API clients (e.g., after re-authentication)."""
-    global _cached_admin_client, _cached_data_client
+    global _cached_admin_client, _cached_admin_alpha_client
+    global _cached_data_client, _cached_data_alpha_client
     _cached_admin_client = None
+    _cached_admin_alpha_client = None
     _cached_data_client = None
+    _cached_data_alpha_client = None
