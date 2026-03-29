@@ -3,6 +3,7 @@
 ## 1. Introduction / Hook
 - The GA4 UI is great for exploration, but breaks down at scale (many properties, repetitive config, reporting pipelines)
 - Introduce GA CLI: a command-line interface for Google Analytics 4
+- Inspiration: the GTM CLI (`@owntag/gtm-cli`) by Justus Blümer / owntag — an open-source CLI wrapping the GTM API, built in TypeScript/Deno, explicitly designed with AI agents as a first-class user (ships `gtm agent guide`, auto-JSON when piped). It proved that a CLI for Google Marketing Platform tools is valuable and that agent-readiness is a killer feature. GA CLI brings the same philosophy to Google Analytics 4.
 
 ## 2. What Is a CLI (and Why Should You Care)?
 - Brief explainer for the analytics audience: a CLI is a text-based interface to a system
