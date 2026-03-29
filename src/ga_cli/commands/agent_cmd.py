@@ -140,6 +140,16 @@ ga firebase-links delete -p PROPERTY_ID --link-id ID --yes
 ```
 No `get` or `update` methods. A property can have at most one Firebase link.
 
+### Annotations (alpha)
+```bash
+ga annotations list [-p PROPERTY_ID] [-o json]
+ga annotations get -p PROPERTY_ID -a ANNOTATION_ID [-o json]
+ga annotations create -p PROPERTY_ID --title TEXT --annotation-date YYYY-MM-DD [--description TEXT] [--color COLOR]
+ga annotations update -p PROPERTY_ID -a ANNOTATION_ID [--title TEXT] [--description TEXT] [--color COLOR]
+ga annotations delete -p PROPERTY_ID -a ANNOTATION_ID --yes
+```
+Mark dates on reports with contextual notes (e.g., launches, campaigns).
+
 ### Reports
 ```bash
 ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE [--limit N] [-o json]
@@ -277,7 +287,7 @@ ga reports metadata -p 987654321 --search page -o json      # Search by name
 **Note**: `ga reports build` requires interactive input — avoid in automation. Use `ga reports run` instead.
 """
 
-_SECTION_ADMIN = r"""# Admin — Properties, Data Streams, Custom Dimensions, Custom Metrics & Key Events
+_SECTION_ADMIN = r"""# Admin — Properties, Streams, Dimensions, Metrics, Key Events, Links & More
 
 ## Properties
 ```bash
@@ -366,6 +376,18 @@ ga firebase-links delete -p PROPERTY_ID --link-id ID --yes
 ```
 - No `get` or `update` methods
 - A property can have at most one Firebase link
+
+## Annotations (alpha)
+Annotations mark specific dates on GA4 reports with contextual notes.
+```bash
+ga annotations list [-p PROPERTY_ID] [-o json]
+ga annotations get -p PROPERTY_ID -a ANNOTATION_ID [-o json]
+ga annotations create -p PROPERTY_ID --title TEXT --annotation-date YYYY-MM-DD [--description TEXT] [--color COLOR]
+ga annotations update -p PROPERTY_ID -a ANNOTATION_ID [--title TEXT] [--description TEXT] [--color COLOR]
+ga annotations delete -p PROPERTY_ID -a ANNOTATION_ID --yes
+```
+- Updatable fields: `title`, `description`, `color`
+- Uses v1alpha Admin API
 """
 
 _SECTION_EXAMPLES = r"""# Complete Examples
