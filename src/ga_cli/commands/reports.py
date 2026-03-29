@@ -3,7 +3,9 @@
 Uses the Analytics Data API v1beta.
 """
 
+import json
 import time
+from pathlib import Path
 from typing import Optional
 
 import questionary
@@ -460,6 +462,86 @@ def metadata_cmd(
                 headers=["Type", "API Name", "UI Name", "Category", "Custom"],
             )
 
+    except Exception as e:
+        handle_error(e)
+
+
+@reports_app.command("batch")
+def batch_cmd(
+    property_id: Optional[str] = typer.Option(
+        None, "--property-id", "-p", help="Property ID (numeric)"
+    ),
+    config_file: str = typer.Option(
+        ..., "--config", "-c", help="Path to JSON batch config file"
+    ),
+    output_format: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output format (json, table, compact)"
+    ),
+):
+    """Run multiple reports in a single API call (max 5)."""
+    try:
+        effective_property = get_effective_value(property_id, "default_property_id")
+        require_options({"property_id": effective_property}, ["property_id"])
+        effective_format = get_effective_value(output_format, "output_format") or "table"
+
+        # Read and parse config file
+        config_path = Path(config_file)
+        if not config_path.exists():
+            raise typer.BadParameter(f"Config file not found: {config_file}")
+
+        try:
+            config = json.loads(config_path.read_text())
+        except json.JSONDecodeError as exc:
+            raise typer.BadParameter(f"Invalid JSON in config file: {exc}")
+
+        reports = config.get("reports")
+        if not isinstance(reports, list) or len(reports) == 0:
+            raise typer.BadParameter("Config must contain a non-empty 'reports' array.")
+
+        if len(reports) > 5:
+            raise typer.BadParameter(
+                f"Batch supports at most 5 reports, got {len(reports)}."
+            )
+
+        # Validate each report has metrics, then build request bodies
+        requests = []
+        for i, spec in enumerate(reports):
+            if not spec.get("metrics"):
+                raise typer.BadParameter(
+                    f"Report {i + 1} is missing required 'metrics' field."
+                )
+            # Normalise shorthand: list of strings → list of dicts
+            if isinstance(spec["metrics"][0], str):
+                spec["metrics"] = [{"name": m} for m in spec["metrics"]]
+            dims = spec.get("dimensions")
+            if dims and isinstance(dims[0], str):
+                spec["dimensions"] = [{"name": d} for d in spec["dimensions"]]
+            requests.append(spec)
+
+        data = get_data_client()
+        result = (
+            data.properties()
+            .batchRunReports(
+                property=f"properties/{effective_property}",
+                body={"requests": requests},
+            )
+            .execute()
+        )
+
+        if effective_format != "table":
+            output(result, effective_format)
+            return
+
+        for idx, report in enumerate(result.get("reports", [])):
+            console.print(f"\n[bold]--- Report {idx + 1} ---[/bold]")
+            rows, columns, headers = _transform_report_rows(report)
+            row_count = report.get("rowCount", len(rows))
+            output(rows, effective_format, columns=columns, headers=headers)
+            if row_count > 0:
+                console.print(f"[dim]{row_count} total rows[/dim]")
+
+    except typer.BadParameter:
+        raise
     except Exception as e:
         handle_error(e)
 

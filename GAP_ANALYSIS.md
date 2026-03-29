@@ -71,7 +71,7 @@ Comprehensive gap analysis of the GA CLI against the full Google Analytics Data 
 | `properties.runReport` | **Implemented** | `ga reports run` |
 | `properties.runRealtimeReport` | **Implemented** | `ga reports realtime` |
 | `properties.getMetadata` | **Implemented** | `ga reports metadata` |
-| `properties.batchRunReports` | Missing | — |
+| `properties.batchRunReports` | **Implemented** | `ga reports batch` |
 | `properties.runPivotReport` | **Implemented** | `ga reports pivot` |
 | `properties.batchRunPivotReports` | Missing | — |
 | `properties.checkCompatibility` | **Implemented** | `ga reports check-compatibility` |
@@ -80,7 +80,7 @@ Comprehensive gap analysis of the GA CLI against the full Google Analytics Data 
 | `properties.audienceExports.get` | Missing | — |
 | `properties.audienceExports.list` | Missing | — |
 
-**Coverage: 5/11 methods (45%)**
+**Coverage: 6/11 methods (55%)**
 
 ### Admin API v1beta
 

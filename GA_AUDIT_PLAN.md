@@ -4,6 +4,9 @@
 
 Build a comprehensive GA4 audit capability into the CLI that checks property configuration, data collection health, event/conversion setup, integrations, and data quality.
 
+--> Use the Google Sheet template as a benchmark/guideline foir which features need to be checked:
+https://docs.google.com/spreadsheets/d/1HXac-gvVXuNjf-pbUB3p1wnjRgQUEyixwwWkp_67AQs/edit?gid=0#gid=0
+
 ## Existing CLI Coverage
 
 The CLI already wraps the key Admin API and Data API resources needed:
