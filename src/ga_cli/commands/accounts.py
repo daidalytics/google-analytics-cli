@@ -6,7 +6,7 @@ import typer
 
 from ..api.client import get_admin_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, output
+from ..utils import handle_error, info, output, require_options
 from ..utils.pagination import paginate_all
 
 accounts_app = typer.Typer(
@@ -85,5 +85,107 @@ def update_cmd(
             .execute()
         )
         output(account, effective_format)
+    except Exception as e:
+        handle_error(e)
+
+
+def _extract_resource_name(change: dict) -> str:
+    """Extract a human-readable resource name from a change entry."""
+    for key in ("resourceAfterChange", "resourceBeforeChange"):
+        container = change.get(key)
+        if not container:
+            continue
+        for resource_obj in container.values():
+            if isinstance(resource_obj, dict):
+                return resource_obj.get("displayName") or resource_obj.get("name", "")
+    return ""
+
+
+def _flatten_change_events(events: list) -> list[dict]:
+    """Flatten change history events into one row per change."""
+    rows = []
+    for event in events:
+        for change in event.get("changes", []):
+            rows.append({
+                "changeTime": event.get("changeTime", ""),
+                "actor": event.get("userActorEmail") or event.get("actorType", ""),
+                "resourceType": change.get("resource", ""),
+                "action": change.get("action", ""),
+                "resourceName": _extract_resource_name(change),
+            })
+    return rows
+
+
+@accounts_app.command("change-history")
+def change_history_cmd(
+    account_id: Optional[str] = typer.Option(
+        None, "--account-id", "-a", help="Account ID (numeric)"
+    ),
+    property_id: Optional[str] = typer.Option(
+        None, "--property-id", "-p", help="Filter to specific property"
+    ),
+    resource_type: Optional[str] = typer.Option(
+        None, "--resource-type", help="Filter by resource type (ACCOUNT, PROPERTY, etc.)"
+    ),
+    action: Optional[str] = typer.Option(
+        None, "--action", help="Filter by action (CREATED, UPDATED, DELETED)"
+    ),
+    earliest_change_time: Optional[str] = typer.Option(
+        None, "--since", help="Earliest change time (ISO 8601)"
+    ),
+    latest_change_time: Optional[str] = typer.Option(
+        None, "--until", help="Latest change time (ISO 8601)"
+    ),
+    limit: int = typer.Option(100, "--limit", "-l", help="Max results to return"),
+    output_format: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output format (json, table, compact)"
+    ),
+) -> None:
+    """Search change history events for an account."""
+    try:
+        effective_account = get_effective_value(account_id, "default_account_id")
+        require_options({"account_id": effective_account}, ["account_id"])
+        effective_format = get_effective_value(output_format, "output_format") or "table"
+
+        body: dict = {}
+        if property_id:
+            body["property"] = f"properties/{property_id}"
+        if resource_type:
+            body["resourceType"] = [resource_type.upper()]
+        if action:
+            body["action"] = [action.upper()]
+        if earliest_change_time:
+            body["earliestChangeTime"] = earliest_change_time
+        if latest_change_time:
+            body["latestChangeTime"] = latest_change_time
+
+        admin = get_admin_client()
+        events = paginate_all(
+            lambda **kw: admin.accounts()
+            .searchChangeHistoryEvents(
+                account=f"accounts/{effective_account}",
+                body={**body, **kw},
+            )
+            .execute(),
+            "changeHistoryEvents",
+            pageSize=200,
+        )
+
+        events = events[:limit]
+
+        if not events:
+            info("No changes found.")
+            return
+
+        if effective_format == "json":
+            output(events, effective_format)
+        else:
+            rows = _flatten_change_events(events)
+            output(
+                rows,
+                effective_format,
+                columns=["changeTime", "actor", "resourceType", "action", "resourceName"],
+                headers=["Time", "Actor", "Resource Type", "Action", "Resource Name"],
+            )
     except Exception as e:
         handle_error(e)

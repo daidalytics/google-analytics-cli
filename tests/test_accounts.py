@@ -1,5 +1,6 @@
-"""Tests for accounts commands (list, get)."""
+"""Tests for accounts commands (list, get, update, change-history)."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
@@ -264,3 +265,189 @@ class TestAccountsUpdate:
 
         assert result.exit_code == 0
         assert '"displayName"' in result.output
+
+
+SAMPLE_CHANGE_HISTORY_RESPONSE = {
+    "changeHistoryEvents": [
+        {
+            "id": "event1",
+            "changeTime": "2024-01-15T10:30:00Z",
+            "actorType": "USER",
+            "userActorEmail": "admin@example.com",
+            "changes": [
+                {
+                    "resource": "PROPERTY",
+                    "action": "UPDATED",
+                    "resourceAfterChange": {
+                        "property": {
+                            "name": "properties/123",
+                            "displayName": "My Site",
+                        }
+                    },
+                }
+            ],
+        },
+        {
+            "id": "event2",
+            "changeTime": "2024-01-14T08:00:00Z",
+            "actorType": "USER",
+            "userActorEmail": "dev@example.com",
+            "changes": [
+                {
+                    "resource": "DATA_STREAM",
+                    "action": "CREATED",
+                    "resourceAfterChange": {
+                        "dataStream": {
+                            "name": "properties/123/dataStreams/456",
+                            "displayName": "Web Stream",
+                        }
+                    },
+                }
+            ],
+        },
+        {
+            "id": "event3",
+            "changeTime": "2024-01-13T15:00:00Z",
+            "actorType": "SYSTEM",
+            "changes": [
+                {
+                    "resource": "PROPERTY",
+                    "action": "DELETED",
+                    "resourceBeforeChange": {
+                        "property": {
+                            "name": "properties/789",
+                            "displayName": "Old Site",
+                        }
+                    },
+                }
+            ],
+        },
+    ]
+}
+
+
+def _mock_change_history_client(response=None):
+    """Create a mock Admin API client with searchChangeHistoryEvents."""
+    mock_client = MagicMock()
+    mock_search = mock_client.accounts.return_value.searchChangeHistoryEvents
+    mock_search.return_value.execute.return_value = (
+        response if response is not None else SAMPLE_CHANGE_HISTORY_RESPONSE
+    )
+    return mock_client
+
+
+class TestChangeHistory:
+    def test_list_changes_table(self):
+        mock_client = _mock_change_history_client()
+
+        with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["accounts", "change-history", "--account-id", "123456"]
+            )
+
+        assert result.exit_code == 0
+        assert "admin@example" in result.output
+        assert "dev@example" in result.output
+        assert "SYSTEM" in result.output
+
+    def test_filter_by_property(self):
+        mock_client = _mock_change_history_client()
+
+        with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                ["accounts", "change-history", "--account-id", "123456", "--property-id", "123"],
+            )
+
+        assert result.exit_code == 0
+        call_args = mock_client.accounts.return_value.searchChangeHistoryEvents.call_args
+        body = call_args[1]["body"]
+        assert body["property"] == "properties/123"
+
+    def test_filter_by_action(self):
+        mock_client = _mock_change_history_client()
+
+        with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                ["accounts", "change-history", "--account-id", "123456", "--action", "CREATED"],
+            )
+
+        assert result.exit_code == 0
+        call_args = mock_client.accounts.return_value.searchChangeHistoryEvents.call_args
+        body = call_args[1]["body"]
+        assert body["action"] == ["CREATED"]
+
+    def test_filter_by_resource_type(self):
+        mock_client = _mock_change_history_client()
+
+        with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                [
+                    "accounts", "change-history",
+                    "--account-id", "123456",
+                    "--resource-type", "PROPERTY",
+                ],
+            )
+
+        assert result.exit_code == 0
+        call_args = mock_client.accounts.return_value.searchChangeHistoryEvents.call_args
+        body = call_args[1]["body"]
+        assert body["resourceType"] == ["PROPERTY"]
+
+    def test_json_output(self):
+        mock_client = _mock_change_history_client()
+
+        with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                ["accounts", "change-history", "--account-id", "123456", "-o", "json"],
+            )
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 3
+        assert data[0]["id"] == "event1"
+
+    def test_empty_history(self):
+        mock_client = _mock_change_history_client(response={"changeHistoryEvents": []})
+
+        with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["accounts", "change-history", "--account-id", "123456"]
+            )
+
+        assert result.exit_code == 0
+        assert "No changes found" in result.output
+
+    def test_api_error(self):
+        mock_client = MagicMock()
+        mock_search = mock_client.accounts.return_value.searchChangeHistoryEvents
+        mock_search.return_value.execute.side_effect = (
+            Exception("Permission denied")
+        )
+
+        with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["accounts", "change-history", "--account-id", "123456"]
+            )
+
+        assert result.exit_code == 1
+        assert "Permission denied" in result.output
+
+    def test_uses_config_account_id(self):
+        mock_client = _mock_change_history_client()
+
+        with (
+            patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client),
+            patch("ga_cli.commands.accounts.get_effective_value") as mock_effective,
+        ):
+            mock_effective.side_effect = (
+                lambda val, key: "999" if key == "default_account_id" else val
+            )
+            result = runner.invoke(app, ["accounts", "change-history"])
+
+        assert result.exit_code == 0
+        call_args = mock_client.accounts.return_value.searchChangeHistoryEvents.call_args
+        assert call_args[1]["account"] == "accounts/999"

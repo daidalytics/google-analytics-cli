@@ -1,5 +1,6 @@
 # OAuth credentials
 client_secret.json
+test-service-account.json
 
 # Python
 __pycache__/
