@@ -11,12 +11,15 @@
 - Analogy: the GA4 UI is like driving manual; a CLI is like having a chauffeur you can give written instructions to
 
 ## 3. CLIs in the Age of AI Agents
-- AI agents need *tools* — interfaces they can call programmatically
-- Why CLIs are natural agent tools:
-  - Structured output (JSON mode) that agents can parse
-  - Self-documenting (`--help`, and GA CLI's built-in `ga agent guide`)
-  - Composable — agents can chain commands just like shell scripts
-  - No browser/UI automation needed
+- Framing via Justin Poehnelt's article ["You Need to Rewrite Your CLI for AI Agents"](https://justin.poehnelt.com/posts/rewrite-your-cli-for-ai-agents/) — Poehnelt (Senior DevRel at Google) built Google Workspace's CLI with agents as the primary consumer from day one
+- His core insight: "Human DX optimizes for discoverability. Agent DX optimizes for predictability."
+- Key agent-DX principles (from the article) and how GA CLI implements them:
+  - **Structured output** → `--output json` on every command; agents parse JSON, not tables
+  - **Context window discipline** → concise, predictable responses; `--output compact` for minimal ID+name output
+  - **Agent-specific documentation** → `ga agent guide` ships a reference (like Poehnelt's "SKILL.md" concept) encoding invariants agents can't intuit
+  - **Self-documenting** → `--help` on every command, plus runtime metadata (`ga reports metadata`)
+  - **Composable** → agents chain commands just like shell scripts; no browser/UI automation needed
+  - **Safety rails** → confirmation prompts on destructive operations (`--yes` to skip in automation)
 - GA CLI was designed with this in mind: the `ga agent guide` command ships a reference specifically for AI agents
 
 ## 4. CLI vs MCP Servers — Where Does Each Fit?
