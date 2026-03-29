@@ -208,7 +208,7 @@ ga reports pivot -p 123456 \
 
 ---
 
-### WS-D2: Batch Reports
+### WS-D2: Batch Reports ✅ DONE
 
 **Goal:** Add `ga reports batch` to run multiple reports in a single API call via `properties.batchRunReports`.
 
@@ -1435,7 +1435,7 @@ def update_cmd(
 
 ---
 
-### WS-A11: Change History
+### WS-A11: Change History ✅ DONE
 
 **Goal:** Add `ga accounts change-history` to search change history events.
 
@@ -2212,8 +2212,8 @@ Standard CRUD test patterns. Tests must verify stream type validation (iOS only)
 | ~~10~~ | ~~WS-A9: Data Streams Patch~~ | ~~1~~ | ~~Completes data streams CRUD~~ **DONE** |
 | ~~11~~ | ~~WS-D5: Expose getMetadata~~ | ~~1~~ | ~~Developer utility~~ **DONE** |
 | ~~12~~ | ~~WS-A6: Firebase Links~~ | ~~3~~ | ~~Firebase integration~~ **DONE** |
-| 13 | WS-A11: Change History | 1 | Audit / debugging |
-| 14 | WS-D2: Batch Reports | 1 | Efficiency for multi-report |
+| ~~13~~ | ~~WS-A11: Change History~~ | ~~1~~ | ~~Audit / debugging~~ **DONE** |
+| ~~14~~ | ~~WS-D2: Batch Reports~~ | ~~1~~ | ~~Efficiency for multi-report~~ **DONE** |
 | ~~15~~ | ~~WS-A10: Data Retention~~ | ~~2~~ | ~~Compliance / governance~~ **DONE** |
 | ~~16~~ | ~~WS-A12: Access Reports~~ | ~~2~~ | ~~Compliance / auditing~~ **DONE** |
 | ~~17~~ | ~~WS-A13: Accounts Delete~~ | ~~1~~ | ~~Completes accounts CRUD~~ **DONE** |
