@@ -7,7 +7,9 @@ from .commands.account_summaries import account_summaries_app
 from .commands.accounts import accounts_app
 from .commands.agent_cmd import agent_app
 from .commands.annotations import annotations_app
+from .commands.audiences import audiences_app
 from .commands.auth_cmd import auth_app
+from .commands.bigquery_links import bigquery_links_app
 from .commands.calculated_metrics import calculated_metrics_app
 from .commands.completions_cmd import completions_app
 from .commands.config_cmd import config_app
@@ -41,6 +43,8 @@ app.add_typer(data_retention_app, name="data-retention")
 app.add_typer(data_streams_app, name="data-streams")
 app.add_typer(access_reports_app, name="access-reports")
 app.add_typer(annotations_app, name="annotations")
+app.add_typer(audiences_app, name="audiences")
+app.add_typer(bigquery_links_app, name="bigquery-links")
 app.add_typer(calculated_metrics_app, name="calculated-metrics")
 app.add_typer(firebase_links_app, name="firebase-links")
 app.add_typer(google_ads_links_app, name="google-ads-links")

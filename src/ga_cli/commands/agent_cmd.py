@@ -150,6 +150,26 @@ ga annotations delete -p PROPERTY_ID -a ANNOTATION_ID --yes
 ```
 Mark dates on reports with contextual notes (e.g., launches, campaigns).
 
+### Audiences (alpha)
+```bash
+ga audiences list [-p PROPERTY_ID] [-o json]
+ga audiences get -p PROPERTY_ID -a AUDIENCE_ID [-o json]
+ga audiences create -p PROPERTY_ID --config audience.json [-o json]
+ga audiences update -p PROPERTY_ID -a AUDIENCE_ID --config update.json [-o json]
+ga audiences archive -p PROPERTY_ID -a AUDIENCE_ID --yes
+```
+Create/update use `--config` JSON file (complex filter clauses). Only `displayName`, `description`, and `eventTrigger` can be updated. Uses `archive` instead of `delete`.
+
+### BigQuery Links (alpha)
+```bash
+ga bigquery-links list [-p PROPERTY_ID] [-o json]
+ga bigquery-links get -p PROPERTY_ID -l LINK_ID [-o json]
+ga bigquery-links create -p PROPERTY_ID --project PROJECT --dataset-location LOC [--daily-export] [--streaming-export] [--export-streams IDS] [--excluded-events EVENTS]
+ga bigquery-links update -p PROPERTY_ID -l LINK_ID [--daily-export|--no-daily-export] [--streaming-export|--no-streaming-export] [--export-streams IDS] [--excluded-events EVENTS]
+ga bigquery-links delete -p PROPERTY_ID -l LINK_ID --yes
+```
+`--project` and `--dataset-location` are immutable (set at creation only). `--export-streams` accepts comma-separated stream IDs; `--excluded-events` accepts comma-separated event names.
+
 ### Calculated Metrics (alpha)
 ```bash
 ga calculated-metrics list [-p PROPERTY_ID] [-o json]
@@ -397,6 +417,35 @@ ga annotations update -p PROPERTY_ID -a ANNOTATION_ID [--title TEXT] [--descript
 ga annotations delete -p PROPERTY_ID -a ANNOTATION_ID --yes
 ```
 - Updatable fields: `title`, `description`, `color`
+- Uses v1alpha Admin API
+
+## Audiences (alpha)
+Define user segments for targeting and analysis.
+```bash
+ga audiences list [-p PROPERTY_ID] [-o json]
+ga audiences get -p PROPERTY_ID -a AUDIENCE_ID [-o json]
+ga audiences create -p PROPERTY_ID --config audience.json [-o json]
+ga audiences update -p PROPERTY_ID -a AUDIENCE_ID --config update.json [-o json]
+ga audiences archive -p PROPERTY_ID -a AUDIENCE_ID --yes
+```
+- Create/update use `--config` JSON file — audience filter clauses are deeply nested
+- Only `displayName`, `description`, and `eventTrigger` can be updated after creation
+- `membershipDurationDays` (max 540), `filterClauses`, and `exclusionDurationMode` are immutable
+- Uses `archive` instead of `delete`
+- Uses v1alpha Admin API
+
+## BigQuery Links (alpha)
+Link a GA4 property to a BigQuery project for data export.
+```bash
+ga bigquery-links list [-p PROPERTY_ID] [-o json]
+ga bigquery-links get -p PROPERTY_ID -l LINK_ID [-o json]
+ga bigquery-links create -p PROPERTY_ID --project PROJECT --dataset-location LOC [--daily-export] [--streaming-export] [--fresh-daily-export] [--include-advertising-id] [--export-streams IDS] [--excluded-events EVENTS]
+ga bigquery-links update -p PROPERTY_ID -l LINK_ID [--daily-export|--no-daily-export] [--streaming-export|--no-streaming-export] [--fresh-daily-export|--no-fresh-daily-export] [--include-advertising-id|--no-include-advertising-id] [--export-streams IDS] [--excluded-events EVENTS]
+ga bigquery-links delete -p PROPERTY_ID -l LINK_ID --yes
+```
+- `--project` and `--dataset-location` are immutable (set at creation only)
+- `--export-streams` accepts comma-separated data stream IDs
+- `--excluded-events` accepts comma-separated event names
 - Uses v1alpha Admin API
 
 ## Calculated Metrics (alpha)

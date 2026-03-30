@@ -87,6 +87,11 @@
 - Call to action: try it, star the repo, file issues
 - Community / contribution invitation
 
+## MEDIA
+
+- Screenshots
+- Record a video of an audit
+
 ---
 
 ## Notes / Ideas to Revisit
