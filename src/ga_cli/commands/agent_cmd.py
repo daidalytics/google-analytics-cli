@@ -200,6 +200,17 @@ ga event-create-rules delete -p PROPERTY_ID -s STREAM_ID -r RULE_ID --yes
 ```
 Requires both `--property-id` and `--stream-id`. Create/update use `--config` JSON with `destinationEvent`, `eventConditions`, `sourceCopyParameters`, and `parameterMutations`.
 
+### Event Edit Rules (alpha)
+```bash
+ga event-edit-rules list -p PROPERTY_ID -s STREAM_ID [-o json]
+ga event-edit-rules get -p PROPERTY_ID -s STREAM_ID -r RULE_ID [-o json]
+ga event-edit-rules create -p PROPERTY_ID -s STREAM_ID --config rule.json [-o json]
+ga event-edit-rules update -p PROPERTY_ID -s STREAM_ID -r RULE_ID --config update.json [-o json]
+ga event-edit-rules delete -p PROPERTY_ID -s STREAM_ID -r RULE_ID --yes
+ga event-edit-rules reorder -p PROPERTY_ID -s STREAM_ID --rule-ids r1,r2,r3
+```
+Requires both `--property-id` and `--stream-id`. Create/update use `--config` JSON with `displayName`, `eventConditions`, and `parameterMutations`. Reorder requires all rule IDs in desired processing order.
+
 ### Reports
 ```bash
 ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE [--limit N] [-o json]
@@ -509,6 +520,23 @@ ga event-create-rules delete -p PROPERTY_ID -s STREAM_ID -r RULE_ID --yes
 - Requires both `--property-id` and `--stream-id` (nested under data streams)
 - Create/update use `--config` JSON with: `destinationEvent`, `eventConditions` (1–10 conditions), `sourceCopyParameters`, `parameterMutations` (max 20)
 - Condition comparison types: `EQUALS`, `CONTAINS`, `STARTS_WITH`, `ENDS_WITH`, `GREATER_THAN`, `LESS_THAN`, `REGULAR_EXPRESSION`, plus case-insensitive variants
+- Uses v1alpha Admin API
+
+## Event Edit Rules (alpha)
+Modify existing events by mutating parameters based on matching conditions. Rules are applied in processing order.
+```bash
+ga event-edit-rules list -p PROPERTY_ID -s STREAM_ID [-o json]
+ga event-edit-rules get -p PROPERTY_ID -s STREAM_ID -r RULE_ID [-o json]
+ga event-edit-rules create -p PROPERTY_ID -s STREAM_ID --config rule.json [-o json]
+ga event-edit-rules update -p PROPERTY_ID -s STREAM_ID -r RULE_ID --config update.json [-o json]
+ga event-edit-rules delete -p PROPERTY_ID -s STREAM_ID -r RULE_ID --yes
+ga event-edit-rules reorder -p PROPERTY_ID -s STREAM_ID --rule-ids r1,r2,r3
+```
+- Requires both `--property-id` and `--stream-id` (nested under data streams)
+- Create/update use `--config` JSON with: `displayName` (max 255 chars), `eventConditions` (1–10 conditions), `parameterMutations` (max 20)
+- Set `parameter` to `event_name` in a mutation to rename the event in place
+- `reorder` requires all rule IDs in the desired processing order (comma-separated)
+- `processingOrder` is output-only (set by the API, changed via `reorder`)
 - Uses v1alpha Admin API
 """
 

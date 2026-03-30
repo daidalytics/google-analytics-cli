@@ -95,7 +95,7 @@
 ---
 
 ## Notes / Ideas to Revisit
-- GA API nuggets: Discovery endpoint? `curl -s "https://analyticsadmin.googleapis.com/$discovery/rest?version=v1alpha"`
+- GA API nuggets: Discovery endpoint `curl -s "https://analyticsadmin.googleapis.com/$discovery/rest?version=v1alpha"`
 - Consider including a "day in the life" narrative: a GA consultant using the CLI + an AI agent to audit 10 client properties in an afternoon
 - Possible visual: terminal screenshots / asciinema recordings of key workflows
 - Tone: practical, not overly salesy. Target audience = GA practitioners + technical marketers + analytics engineers
