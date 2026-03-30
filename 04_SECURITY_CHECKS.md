@@ -6,8 +6,8 @@ Security review of the GA CLI codebase prior to publishing as an open-source pac
 
 **Current state:**
 
-- `client_secret.json` with real OAuth credentials exists in repo root (gitignored but present on disk)
-- Release workflow injects OAuth secrets into source at build time — secrets are extractable from published wheels
+- `client_secret.json` with real OAuth credentials exists in repo root (gitignored but present on disk) — for development only
+- ~~Release workflow injects OAuth secrets into source at build time~~ → **Resolved by design:** users provide their own OAuth credentials; no secrets are shipped in the package
 - Measurement Protocol secrets displayed in plaintext in CLI output
 - No input validation on user-supplied resource IDs
 - No credential file permission checks on load
@@ -16,62 +16,53 @@ Security review of the GA CLI codebase prior to publishing as an open-source pac
 
 ## Findings Summary
 
-| # | Severity | Finding | File(s) | Phase |
-|---|----------|---------|---------|-------|
-| S1 | Critical | OAuth credentials on disk | `client_secret.json` | 1 |
-| S2 | Critical | Client secret extractable from published package | `.github/workflows/release.yml`, `src/ga_cli/config/constants.py` | 1 |
-| S3 | High | MP secrets displayed in plaintext | `src/ga_cli/commands/mp_secrets.py` | 2 |
-| S4 | Medium | No input validation on numeric IDs | `src/ga_cli/commands/properties.py`, `data_streams.py`, etc. | 2 |
-| S5 | Medium | No credential file permission check on load | `src/ga_cli/auth/credentials.py` | 2 |
-| S6 | Medium | Update check file uses default permissions | `src/ga_cli/commands/upgrade_cmd.py` | 3 |
-| S7 | Low | Silent exception swallowing in update check | `src/ga_cli/commands/upgrade_cmd.py` | 3 |
-| S8 | Low | TOCTOU in OAuth flow file check | `src/ga_cli/auth/oauth.py` | 3 |
-| S9 | Low | No dependency vulnerability scanning in CI | `.github/workflows/ci.yml` | 3 |
+| # | Severity | Finding | File(s) | Phase | Status |
+|---|----------|---------|---------|-------|--------|
+| S1 | Medium | OAuth credentials on disk (dev only) | `client_secret.json` | 1 | Open — verify not in git history |
+| S2 | ~~Critical~~ | ~~Client secret extractable from published package~~ | — | — | **Resolved by design** — users provide their own credentials; nothing embedded in package |
+| S3 | High | MP secrets displayed in plaintext | `src/ga_cli/commands/mp_secrets.py` | 2 | Open |
+| S4 | Medium | No input validation on numeric IDs | `src/ga_cli/commands/properties.py`, `data_streams.py`, etc. | 2 | Open |
+| S5 | Medium | No credential file permission check on load | `src/ga_cli/auth/credentials.py` | 2 | Open |
+| S6 | Medium | Update check file uses default permissions | `src/ga_cli/commands/upgrade_cmd.py` | 3 | Open |
+| S7 | Low | Silent exception swallowing in update check | `src/ga_cli/commands/upgrade_cmd.py` | 3 | Open |
+| S8 | Low | TOCTOU in OAuth flow file check | `src/ga_cli/auth/oauth.py` | 3 | Open |
+| S9 | Low | No dependency vulnerability scanning in CI | `.github/workflows/ci.yml` | 3 | Open |
 
 ---
 
 ## Phase 1: Critical — Before Publishing
 
-### S1: Rotate OAuth Credentials
+### S1: Verify Local client_secret.json Not in Git History
 
-**Problem:** `client_secret.json` in the repo root contains a live OAuth client ID and secret (`779984266832-...`). Even though it's in `.gitignore`, the credentials should be considered compromised if anyone has ever had access to the working directory.
+**Problem:** `client_secret.json` in the repo root contains a live OAuth client ID and secret for development. Even though it's in `.gitignore`, verify it was never committed.
+
+**Severity downgraded** from Critical to Medium: since the published package no longer ships with embedded credentials (users provide their own), the `client_secret.json` is only a development artifact. The risk is limited to accidental git history exposure.
 
 **Steps:**
 
-1. Go to [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials)
-2. Select project `daidalytics-ga-cli`
-3. Delete the existing OAuth 2.0 client ID
-4. Create a new OAuth 2.0 client ID (Desktop application type)
-5. Download the new `client_secret.json` and place it in the repo root
-6. Update GitHub Actions secrets `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` to match
-7. Delete the old `client_secret.json` from disk
+1. Run `git log --all --full-history -- client_secret.json` to verify it was never committed
+2. If it was committed, use `BFG Repo Cleaner` to remove from history before making repo public
+3. Rotate the client secret in Google Cloud Console if it was ever exposed
 
-**Verification:** Run `uv run ga auth login` and confirm the OAuth flow works with the new credentials.
+**Verification:** `git log --all --full-history -- client_secret.json` returns no results.
 
 ---
 
-### S2: Harden OAuth Client Configuration
+### S2: ~~Client Secret Extractable from Published Package~~ — RESOLVED
 
-**Problem:** The release workflow in `.github/workflows/release.yml` (lines 23–25) uses `sed` to inject `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` into `src/ga_cli/config/constants.py` at build time. The resulting wheel ships these values in plaintext — anyone can extract them with `unzip *.whl`.
+**Status: Resolved by design.**
 
-This is an inherent limitation of desktop OAuth apps (Google's own `gcloud` CLI does the same). The client secret is **not** a user secret — it identifies the application, not the user. However, the blast radius should be minimized.
+The CLI no longer ships with embedded OAuth credentials. Users provide their own GCP OAuth client ID and secret via:
+- `client_secret.json` in `~/.config/ga-cli/`
+- `GA_CLI_CLIENT_ID` / `GA_CLI_CLIENT_SECRET` environment variables
 
-**Steps:**
+This eliminates:
+- The `sed` injection step in the release workflow
+- The `__OAUTH_CLIENT_ID__` / `__OAUTH_CLIENT_SECRET__` placeholders in `constants.py`
+- The `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` GitHub Actions secrets
+- The risk of secrets being extracted from published wheels
 
-1. Ensure the OAuth client is configured as **Desktop** application type (not Web)
-2. Verify redirect URI is restricted to `http://localhost` only
-3. Confirm OAuth consent screen scopes are the minimum required
-4. Consider adding a rate limit or abuse-detection note in the Google Cloud Console
-5. Document in the README that the embedded client ID is intentionally public (this is standard for desktop OAuth apps)
-
-**Verification:**
-
-```bash
-# After building, inspect the wheel to confirm only expected secrets are present
-uv build
-unzip -p dist/*.whl ga_cli/config/constants.py | grep -E 'CLIENT_ID|CLIENT_SECRET'
-# Should show the placeholders (in dev) or the injected values (in release)
-```
+**No action required.**
 
 ---
 
@@ -217,8 +208,8 @@ except FileNotFoundError:
 
 ## Checklist
 
-- [ ] **S1** — Rotate OAuth credentials in Google Cloud Console
-- [ ] **S2** — Verify OAuth client is Desktop type with localhost-only redirect
+- [ ] **S1** — Verify `client_secret.json` never committed to git history; rotate if exposed
+- [x] **S2** — ~~Embedded secrets in package~~ → Resolved: users provide their own credentials
 - [ ] **S3** — Mask MP secrets in table output, add `--show-secrets` flag
 - [ ] **S4** — Add numeric ID validation helper and apply to all commands
 - [ ] **S5** — Add permission check on credential file load
