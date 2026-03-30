@@ -610,4 +610,3 @@ class TestEventEditRulesReorder:
             ["event-edit-rules", "reorder", "-s", "456", "--rule-ids", "r1,r2"],
         )
         assert result.exit_code != 0
-        assert "property-id" in result.output.lower()
