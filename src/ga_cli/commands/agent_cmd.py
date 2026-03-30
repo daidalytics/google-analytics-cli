@@ -190,6 +190,16 @@ ga calculated-metrics delete -p PROPERTY_ID -m METRIC_ID --yes
 ```
 Metric units: `STANDARD`, `CURRENCY`, `FEET`, `METERS`, `KILOMETERS`, `MILES`, `MILLISECONDS`, `SECONDS`, `MINUTES`, `HOURS`
 
+### Event Create Rules (alpha)
+```bash
+ga event-create-rules list -p PROPERTY_ID -s STREAM_ID [-o json]
+ga event-create-rules get -p PROPERTY_ID -s STREAM_ID -r RULE_ID [-o json]
+ga event-create-rules create -p PROPERTY_ID -s STREAM_ID --config rule.json [-o json]
+ga event-create-rules update -p PROPERTY_ID -s STREAM_ID -r RULE_ID --config update.json [-o json]
+ga event-create-rules delete -p PROPERTY_ID -s STREAM_ID -r RULE_ID --yes
+```
+Requires both `--property-id` and `--stream-id`. Create/update use `--config` JSON with `destinationEvent`, `eventConditions`, `sourceCopyParameters`, and `parameterMutations`.
+
 ### Reports
 ```bash
 ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE [--limit N] [-o json]
@@ -485,6 +495,20 @@ ga calculated-metrics delete -p PROPERTY_ID -m METRIC_ID --yes
 - Formula syntax uses `{{metricName}}` placeholders, e.g., `"{{totalRevenue}} / {{totalUsers}}"`
 - Metric units: `STANDARD`, `CURRENCY`, `FEET`, `METERS`, `KILOMETERS`, `MILES`, `MILLISECONDS`, `SECONDS`, `MINUTES`, `HOURS`
 - `calculatedMetricId` and `metricUnit` cannot be changed after creation
+- Uses v1alpha Admin API
+
+## Event Create Rules (alpha)
+Create new events based on conditions matched against incoming events.
+```bash
+ga event-create-rules list -p PROPERTY_ID -s STREAM_ID [-o json]
+ga event-create-rules get -p PROPERTY_ID -s STREAM_ID -r RULE_ID [-o json]
+ga event-create-rules create -p PROPERTY_ID -s STREAM_ID --config rule.json [-o json]
+ga event-create-rules update -p PROPERTY_ID -s STREAM_ID -r RULE_ID --config update.json [-o json]
+ga event-create-rules delete -p PROPERTY_ID -s STREAM_ID -r RULE_ID --yes
+```
+- Requires both `--property-id` and `--stream-id` (nested under data streams)
+- Create/update use `--config` JSON with: `destinationEvent`, `eventConditions` (1–10 conditions), `sourceCopyParameters`, `parameterMutations` (max 20)
+- Condition comparison types: `EQUALS`, `CONTAINS`, `STARTS_WITH`, `ENDS_WITH`, `GREATER_THAN`, `LESS_THAN`, `REGULAR_EXPRESSION`, plus case-insensitive variants
 - Uses v1alpha Admin API
 """
 
