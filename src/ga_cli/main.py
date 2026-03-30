@@ -11,6 +11,7 @@ from .commands.audiences import audiences_app
 from .commands.auth_cmd import auth_app
 from .commands.bigquery_links import bigquery_links_app
 from .commands.calculated_metrics import calculated_metrics_app
+from .commands.channel_groups import channel_groups_app
 from .commands.completions_cmd import completions_app
 from .commands.config_cmd import config_app
 from .commands.custom_dimensions import custom_dimensions_app
@@ -46,6 +47,7 @@ app.add_typer(annotations_app, name="annotations")
 app.add_typer(audiences_app, name="audiences")
 app.add_typer(bigquery_links_app, name="bigquery-links")
 app.add_typer(calculated_metrics_app, name="calculated-metrics")
+app.add_typer(channel_groups_app, name="channel-groups")
 app.add_typer(firebase_links_app, name="firebase-links")
 app.add_typer(google_ads_links_app, name="google-ads-links")
 app.add_typer(key_events_app, name="key-events")

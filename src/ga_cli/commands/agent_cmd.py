@@ -170,6 +170,16 @@ ga bigquery-links delete -p PROPERTY_ID -l LINK_ID --yes
 ```
 `--project` and `--dataset-location` are immutable (set at creation only). `--export-streams` accepts comma-separated stream IDs; `--excluded-events` accepts comma-separated event names.
 
+### Channel Groups (alpha)
+```bash
+ga channel-groups list [-p PROPERTY_ID] [-o json]
+ga channel-groups get -p PROPERTY_ID -g GROUP_ID [-o json]
+ga channel-groups create -p PROPERTY_ID --config channel_group.json [-o json]
+ga channel-groups update -p PROPERTY_ID -g GROUP_ID --config update.json [-o json]
+ga channel-groups delete -p PROPERTY_ID -g GROUP_ID --yes
+```
+Create/update use `--config` JSON file (complex grouping rules with filter expressions). Max 50 rules per group.
+
 ### Calculated Metrics (alpha)
 ```bash
 ga calculated-metrics list [-p PROPERTY_ID] [-o json]
@@ -446,6 +456,21 @@ ga bigquery-links delete -p PROPERTY_ID -l LINK_ID --yes
 - `--project` and `--dataset-location` are immutable (set at creation only)
 - `--export-streams` accepts comma-separated data stream IDs
 - `--excluded-events` accepts comma-separated event names
+- Uses v1alpha Admin API
+
+## Channel Groups (alpha)
+Custom channel groupings for categorizing traffic sources.
+```bash
+ga channel-groups list [-p PROPERTY_ID] [-o json]
+ga channel-groups get -p PROPERTY_ID -g GROUP_ID [-o json]
+ga channel-groups create -p PROPERTY_ID --config channel_group.json [-o json]
+ga channel-groups update -p PROPERTY_ID -g GROUP_ID --config update.json [-o json]
+ga channel-groups delete -p PROPERTY_ID -g GROUP_ID --yes
+```
+- Create/update use `--config` JSON file — grouping rules have nested filter expressions
+- Maximum 50 grouping rules per channel group
+- `displayName` (max 80 chars), `description`, `groupingRule`, and `primary` are updatable
+- `systemDefined` channel groups (Google defaults) are read-only
 - Uses v1alpha Admin API
 
 ## Calculated Metrics (alpha)
