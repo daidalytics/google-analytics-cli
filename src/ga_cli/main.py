@@ -2,6 +2,7 @@
 
 import typer
 
+from .commands.access_bindings import access_bindings_app
 from .commands.access_reports import access_reports_app
 from .commands.account_summaries import account_summaries_app
 from .commands.accounts import accounts_app
@@ -44,6 +45,7 @@ app.add_typer(custom_dimensions_app, name="custom-dimensions")
 app.add_typer(custom_metrics_app, name="custom-metrics")
 app.add_typer(data_retention_app, name="data-retention")
 app.add_typer(data_streams_app, name="data-streams")
+app.add_typer(access_bindings_app, name="access-bindings")
 app.add_typer(access_reports_app, name="access-reports")
 app.add_typer(annotations_app, name="annotations")
 app.add_typer(audiences_app, name="audiences")

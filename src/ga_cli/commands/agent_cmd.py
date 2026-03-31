@@ -140,6 +140,16 @@ ga firebase-links delete -p PROPERTY_ID --link-id ID --yes
 ```
 No `get` or `update` methods. A property can have at most one Firebase link.
 
+### Access Bindings (alpha)
+```bash
+ga access-bindings list (-a ACCOUNT_ID | -p PROPERTY_ID) [-o json]
+ga access-bindings get (-a ACCOUNT_ID | -p PROPERTY_ID) -b BINDING_ID [-o json]
+ga access-bindings create (-a ACCOUNT_ID | -p PROPERTY_ID) --user EMAIL --roles viewer,editor [-o json]
+ga access-bindings update (-a ACCOUNT_ID | -p PROPERTY_ID) -b BINDING_ID --roles viewer [-o json]
+ga access-bindings delete (-a ACCOUNT_ID | -p PROPERTY_ID) -b BINDING_ID --yes
+```
+Requires either `--account-id` or `--property-id` (not both). Roles: viewer, analyst, editor, admin, no-cost-data, no-revenue-data.
+
 ### Annotations (alpha)
 ```bash
 ga annotations list [-p PROPERTY_ID] [-o json]
@@ -437,6 +447,22 @@ ga firebase-links delete -p PROPERTY_ID --link-id ID --yes
 ```
 - No `get` or `update` methods
 - A property can have at most one Firebase link
+
+## Access Bindings (alpha)
+Manage user-role assignments at account or property level.
+```bash
+ga access-bindings list (-a ACCOUNT_ID | -p PROPERTY_ID) [-o json]
+ga access-bindings get (-a ACCOUNT_ID | -p PROPERTY_ID) -b BINDING_ID [-o json]
+ga access-bindings create (-a ACCOUNT_ID | -p PROPERTY_ID) --user EMAIL --roles viewer,editor [-o json]
+ga access-bindings update (-a ACCOUNT_ID | -p PROPERTY_ID) -b BINDING_ID --roles viewer [-o json]
+ga access-bindings delete (-a ACCOUNT_ID | -p PROPERTY_ID) -b BINDING_ID --yes
+```
+- Requires either `--account-id` (`-a`) or `--property-id` (`-p`), not both
+- `--property-id` falls back to config default if not explicitly provided
+- Valid roles: `viewer`, `analyst`, `editor`, `admin`, `no-cost-data`, `no-revenue-data`
+- Short role names (e.g. `viewer`) are auto-prefixed to `predefinedRoles/viewer`
+- Full role names (`predefinedRoles/viewer`) also accepted
+- Uses v1alpha Admin API
 
 ## Annotations (alpha)
 Annotations mark specific dates on GA4 reports with contextual notes.
