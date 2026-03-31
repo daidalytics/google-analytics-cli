@@ -221,6 +221,14 @@ ga event-edit-rules reorder -p PROPERTY_ID -s STREAM_ID --rule-ids r1,r2,r3
 ```
 Requires both `--property-id` and `--stream-id`. Create/update use `--config` JSON with `displayName`, `eventConditions`, and `parameterMutations`. Reorder requires all rule IDs in desired processing order.
 
+### Property Settings (alpha)
+```bash
+ga property-settings attribution [-p PROPERTY_ID] [--attribution-model MODEL] [--acquisition-lookback VAL] [--other-lookback VAL] [--ads-export-scope VAL] [-o json]
+ga property-settings google-signals [-p PROPERTY_ID] [--state GOOGLE_SIGNALS_ENABLED|GOOGLE_SIGNALS_DISABLED] [-o json]
+ga property-settings enhanced-measurement [-p PROPERTY_ID] -s STREAM_ID [--scrolls/--no-scrolls] [--outbound-clicks/--no-outbound-clicks] [...] [-o json]
+```
+Get/set hybrid: no update flags = GET, any update flag = PATCH. Enhanced measurement requires `--stream-id`.
+
 ### Reports
 ```bash
 ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE [--limit N] [-o json]
@@ -563,6 +571,39 @@ ga event-edit-rules reorder -p PROPERTY_ID -s STREAM_ID --rule-ids r1,r2,r3
 - Set `parameter` to `event_name` in a mutation to rename the event in place
 - `reorder` requires all rule IDs in the desired processing order (comma-separated)
 - `processingOrder` is output-only (set by the API, changed via `reorder`)
+- Uses v1alpha Admin API
+
+## Property Settings (alpha)
+Get/set hybrid commands for property-level singleton settings. No update flags = GET current settings. Any update flag = PATCH and display result.
+
+### Attribution Settings
+```bash
+ga property-settings attribution [-p PROPERTY_ID] [-o json]
+ga property-settings attribution -p PROPERTY_ID --attribution-model PAID_AND_ORGANIC_CHANNELS_DATA_DRIVEN
+ga property-settings attribution -p PROPERTY_ID --acquisition-lookback ACQUISITION_CONVERSION_EVENT_LOOKBACK_WINDOW_7_DAYS --other-lookback OTHER_CONVERSION_EVENT_LOOKBACK_WINDOW_60_DAYS
+ga property-settings attribution -p PROPERTY_ID --ads-export-scope PAID_AND_ORGANIC_CHANNELS
+```
+- `--attribution-model`: `PAID_AND_ORGANIC_CHANNELS_DATA_DRIVEN`, `PAID_AND_ORGANIC_CHANNELS_LAST_CLICK`, `GOOGLE_PAID_CHANNELS_LAST_CLICK`
+- `--acquisition-lookback`: `ACQUISITION_CONVERSION_EVENT_LOOKBACK_WINDOW_7_DAYS`, `ACQUISITION_CONVERSION_EVENT_LOOKBACK_WINDOW_30_DAYS`
+- `--other-lookback`: `OTHER_CONVERSION_EVENT_LOOKBACK_WINDOW_30_DAYS`, `OTHER_CONVERSION_EVENT_LOOKBACK_WINDOW_60_DAYS`, `OTHER_CONVERSION_EVENT_LOOKBACK_WINDOW_90_DAYS`
+- `--ads-export-scope`: `NOT_SELECTED_YET`, `PAID_AND_ORGANIC_CHANNELS`, `GOOGLE_PAID_CHANNELS`
+
+### Google Signals Settings
+```bash
+ga property-settings google-signals [-p PROPERTY_ID] [-o json]
+ga property-settings google-signals -p PROPERTY_ID --state GOOGLE_SIGNALS_ENABLED
+```
+- `--state`: `GOOGLE_SIGNALS_ENABLED`, `GOOGLE_SIGNALS_DISABLED`
+- `consent` is output-only (Terms of Service acceptance status)
+
+### Enhanced Measurement Settings
+```bash
+ga property-settings enhanced-measurement -p PROPERTY_ID -s STREAM_ID [-o json]
+ga property-settings enhanced-measurement -p PROPERTY_ID -s STREAM_ID --no-scrolls --form-interactions
+```
+- Requires `--stream-id` (web data stream only)
+- Boolean toggles: `--stream-enabled/--no-stream-enabled`, `--scrolls/--no-scrolls`, `--outbound-clicks/--no-outbound-clicks`, `--site-search/--no-site-search`, `--video-engagement/--no-video-engagement`, `--file-downloads/--no-file-downloads`, `--page-changes/--no-page-changes`, `--form-interactions/--no-form-interactions`
+- String params: `--search-query-parameter`, `--uri-query-parameter`
 - Uses v1alpha Admin API
 """
 

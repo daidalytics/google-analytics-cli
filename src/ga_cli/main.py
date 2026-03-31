@@ -26,6 +26,7 @@ from .commands.google_ads_links import google_ads_links_app
 from .commands.key_events import key_events_app
 from .commands.mp_secrets import mp_secrets_app
 from .commands.properties import properties_app
+from .commands.property_settings import property_settings_app
 from .commands.reports import reports_app
 from .commands.upgrade_cmd import upgrade_app
 
@@ -58,6 +59,7 @@ app.add_typer(firebase_links_app, name="firebase-links")
 app.add_typer(google_ads_links_app, name="google-ads-links")
 app.add_typer(key_events_app, name="key-events")
 app.add_typer(mp_secrets_app, name="mp-secrets")
+app.add_typer(property_settings_app, name="property-settings")
 app.add_typer(reports_app, name="reports")
 app.add_typer(agent_app, name="agent")
 app.add_typer(upgrade_app, name="upgrade")
