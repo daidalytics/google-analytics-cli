@@ -127,6 +127,7 @@ def get_data_alpha_client() -> Resource:
             "analyticsdata",
             "v1alpha",
             credentials=creds,
+            static_discovery=False,
         )
     return _cached_data_alpha_client
 

@@ -5,7 +5,7 @@ from typing import Optional
 import questionary
 import typer
 
-from ..api.client import get_admin_client
+from ..api.client import get_admin_client, get_data_alpha_client
 from ..config.store import get_effective_value
 from ..utils import handle_error, info, output, require_options, success
 from ..utils.pagination import paginate_all
@@ -221,5 +221,70 @@ def acknowledge_udc_cmd(
         success(f"User data collection acknowledged for property {effective_property}.")
     except typer.Exit:
         raise
+    except Exception as e:
+        handle_error(e)
+
+
+def _format_quota_category(key: str) -> str:
+    """Convert API field name to human-readable label (e.g. 'tokensPerDay' -> 'Tokens Per Day')."""
+    import re
+
+    # Split on camelCase boundaries
+    words = re.sub(r"([a-z])([A-Z])", r"\1 \2", key)
+    return words.title()
+
+
+@properties_app.command("quotas")
+def quotas_cmd(
+    property_id: Optional[str] = typer.Option(
+        None, "--property-id", "-p", help="Property ID (numeric)"
+    ),
+    output_format: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output format (json, table, compact)"
+    ),
+):
+    """Show API quota usage for a property."""
+    try:
+        effective_property = get_effective_value(property_id, "default_property_id")
+        require_options({"property_id": effective_property}, ["property_id"])
+        effective_format = get_effective_value(output_format, "output_format") or "table"
+
+        data_alpha = get_data_alpha_client()
+        result = (
+            data_alpha.properties()
+            .getPropertyQuotasSnapshot(
+                name=f"properties/{effective_property}/propertyQuotasSnapshot"
+            )
+            .execute()
+        )
+
+        if effective_format != "table":
+            output(result, effective_format)
+            return
+
+        rows = []
+        for category_key, category_value in result.items():
+            if not isinstance(category_value, dict):
+                continue
+            category_label = _format_quota_category(category_key)
+            for metric_key, metric_value in category_value.items():
+                if isinstance(metric_value, dict) and "remaining" in metric_value:
+                    rows.append({
+                        "category": category_label,
+                        "metric": _format_quota_category(metric_key),
+                        "consumed": str(metric_value.get("consumed", 0)),
+                        "remaining": str(metric_value.get("remaining", 0)),
+                    })
+
+        if not rows:
+            info("No quota data available.")
+        else:
+            output(
+                rows,
+                effective_format,
+                columns=["category", "metric", "consumed", "remaining"],
+                headers=["Quota Category", "Metric", "Consumed", "Remaining"],
+            )
+
     except Exception as e:
         handle_error(e)

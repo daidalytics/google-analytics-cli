@@ -437,3 +437,97 @@ class TestPropertiesAcknowledgeUdc:
 
         assert result.exit_code == 1
         assert "Permission denied" in result.output
+
+
+SAMPLE_QUOTAS_RESPONSE = {
+    "corePropertyQuota": {
+        "tokensPerDay": {"consumed": 500, "remaining": 24500},
+        "tokensPerHour": {"consumed": 50, "remaining": 4950},
+        "concurrentRequests": {"consumed": 2, "remaining": 8},
+        "serverErrorsPerProjectPerHour": {"consumed": 0, "remaining": 10},
+        "potentiallyThresholdedRequestsPerHour": {"consumed": 1, "remaining": 119},
+    },
+}
+
+
+def _mock_data_alpha_client(quotas_response=None):
+    """Create a mock Data Alpha API client for quotas."""
+    mock_client = MagicMock()
+    snapshot = mock_client.properties.return_value.getPropertyQuotasSnapshot
+    snapshot.return_value.execute.return_value = (
+        SAMPLE_QUOTAS_RESPONSE if quotas_response is None else quotas_response
+    )
+    return mock_client
+
+
+class TestPropertiesQuotas:
+    def test_quotas_table_output(self):
+        mock_client = _mock_data_alpha_client()
+
+        with patch("ga_cli.commands.properties.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["properties", "quotas", "-p", "111111"])
+
+        assert result.exit_code == 0
+        assert "Tokens Per Day" in result.output
+        assert "Tokens Per Hour" in result.output
+        assert "Concurrent Requests" in result.output
+        assert "500" in result.output
+        assert "24500" in result.output
+
+    def test_quotas_json_output(self):
+        mock_client = _mock_data_alpha_client()
+
+        with patch("ga_cli.commands.properties.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["properties", "quotas", "-p", "111111", "-o", "json"])
+
+        assert result.exit_code == 0
+        assert "tokensPerDay" in result.output
+        assert "500" in result.output
+
+    def test_quotas_uses_config_default(self):
+        save_config(UserConfig(default_property_id="111111"))
+        mock_client = _mock_data_alpha_client()
+
+        with patch("ga_cli.commands.properties.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["properties", "quotas"])
+
+        assert result.exit_code == 0
+        assert "Tokens Per Day" in result.output
+
+    def test_quotas_missing_property_id(self):
+        result = runner.invoke(app, ["properties", "quotas"])
+
+        assert result.exit_code != 0
+        assert "property-id" in result.output.lower()
+
+    def test_quotas_api_error(self):
+        mock_client = MagicMock()
+        snapshot = mock_client.properties.return_value.getPropertyQuotasSnapshot
+        snapshot.return_value.execute.side_effect = (
+            Exception("Quota API error")
+        )
+
+        with patch("ga_cli.commands.properties.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["properties", "quotas", "-p", "111111"])
+
+        assert result.exit_code == 1
+        assert "Quota API error" in result.output
+
+    def test_quotas_empty_response(self):
+        mock_client = _mock_data_alpha_client(quotas_response={})
+
+        with patch("ga_cli.commands.properties.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["properties", "quotas", "-p", "111111"])
+
+        assert result.exit_code == 0
+        assert "No quota data" in result.output
+
+    def test_quotas_calls_correct_endpoint(self):
+        mock_client = _mock_data_alpha_client()
+
+        with patch("ga_cli.commands.properties.get_data_alpha_client", return_value=mock_client):
+            runner.invoke(app, ["properties", "quotas", "-p", "999"])
+
+        mock_client.properties.return_value.getPropertyQuotasSnapshot.assert_called_once_with(
+            name="properties/999/propertyQuotasSnapshot"
+        )

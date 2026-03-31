@@ -363,6 +363,17 @@ ga reports metadata -p 987654321 --type metrics -o json     # Only metrics
 ga reports metadata -p 987654321 --search page -o json      # Search by name
 ```
 
+## Funnel Reports (v1alpha)
+Run funnel analysis using a JSON config file with step definitions:
+```bash
+ga reports funnel -p 987654321 -c funnel_config.json -o json
+ga reports funnel -p 987654321 -c funnel_config.json        # Table output
+```
+- Config JSON is passed as the full request body (minus `property`)
+- Must contain a `funnel` object with a non-empty `steps` array
+- Date ranges go in the config JSON (no `--start-date`/`--end-date` flags)
+- Table columns: Step Name, Active Users, Completion Rate, Abandonment Rate
+
 **Note**: `ga reports build` requires interactive input — avoid in automation. Use `ga reports run` instead.
 """
 
@@ -375,8 +386,10 @@ ga properties get [-p PROPERTY_ID] [-o json]
 ga properties create -a ACCOUNT_ID --name "Name" [--timezone TZ] [--currency CODE]
 ga properties update -p PROPERTY_ID [--name NAME] [--timezone TZ] [--currency CODE] [--industry CAT]
 ga properties delete -p PROPERTY_ID --yes
+ga properties quotas -p PROPERTY_ID [-o json]
 ```
 - Updatable fields: `displayName`, `timeZone`, `currencyCode`, `industryCategory`
+- `quotas` shows API quota usage (v1alpha Data API): Tokens Per Day/Hour, Concurrent Requests, etc.
 
 ## Custom Dimensions
 ```bash

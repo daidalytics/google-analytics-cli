@@ -11,7 +11,7 @@ from typing import Optional
 import questionary
 import typer
 
-from ..api.client import get_data_client
+from ..api.client import get_data_alpha_client, get_data_client
 from ..config.store import get_effective_value
 from ..utils import console, handle_error, info, output, require_options
 
@@ -539,6 +539,117 @@ def batch_cmd(
             output(rows, effective_format, columns=columns, headers=headers)
             if row_count > 0:
                 console.print(f"[dim]{row_count} total rows[/dim]")
+
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        handle_error(e)
+
+
+def _transform_funnel_rows(result: dict) -> tuple[list[dict], list[str], list[str]]:
+    """Transform a funnel report response into flat rows for table display."""
+    rows = []
+    funnel_table = result.get("funnelTable", {})
+
+    dim_headers = [h.get("name", "") for h in funnel_table.get("dimensionHeaders", [])]
+    raw_met_headers = [h.get("name", "") for h in funnel_table.get("metricHeaders", [])]
+
+    for row in funnel_table.get("rows", []):
+        entry = {}
+        for i, name in enumerate(dim_headers):
+            vals = row.get("dimensionValues", [])
+            entry[name] = vals[i].get("value", "") if i < len(vals) else ""
+        metric_vals = row.get("metricValues", [])
+        # Deduplicate metric headers — API may return duplicates; use
+        # only as many headers as there are values in this row.
+        met_headers = raw_met_headers[:len(metric_vals)]
+        # Make header keys unique by appending suffix for duplicates
+        seen: dict[str, int] = {}
+        unique_headers: list[str] = []
+        for name in met_headers:
+            if name in seen:
+                seen[name] += 1
+                unique_headers.append(f"{name}_{seen[name]}")
+            else:
+                seen[name] = 0
+                unique_headers.append(name)
+        for i, name in enumerate(unique_headers):
+            entry[name] = metric_vals[i].get("value", "") if i < len(metric_vals) else ""
+        rows.append(entry)
+
+    columns = [
+        "funnelStepName", "activeUsers",
+        "funnelStepCompletionRate", "funnelStepAbandonments",
+        "funnelStepAbandonmentRate",
+    ]
+    headers = ["Step Name", "Active Users", "Completion Rate", "Abandonments", "Abandonment Rate"]
+
+    # Only include columns that actually exist in the data
+    if rows:
+        available = set(rows[0].keys())
+        filtered = [(c, h) for c, h in zip(columns, headers) if c in available]
+        # Add any extra columns not in our predefined list
+        for key in rows[0]:
+            if key not in columns:
+                filtered.append((key, key))
+        columns, headers = zip(*filtered) if filtered else ([], [])
+        columns, headers = list(columns), list(headers)
+
+    return rows, columns, headers
+
+
+@reports_app.command("funnel")
+def funnel_cmd(
+    property_id: Optional[str] = typer.Option(
+        None, "--property-id", "-p", help="Property ID (numeric)"
+    ),
+    config_file: str = typer.Option(
+        ..., "--config", "-c", help="Path to JSON funnel config file"
+    ),
+    output_format: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output format (json, table, compact)"
+    ),
+):
+    """Run a funnel report (v1alpha)."""
+    try:
+        effective_property = get_effective_value(property_id, "default_property_id")
+        require_options({"property_id": effective_property}, ["property_id"])
+        effective_format = get_effective_value(output_format, "output_format") or "table"
+
+        config_path = Path(config_file)
+        if not config_path.exists():
+            raise typer.BadParameter(f"Config file not found: {config_file}")
+
+        try:
+            config = json.loads(config_path.read_text())
+        except json.JSONDecodeError as exc:
+            raise typer.BadParameter(f"Invalid JSON in config file: {exc}")
+
+        funnel = config.get("funnel")
+        if not isinstance(funnel, dict) or not funnel.get("steps"):
+            raise typer.BadParameter(
+                "Config must contain a 'funnel' object with a non-empty 'steps' array."
+            )
+
+        data_alpha = get_data_alpha_client()
+        result = (
+            data_alpha.properties()
+            .runFunnelReport(
+                property=f"properties/{effective_property}",
+                body=config,
+            )
+            .execute()
+        )
+
+        if effective_format != "table":
+            output(result, effective_format)
+            return
+
+        rows, columns, headers = _transform_funnel_rows(result)
+        if not rows:
+            info("No funnel data returned.")
+        else:
+            output(rows, effective_format, columns=columns, headers=headers)
 
     except typer.BadParameter:
         raise
