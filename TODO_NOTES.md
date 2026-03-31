@@ -19,3 +19,5 @@
 | 37 | WS-AA14: Rollup Source Links | 4 | Rollup properties |
 | 38 | WS-AA15: Subproperty Event Filters | 5 | Subproperty management |
 | 39 | WS-AA16: SKAdNetwork Schema | 5 | iOS attribution |
+
+Also not covered: batchRunPivotReports and accounts.runAccessReport / accounts.searchChangeHistoryEvents / accounts.getDataSharingSettings at the account level (property-level equivalents are done).
