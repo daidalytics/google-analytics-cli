@@ -28,14 +28,15 @@ def _resolve_parent(
     Returns (parent_string, parent_type) where parent_type is
     "accounts" or "properties".
     """
-    effective_property = get_effective_value(property_id, "default_property_id")
-
-    if account_id and effective_property:
+    if account_id and property_id:
         raise typer.BadParameter(
             "Provide either --account-id or --property-id, not both."
         )
     if account_id:
         return f"accounts/{account_id}", "accounts"
+
+    # Only fall back to config default when --account-id is not provided
+    effective_property = get_effective_value(property_id, "default_property_id")
     if effective_property:
         return f"properties/{effective_property}", "properties"
     raise typer.BadParameter(
@@ -80,10 +81,10 @@ def list_cmd(
             pageSize=500,
         )
 
-        # Format roles for table display
-        for b in bindings:
-            if "roles" in b:
-                b["_roles_display"] = _format_roles(b["roles"])
+        if effective_format != "json":
+            for b in bindings:
+                if "roles" in b:
+                    b["_roles_display"] = _format_roles(b["roles"])
 
         output(
             bindings,
