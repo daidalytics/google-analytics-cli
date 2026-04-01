@@ -340,14 +340,14 @@ git push origin v0.1.0rc1
 
 ### 7.1 Final Checklist
 
-- [ ] OAuth placeholder injection removed from constants.py and release.yml (Phase 1.4)
-- [ ] `ga agent guide --section setup` includes credential setup instructions (Phase 1.2)
-- [ ] Error message for missing credentials points to setup guide (Phase 1.3)
+- [x] OAuth placeholder injection removed from constants.py and release.yml (Phase 1.4)
+- [x] `ga agent guide --section setup` includes credential setup instructions (Phase 1.2)
+- [x] Error message for missing credentials points to setup guide (Phase 1.3)
 - [ ] PyPI pending publisher is configured (Phase 4.3)
 - [ ] GitHub environments `pypi` and `testpypi` exist (Phase 4.4)
-- [ ] Package name in pyproject.toml is `google-analytics-cli` (Phase 3.2)
-- [ ] Version in pyproject.toml is `0.1.0`
-- [ ] README has correct install + credential setup instructions (Phase 3.3)
+- [x] Package name in pyproject.toml is `google-analytics-cli` (Phase 3.2)
+- [x] Version in pyproject.toml is `0.1.0`
+- [x] README has correct install + credential setup instructions (Phase 3.3)
 - [ ] TestPyPI dry run succeeded (Phase 6)
 
 ### 7.2 Tag and Release
