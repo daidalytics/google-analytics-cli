@@ -13,18 +13,19 @@ This replaces ~300 lines of manual OAuth code in the GTM CLI.
 from __future__ import annotations
 
 import logging
+import os
 import webbrowser
 import wsgiref.simple_server
 import wsgiref.util
 from typing import Optional
 
 import requests
+import typer
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+from rich.panel import Panel
 
 from ..config.constants import (
-    GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET,
     OAUTH_CALLBACK_PORT,
     OAUTH_SCOPES,
     get_client_secret_path,
@@ -160,11 +161,13 @@ class _SilentRequestHandler(wsgiref.simple_server.WSGIRequestHandler):
 
 
 def _get_client_config() -> dict:
-    """Build the OAuth client config dict from env vars / constants."""
+    """Build the OAuth client config dict from env vars."""
+    client_id = os.environ.get("GA_CLI_CLIENT_ID", "")
+    client_secret = os.environ.get("GA_CLI_CLIENT_SECRET", "")
     return {
         "installed": {
-            "client_id": GOOGLE_CLIENT_ID,
-            "client_secret": GOOGLE_CLIENT_SECRET,
+            "client_id": client_id,
+            "client_secret": client_secret,
             "auth_uri": "https://accounts.google.com/o/oauth2/v2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "redirect_uris": [f"http://localhost:{OAUTH_CALLBACK_PORT}"],
@@ -179,7 +182,7 @@ def login() -> Credentials:
     exchanges the code for tokens, and saves credentials to disk.
 
     Raises:
-        ValueError: If client credentials are not configured.
+        typer.Exit: If client credentials are not configured.
         OSError: If the callback port is already in use.
     """
     client_secret_path = get_client_secret_path()
@@ -189,18 +192,32 @@ def login() -> Credentials:
             str(client_secret_path),
             scopes=OAUTH_SCOPES,
         )
-    else:
-        if GOOGLE_CLIENT_ID == "__OAUTH_CLIENT_ID__":
-            raise ValueError(
-                "OAuth client credentials not configured. "
-                "Either place a client_secret.json in "
-                f"{client_secret_path.parent} or set GA_CLI_CLIENT_ID "
-                "and GA_CLI_CLIENT_SECRET environment variables."
-            )
+    elif os.environ.get("GA_CLI_CLIENT_ID") and os.environ.get("GA_CLI_CLIENT_SECRET"):
         flow = InstalledAppFlow.from_client_config(
             _get_client_config(),
             scopes=OAUTH_SCOPES,
         )
+    else:
+        from ..utils.output import err_console
+
+        err_console.print(Panel(
+            "[bold]OAuth client credentials not found.[/bold]\n\n"
+            "GA CLI requires your own GCP OAuth credentials. "
+            "Choose one of the following:\n\n"
+            "[cyan]Option 1:[/cyan] Place a client_secret.json file in:\n"
+            f"  [green]{client_secret_path}[/green]\n\n"
+            "[cyan]Option 2:[/cyan] Set environment variables:\n"
+            "  [green]GA_CLI_CLIENT_ID[/green] and "
+            "[green]GA_CLI_CLIENT_SECRET[/green]\n\n"
+            "For step-by-step setup instructions, run:\n"
+            "  [bold yellow]ga agent guide --section setup[/bold yellow]\n\n"
+            "Create OAuth credentials in the GCP Console:\n"
+            "  APIs & Services > Credentials > Create OAuth client ID (Desktop app)",
+            title="[red]Missing Credentials[/red]",
+            border_style="red",
+            expand=False,
+        ))
+        raise typer.Exit(1)
 
     # Custom local server flow to serve a styled HTML success page
     wsgi_app = _HtmlRedirectWSGIApp(_SUCCESS_HTML)

@@ -12,6 +12,10 @@ agent_app = typer.Typer(name="agent", help="AI agent utilities", no_args_is_help
 
 _SECTION_OVERVIEW = r"""# GA CLI — AI Agent Quick Reference
 
+## Prerequisites
+GA CLI requires your own GCP OAuth credentials. Run `ga agent guide --section setup` for
+step-by-step instructions on creating a GCP project and OAuth client.
+
 ## Setup
 ```bash
 ga auth login                                  # OAuth (interactive)
@@ -303,7 +307,7 @@ ga data-streams list -o json | jq -r '.[].name' | grep -o '[0-9]*$'
 
 Debugging steps: `ga auth status -o json` → `ga config get` → `ga accounts list -o json` → `ga properties list -o json`
 
-Use `ga agent guide --section SECTION` for details on: `reports`, `admin`, `examples`
+Use `ga agent guide --section SECTION` for details on: `setup`, `reports`, `admin`, `examples`
 """
 
 _SECTION_REPORTS = r"""# Reports — Detailed Reference
@@ -651,7 +655,84 @@ wait
 ```
 """
 
+_SECTION_SETUP = r"""# Credential Setup — GCP OAuth Configuration
+
+GA CLI requires your own Google Cloud Platform OAuth credentials. This guide walks
+through creating them from scratch.
+
+## Step 1: Create or Select a GCP Project
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project (or select an existing one)
+3. Note your project ID
+
+## Step 2: Enable Required APIs
+
+In the GCP Console, go to **APIs & Services > Library** and enable:
+- **Google Analytics Admin API**
+- **Google Analytics Data API**
+
+Or via `gcloud`:
+```bash
+gcloud services enable analyticsadmin.googleapis.com analyticsdata.googleapis.com
+```
+
+## Step 3: Configure OAuth Consent Screen
+
+1. Go to **APIs & Services > OAuth consent screen**
+2. Choose **External** user type (or Internal if using Google Workspace)
+3. Fill in the required fields (app name, user support email, developer contact)
+4. No scopes need to be added manually — GA CLI requests them at login time
+5. For personal use, leave the app in **Testing** mode — it works for the project owner
+   and up to 100 added test users without Google verification
+
+## Step 4: Create OAuth Client ID
+
+1. Go to **APIs & Services > Credentials**
+2. Click **Create Credentials > OAuth client ID**
+3. Choose **Desktop app** as the application type
+4. Give it a name (e.g., "GA CLI")
+5. Click **Create** and download the JSON file
+
+## Step 5: Provide Credentials to GA CLI
+
+**Option A** — Place the downloaded JSON file (recommended):
+```bash
+mkdir -p ~/.config/ga-cli
+cp /path/to/downloaded/client_secret_*.json ~/.config/ga-cli/client_secret.json
+```
+
+**Option B** — Set environment variables:
+```bash
+export GA_CLI_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+export GA_CLI_CLIENT_SECRET="your-client-secret"
+```
+
+## Step 6: Authenticate
+
+```bash
+ga auth login
+```
+
+This opens your browser for Google OAuth consent and stores the token locally at
+`~/.config/ga-cli/credentials.json`.
+
+## Verification
+
+```bash
+ga auth status          # Check authentication state
+ga accounts list        # Verify API access
+```
+
+## Notes
+- **Testing mode** is sufficient for personal use — no Google verification needed
+- For team use, publish the consent screen to **Production** within your GCP project
+- Service account auth (`ga auth login --service-account /path/key.json`) does not
+  require OAuth credentials and works independently
+"""
+
 _SECTIONS = {
+    "setup": _SECTION_SETUP,
     "reports": _SECTION_REPORTS,
     "admin": _SECTION_ADMIN,
     "examples": _SECTION_EXAMPLES,

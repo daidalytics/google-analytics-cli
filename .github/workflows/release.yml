@@ -5,7 +5,21 @@ on:
     tags: ["v*"]
 
 jobs:
-  publish:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync
+      - name: Lint
+        run: uv run ruff check src/ tests/
+      - name: Run tests
+        run: uv run pytest
+
+  build:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -13,21 +27,49 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Install dependencies
-        run: uv sync
-
-      - name: Run tests
-        run: uv run pytest
-
-      - name: Inject OAuth credentials
-        run: |
-          sed -i 's/__OAUTH_CLIENT_ID__/${{ secrets.OAUTH_CLIENT_ID }}/' src/ga_cli/config/constants.py
-          sed -i 's/__OAUTH_CLIENT_SECRET__/${{ secrets.OAUTH_CLIENT_SECRET }}/' src/ga_cli/config/constants.py
-
       - name: Build
         run: uv build
 
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-testpypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Publish to TestPyPI
+        run: uv publish --index-url https://test.pypi.org/legacy/
+
+  publish-pypi:
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Publish to PyPI
         run: uv publish
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}

@@ -1,5 +1,5 @@
 [project]
-name = "ga-cli"
+name = "google-analytics-cli"
 version = "0.1.0"
 description = "Command-line interface for Google Analytics 4"
 readme = "README.md"

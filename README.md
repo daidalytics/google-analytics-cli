@@ -20,7 +20,20 @@ Manage GA4 accounts, properties, data streams, and run reports — all from your
 
 ## Installation
 
-### Quick install
+### From PyPI (recommended)
+
+```bash
+# pipx (recommended for CLI tools — isolated env)
+pipx install google-analytics-cli
+
+# uv
+uv tool install google-analytics-cli
+
+# pip
+pip install google-analytics-cli
+```
+
+### Quick install (script)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gunnargriese/ga-cli/master/install.sh | bash
@@ -174,8 +187,8 @@ ga completions fish > ~/.config/fish/completions/ga.fish
 | `GA_CLI_SERVICE_ACCOUNT` | Path to service account key file |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Standard GCP credential path (fallback) |
 | `GA_CLI_CONFIG_DIR` | Override config directory |
-| `GA_CLI_CLIENT_ID` | OAuth client ID (dev override) |
-| `GA_CLI_CLIENT_SECRET` | OAuth client secret (dev override) |
+| `GA_CLI_CLIENT_ID` | OAuth client ID (alternative to client_secret.json) |
+| `GA_CLI_CLIENT_SECRET` | OAuth client secret (alternative to client_secret.json) |
 | `NO_COLOR` | Disable colored output |
 
 ## CI/CD Integration
@@ -186,7 +199,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install GA CLI
-        run: pip install ga-cli
+        run: pip install google-analytics-cli
 
       - name: Export daily report
         run: |

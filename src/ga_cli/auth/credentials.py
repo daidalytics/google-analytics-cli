@@ -18,8 +18,6 @@ from typing import Optional
 from google.oauth2.credentials import Credentials
 
 from ..config.constants import (
-    GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET,
     OAUTH_SCOPES,
     get_config_dir,
     get_credentials_path,
@@ -75,8 +73,8 @@ def load_credentials() -> Optional[Credentials]:
         token=data.get("token"),
         refresh_token=data.get("refresh_token"),
         token_uri=data.get("token_uri", "https://oauth2.googleapis.com/token"),
-        client_id=data.get("client_id", GOOGLE_CLIENT_ID),
-        client_secret=data.get("client_secret", GOOGLE_CLIENT_SECRET),
+        client_id=data.get("client_id"),
+        client_secret=data.get("client_secret"),
         scopes=data.get("scopes", OAUTH_SCOPES),
     )
 

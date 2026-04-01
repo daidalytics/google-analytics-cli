@@ -21,12 +21,6 @@ OAUTH_SCOPES = [
 # OAuth callback server
 OAUTH_CALLBACK_PORT = 8085
 
-# OAuth client credentials
-# For development: set env vars. For production: embed at build time.
-GOOGLE_CLIENT_ID = os.environ.get("GA_CLI_CLIENT_ID", "__OAUTH_CLIENT_ID__")
-GOOGLE_CLIENT_SECRET = os.environ.get("GA_CLI_CLIENT_SECRET", "__OAUTH_CLIENT_SECRET__")
-
-
 # Configuration directory
 # Priority: GA_CLI_CONFIG_DIR env var > platformdirs (XDG-compliant)
 def get_config_dir() -> Path:

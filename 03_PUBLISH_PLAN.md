@@ -463,3 +463,86 @@ echo "Released v$NEW_VERSION — GitHub Actions will publish to PyPI"
 | Phase 8 (Post-launch) | 30 minutes | No |
 
 **You can publish to PyPI immediately** — no Google verification or consent screen setup needed on your end. Users handle their own GCP OAuth setup.
+
+---
+
+## Appendix: File-Level Implementation Plan
+
+Detailed breakdown of every file that needs to change for Phases 1, 3, and 5. Use this as the implementation checklist.
+
+### Files to Change (8 files)
+
+#### 1. `src/ga_cli/config/constants.py` — Remove OAuth constants
+
+- Delete `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (lines ~26–27) and the associated comment
+- These constants currently fall back to `__OAUTH_CLIENT_ID__` / `__OAUTH_CLIENT_SECRET__` placeholders — both are dead code once users provide their own credentials
+- The env var reads (`GA_CLI_CLIENT_ID`, `GA_CLI_CLIENT_SECRET`) move into the modules that actually use them (`oauth.py`, `credentials.py`)
+
+#### 2. `src/ga_cli/auth/oauth.py` — New credential resolution + Rich error panel
+
+- Remove `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` imports from `constants`
+- Update `_get_client_config()` to read `GA_CLI_CLIENT_ID` / `GA_CLI_CLIENT_SECRET` env vars directly (inline, no constants)
+- Replace the current `ValueError` raised when credentials are missing with a Rich `Panel` (from `rich.panel`) containing:
+  - **Title:** "OAuth client credentials not found"
+  - **Body:** The two credential options (`client_secret.json` file path or env vars), a pointer to `ga agent guide --section setup`, and a link to the GCP Console credentials page
+- Use `err_console` from `utils.output` to render the panel, then `raise typer.Exit(1)`
+
+#### 3. `src/ga_cli/auth/credentials.py` — Remove constant imports
+
+- Remove `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` imports
+- In `load_credentials()` (line ~78–79), the fallback for `client_id` / `client_secret` should become `None` instead of the old constants
+- **Rationale:** `save_credentials()` always writes `client_id` and `client_secret` from the actual OAuth flow's credentials object, so the fallback in `load_credentials()` is a dead path. Using `None` is safer than silently injecting a placeholder that would fail on token refresh anyway
+
+#### 4. `src/ga_cli/commands/agent_cmd.py` — Add `setup` section to agent guide
+
+- Add a `_SECTION_SETUP` constant with step-by-step GCP credential setup instructions:
+  1. Create a GCP project (or use existing)
+  2. Enable Google Analytics Admin API and Google Analytics Data API
+  3. Configure OAuth consent screen (Testing mode is fine for personal use)
+  4. Create OAuth 2.0 Client ID (Desktop application type)
+  5. Download `client_secret.json` and place in `~/.config/ga-cli/`
+  6. Alternative: set `GA_CLI_CLIENT_ID` and `GA_CLI_CLIENT_SECRET` env vars
+  7. Run `ga auth login`
+- Register `"setup"` in the `_SECTIONS` dict
+- In `_SECTION_OVERVIEW`, add a note pointing to `ga agent guide --section setup` for credential prerequisites
+
+#### 5. `.github/workflows/release.yml` — Remove credential injection, add OIDC
+
+- Remove the `sed` lines that inject `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` into `constants.py`
+- Split into 4 jobs: `test` → `build` → `publish-testpypi` → `publish-pypi`
+- Use OIDC trusted publishing (`permissions: id-token: write`) — zero secrets required
+- Build artifacts shared between jobs via `upload-artifact` / `download-artifact`
+- Full YAML is in Phase 5.1 above
+
+#### 6. `pyproject.toml` — Package rename
+
+- Change `name = "ga-cli"` to `name = "google-analytics-cli"`
+- Entry point (`ga = "ga_cli.main:run"`) stays the same — CLI command remains `ga`
+- URLs stay the same (GitHub repo name doesn't change)
+
+#### 7. `README.md` — Update install + credential docs
+
+- Change `pip install ga-cli` to `pip install google-analytics-cli` everywhere
+- Add `pipx install google-analytics-cli` and `uv tool install google-analytics-cli` as recommended install methods
+- Update the CI/CD example to use the new package name
+- Update the Environment Variables table: `GA_CLI_CLIENT_ID` / `GA_CLI_CLIENT_SECRET` are no longer "dev override" — they're a primary credential method (remove the "(dev override)" qualifier)
+
+#### 8. `CLAUDE.md` — Reflect new credential model
+
+- Remove the "OAuth placeholders" bullet from Key Conventions (`__OAUTH_CLIENT_ID__` and `__OAUTH_CLIENT_SECRET__` in constants.py are replaced at build time...)
+- Update "Auth priority" to document the new resolution order: `client_secret.json` → env vars → service account
+- Update CI/CD section: remove "Required GitHub secrets for release: `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `PYPI_TOKEN`" — no secrets are required (OIDC trusted publishing)
+
+### Files NOT Changing
+
+- **Tests** — `test_credentials.py` uses `"test-client-secret"` as literal test data in a mock fixture, not referencing the constants. No test changes needed.
+- **`main.py`** — No changes needed
+- **`auth/service_account.py`** — Unaffected (service account flow is independent)
+
+### Risk Areas
+
+| Area | Risk | Mitigation |
+|------|------|------------|
+| `credentials.py` fallback | When loading saved credentials from disk, the current code falls back to `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` if `client_id` / `client_secret` aren't in the JSON. Changing to `None` means old credential files missing those keys would fail on token refresh. | `save_credentials()` always writes `client_id` and `client_secret` from the flow's credentials object, so the fallback should never trigger. Changing to `None` makes this explicit rather than silently using a placeholder. |
+| Existing users | Anyone who installed a build with injected credentials and has a saved `credentials.json` | Not affected — their credentials file already has the real `client_id` / `client_secret` baked in from the original OAuth flow. |
+| Package rename | Users with `ga-cli` installed won't auto-upgrade to `google-analytics-cli` | Document in release notes. Both `pip install ga-cli` (old) and `pip install google-analytics-cli` (new) will work if the old name is never claimed on PyPI. |

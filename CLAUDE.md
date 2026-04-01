@@ -13,7 +13,7 @@ src/ga_cli/
 ├── __init__.py              # Package init, version via importlib.metadata
 ├── main.py                  # Typer app, registers 6 command groups
 ├── config/
-│   ├── constants.py         # OAuth scopes, placeholders, paths, pagination defaults
+│   ├── constants.py         # OAuth scopes, paths, pagination defaults
 │   └── store.py             # JSON config persistence (~/.config/ga-cli/config.json)
 ├── auth/
 │   ├── oauth.py             # OAuth 2.0 flow (InstalledAppFlow)
@@ -41,8 +41,8 @@ src/ga_cli/
 - **Entry point**: `ga = "ga_cli.main:run"` (defined in pyproject.toml)
 - **Config directory**: `~/.config/ga-cli/` via platformdirs, overridable with `GA_CLI_CONFIG_DIR` env var
 - **Output**: All read commands support `--output table|json` (default: table)
-- **Auth priority**: Service account credentials take precedence over OAuth
-- **OAuth placeholders**: `__OAUTH_CLIENT_ID__` and `__OAUTH_CLIENT_SECRET__` in constants.py are replaced at build time by the release workflow
+- **OAuth credentials**: Users provide their own GCP OAuth credentials via `client_secret.json` file or `GA_CLI_CLIENT_ID`/`GA_CLI_CLIENT_SECRET` env vars
+- **Auth priority**: `client_secret.json` > env vars > service account
 - **API clients**: Cached instances via `get_admin_client()` and `get_data_client()` in `api/client.py`
 
 ## Common commands
@@ -68,5 +68,4 @@ Tests live in `tests/` and run via `uv run pytest`.
 ## CI/CD
 
 - **CI** (`.github/workflows/ci.yml`): Runs on push/PR to master. Tests across Python 3.10, 3.12, 3.13. Lints with ruff.
-- **Release** (`.github/workflows/release.yml`): Triggered by `v*` tags. Injects OAuth credentials, builds, and publishes to PyPI.
-- Required GitHub secrets for release: `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `PYPI_TOKEN`
+- **Release** (`.github/workflows/release.yml`): Triggered by `v*` tags. Tests, builds, publishes to TestPyPI then PyPI via OIDC trusted publishing. No secrets required.
