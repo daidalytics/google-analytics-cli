@@ -1,5 +1,6 @@
 """Tests for data-retention commands (get, update)."""
 
+import re
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
@@ -7,6 +8,12 @@ from typer.testing import CliRunner
 from ga_cli.main import app
 
 runner = CliRunner()
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
 
 SAMPLE_SETTINGS = {
     "name": "properties/111111/dataRetentionSettings",
@@ -50,7 +57,7 @@ class TestDataRetentionGet:
         result = runner.invoke(app, ["data-retention", "get"])
 
         assert result.exit_code != 0
-        assert "property-id" in result.output.lower() or "missing" in result.output.lower()
+        assert "property-id" in _strip_ansi(result.output).lower()
 
     def test_get_api_error(self):
         mock_client = MagicMock()
@@ -193,7 +200,7 @@ class TestDataRetentionUpdate:
         )
 
         assert result.exit_code != 0
-        assert "property-id" in result.output.lower() or "missing" in result.output.lower()
+        assert "property-id" in _strip_ansi(result.output).lower()
 
     def test_update_api_error(self):
         mock_client = MagicMock()

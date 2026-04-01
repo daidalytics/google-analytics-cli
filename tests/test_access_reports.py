@@ -1,5 +1,6 @@
 """Tests for access-reports commands (run-account, run-property)."""
 
+import re
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
@@ -7,6 +8,12 @@ from typer.testing import CliRunner
 from ga_cli.main import app
 
 runner = CliRunner()
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
 
 SAMPLE_ACCESS_REPORT = {
     "dimensionHeaders": [
@@ -108,7 +115,7 @@ class TestAccessReportsRunAccount:
         result = runner.invoke(app, ["access-reports", "run-account"])
 
         assert result.exit_code != 0
-        assert "account-id" in result.output.lower() or "missing" in result.output.lower()
+        assert "account-id" in _strip_ansi(result.output).lower()
 
     def test_run_api_error(self):
         mock_client = MagicMock()
@@ -170,7 +177,7 @@ class TestAccessReportsRunProperty:
         result = runner.invoke(app, ["access-reports", "run-property"])
 
         assert result.exit_code != 0
-        assert "property-id" in result.output.lower() or "missing" in result.output.lower()
+        assert "property-id" in _strip_ansi(result.output).lower()
 
     def test_run_empty_results(self):
         empty_report = {"dimensionHeaders": [], "metricHeaders": [], "rows": []}
