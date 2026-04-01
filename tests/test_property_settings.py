@@ -11,7 +11,9 @@ runner = CliRunner()
 
 SAMPLE_ATTRIBUTION = {
     "name": "properties/123/attributionSettings",
-    "acquisitionConversionEventLookbackWindow": "ACQUISITION_CONVERSION_EVENT_LOOKBACK_WINDOW_30_DAYS",
+    "acquisitionConversionEventLookbackWindow": (
+        "ACQUISITION_CONVERSION_EVENT_LOOKBACK_WINDOW_30_DAYS"
+    ),
     "otherConversionEventLookbackWindow": "OTHER_CONVERSION_EVENT_LOOKBACK_WINDOW_90_DAYS",
     "reportingAttributionModel": "PAID_AND_ORGANIC_CHANNELS_DATA_DRIVEN",
     "adsWebConversionDataExportScope": "PAID_AND_ORGANIC_CHANNELS",
@@ -127,7 +129,8 @@ class TestAttributionSettings:
         assert "updated" in result.output.lower()
         props = mock_client.properties.return_value
         call_args = props.updateAttributionSettings.call_args[1]
-        assert call_args["body"]["reportingAttributionModel"] == "PAID_AND_ORGANIC_CHANNELS_LAST_CLICK"
+        expected = "PAID_AND_ORGANIC_CHANNELS_LAST_CLICK"
+        assert call_args["body"]["reportingAttributionModel"] == expected
         assert "reportingAttributionModel" in call_args["updateMask"]
 
     def test_update_multiple_fields(self):
@@ -325,7 +328,10 @@ class TestEnhancedMeasurementSettings:
         ):
             result = runner.invoke(
                 app,
-                ["property-settings", "enhanced-measurement", "-p", "123", "-s", "456", "-o", "json"],
+                [
+                    "property-settings", "enhanced-measurement",
+                    "-p", "123", "-s", "456", "-o", "json",
+                ],
             )
 
         assert result.exit_code == 0

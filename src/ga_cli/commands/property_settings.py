@@ -97,7 +97,11 @@ def attribution_cmd(
 
         if body:
             # Validate enums
-            _validate_enum(acquisition_lookback, _ACQUISITION_LOOKBACK_CHOICES, "--acquisition-lookback")
+            _validate_enum(
+                acquisition_lookback,
+                _ACQUISITION_LOOKBACK_CHOICES,
+                "--acquisition-lookback",
+            )
             _validate_enum(other_lookback, _OTHER_LOOKBACK_CHOICES, "--other-lookback")
             _validate_enum(attribution_model, _ATTRIBUTION_MODEL_CHOICES, "--attribution-model")
             _validate_enum(ads_export_scope, _ADS_EXPORT_SCOPE_CHOICES, "--ads-export-scope")
@@ -228,7 +232,10 @@ def enhanced_measurement_cmd(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
 ):
-    """Get or update enhanced measurement settings. With no update flags, displays current settings."""
+    """Get or update enhanced measurement settings.
+
+    With no update flags, displays current settings.
+    """
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
