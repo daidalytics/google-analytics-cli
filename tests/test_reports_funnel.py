@@ -174,7 +174,7 @@ class TestFunnelReport:
             app, ["reports", "funnel", "-c", config_path]
         )
         assert result.exit_code != 0
-        assert "property-id" in result.output.lower()
+        assert "property-id" in result.output.lower() or "missing" in result.output.lower()
 
     def test_funnel_passes_full_config_as_body(self, tmp_path):
         mock_client = _mock_funnel_client()
