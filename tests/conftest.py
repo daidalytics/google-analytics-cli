@@ -15,9 +15,10 @@ def isolated_config_dir(tmp_path, monkeypatch):
     store._cached_config = None
 
     # Reset global output flags between tests
-    from ga_cli.utils.output import set_no_color, set_quiet
+    from ga_cli.utils.output import set_no_color, set_output_format, set_quiet
 
     set_quiet(False)
     set_no_color(False)
+    set_output_format("table")
 
     yield tmp_path

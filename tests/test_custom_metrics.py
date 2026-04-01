@@ -117,7 +117,7 @@ class TestCustomMetricsList:
                 app, ["custom-metrics", "list", "-p", "123"]
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_list_missing_property_id(self):
         result = runner.invoke(app, ["custom-metrics", "list"])
@@ -188,7 +188,7 @@ class TestCustomMetricsGet:
                 ["custom-metrics", "get", "-p", "123", "-m", "999"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestCustomMetricsCreate:
@@ -336,7 +336,7 @@ class TestCustomMetricsCreate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestCustomMetricsUpdate:
@@ -441,7 +441,7 @@ class TestCustomMetricsUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestCustomMetricsArchive:
@@ -516,4 +516,4 @@ class TestCustomMetricsArchive:
                 ["custom-metrics", "archive", "-p", "123", "-m", "1", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3

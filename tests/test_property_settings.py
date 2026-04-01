@@ -193,7 +193,7 @@ class TestAttributionSettings:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
     def test_missing_property_id(self):
         result = runner.invoke(
@@ -296,7 +296,7 @@ class TestGoogleSignalsSettings:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
 
 # --- Enhanced Measurement Settings ---
@@ -426,7 +426,7 @@ class TestEnhancedMeasurementSettings:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
     def test_missing_stream_id(self):
         result = runner.invoke(

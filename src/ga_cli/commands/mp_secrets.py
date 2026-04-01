@@ -7,7 +7,7 @@ import typer
 
 from ..api.client import get_admin_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, info, output, require_options, success
+from ..utils import handle_error, info, output, require_options, resolve_output_format, success
 from ..utils.pagination import paginate_all
 
 mp_secrets_app = typer.Typer(
@@ -33,7 +33,7 @@ def list_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_client()
         parent = f"properties/{effective_property}/dataStreams/{stream_id}"
@@ -76,7 +76,7 @@ def get_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_client()
         resource_name = (
@@ -114,7 +114,7 @@ def create_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_client()
         parent = f"properties/{effective_property}/dataStreams/{stream_id}"
@@ -153,7 +153,7 @@ def update_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         body = {}
         mask_fields = []

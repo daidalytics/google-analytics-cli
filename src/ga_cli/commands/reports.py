@@ -13,7 +13,7 @@ import typer
 
 from ..api.client import get_data_alpha_client, get_data_client
 from ..config.store import get_effective_value
-from ..utils import console, handle_error, info, output, require_options
+from ..utils import console, handle_error, info, output, require_options, resolve_output_format
 
 reports_app = typer.Typer(
     name="reports", help="Run GA4 reports", no_args_is_help=True
@@ -107,7 +107,7 @@ def run_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         data = get_data_client()
 
@@ -158,7 +158,7 @@ def realtime_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         data_client = get_data_client()
 
@@ -220,7 +220,7 @@ def pivot_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         dim_list = [d.strip() for d in dimensions.split(",")]
         pivot_field_clean = pivot_field.strip()
@@ -339,7 +339,7 @@ def check_compatibility_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         if not metrics and not dimensions:
             raise typer.BadParameter(
@@ -413,7 +413,7 @@ def metadata_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         data = get_data_client()
         metadata = (
@@ -482,7 +482,7 @@ def batch_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         # Read and parse config file
         config_path = Path(config_file)
@@ -614,7 +614,7 @@ def funnel_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         config_path = Path(config_file)
         if not config_path.exists():
@@ -670,7 +670,7 @@ def build_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         data_client = get_data_client()
 

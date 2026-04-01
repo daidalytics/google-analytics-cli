@@ -5,8 +5,7 @@ from typing import Optional
 import typer
 
 from ..api.client import get_admin_client
-from ..config.store import get_effective_value
-from ..utils import handle_error, output
+from ..utils import handle_error, output, resolve_output_format
 from ..utils.pagination import paginate_all
 
 account_summaries_app = typer.Typer(
@@ -24,7 +23,7 @@ def list_cmd(
 ):
     """List all accounts with their property summaries."""
     try:
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_client()
         summaries = paginate_all(

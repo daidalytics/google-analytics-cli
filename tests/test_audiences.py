@@ -133,7 +133,7 @@ class TestAudiencesList:
         ):
             result = runner.invoke(app, ["audiences", "list", "-p", "123"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_list_missing_property_id(self):
         result = runner.invoke(app, ["audiences", "list"])
@@ -203,7 +203,7 @@ class TestAudiencesGet:
                 ["audiences", "get", "-p", "123", "-a", "missing"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestAudiencesCreate:
@@ -314,7 +314,7 @@ class TestAudiencesCreate:
                 ["audiences", "create", "-p", "123", "--config", str(config_file)],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestAudiencesUpdate:
@@ -426,7 +426,7 @@ class TestAudiencesUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestAudiencesArchive:
@@ -505,4 +505,4 @@ class TestAudiencesArchive:
                 ["audiences", "archive", "-p", "123", "-a", "1001", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3

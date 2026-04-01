@@ -116,7 +116,7 @@ class TestBigQueryLinksList:
                 app, ["bigquery-links", "list", "-p", "123"]
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_list_missing_property_id(self):
         result = runner.invoke(app, ["bigquery-links", "list"])
@@ -186,7 +186,7 @@ class TestBigQueryLinksGet:
                 ["bigquery-links", "get", "-p", "123", "-l", "missing"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestBigQueryLinksCreate:
@@ -297,7 +297,7 @@ class TestBigQueryLinksCreate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestBigQueryLinksUpdate:
@@ -433,7 +433,7 @@ class TestBigQueryLinksUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestBigQueryLinksDelete:
@@ -512,4 +512,4 @@ class TestBigQueryLinksDelete:
                 ["bigquery-links", "delete", "-p", "123", "-l", "abc123", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3

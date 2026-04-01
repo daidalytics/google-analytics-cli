@@ -159,7 +159,7 @@ class TestFunnelReport:
                 app, ["reports", "funnel", "-p", "111", "-c", config_path]
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Funnel API error" in result.output
 
     def test_funnel_uses_config_default(self, tmp_path):

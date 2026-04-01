@@ -114,7 +114,7 @@ class TestMPSecretsList:
                 app, ["mp-secrets", "list", "-p", "123", "-s", "456"]
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_list_missing_property_id(self):
         result = runner.invoke(app, ["mp-secrets", "list", "-s", "456"])
@@ -194,7 +194,7 @@ class TestMPSecretsGet:
                 ["mp-secrets", "get", "-p", "123", "-s", "456", "--secret-id", "999"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestMPSecretsCreate:
@@ -259,7 +259,7 @@ class TestMPSecretsCreate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestMPSecretsUpdate:
@@ -333,7 +333,7 @@ class TestMPSecretsUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestMPSecretsDelete:
@@ -418,4 +418,4 @@ class TestMPSecretsDelete:
                 ["mp-secrets", "delete", "-p", "123", "-s", "456", "--secret-id", "789", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3

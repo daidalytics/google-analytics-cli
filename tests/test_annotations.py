@@ -106,7 +106,7 @@ class TestAnnotationsList:
                 app, ["annotations", "list", "-p", "123"]
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_list_missing_property_id(self):
         result = runner.invoke(app, ["annotations", "list"])
@@ -177,7 +177,7 @@ class TestAnnotationsGet:
                 ["annotations", "get", "-p", "123", "-a", "999"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestAnnotationsCreate:
@@ -277,7 +277,7 @@ class TestAnnotationsCreate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestAnnotationsUpdate:
@@ -409,7 +409,7 @@ class TestAnnotationsUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestAnnotationsDelete:
@@ -488,4 +488,4 @@ class TestAnnotationsDelete:
                 ["annotations", "delete", "-p", "123", "-a", "1", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3

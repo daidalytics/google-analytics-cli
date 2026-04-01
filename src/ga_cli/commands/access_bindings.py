@@ -7,7 +7,7 @@ import typer
 
 from ..api.client import get_admin_alpha_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, info, output, success
+from ..utils import handle_error, info, output, resolve_output_format, success
 from ..utils.pagination import paginate_all
 
 access_bindings_app = typer.Typer(
@@ -71,7 +71,7 @@ def list_cmd(
     """List access bindings for an account or property."""
     try:
         parent, parent_type = _resolve_parent(account_id, property_id)
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_alpha_client()
         resource = _get_access_bindings_resource(admin, parent_type)
@@ -116,7 +116,7 @@ def get_cmd(
     """Get details for an access binding."""
     try:
         parent, parent_type = _resolve_parent(account_id, property_id)
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_alpha_client()
         resource = _get_access_bindings_resource(admin, parent_type)
@@ -150,7 +150,7 @@ def create_cmd(
     """Create an access binding for a user."""
     try:
         parent, parent_type = _resolve_parent(account_id, property_id)
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         role_list = [
             r.strip() if "/" in r.strip() else f"predefinedRoles/{r.strip()}"
@@ -194,7 +194,7 @@ def update_cmd(
     """Update roles for an access binding."""
     try:
         parent, parent_type = _resolve_parent(account_id, property_id)
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         role_list = [
             r.strip() if "/" in r.strip() else f"predefinedRoles/{r.strip()}"

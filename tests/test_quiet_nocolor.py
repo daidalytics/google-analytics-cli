@@ -72,7 +72,7 @@ class TestQuietFlag:
         with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
             result = runner.invoke(app, ["--quiet", "accounts", "list"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "API failure" in result.output
 
     def test_quiet_does_not_suppress_data_output(self):

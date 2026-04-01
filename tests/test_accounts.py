@@ -107,9 +107,8 @@ class TestAccountsList:
 
         with (
             patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client),
-            patch("ga_cli.commands.accounts.get_effective_value") as mock_effective,
+            patch("ga_cli.commands.accounts.resolve_output_format", return_value="json"),
         ):
-            mock_effective.return_value = "json"
             result = runner.invoke(app, ["accounts", "list"])
 
         assert result.exit_code == 0
@@ -125,7 +124,7 @@ class TestAccountsList:
         with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
             result = runner.invoke(app, ["accounts", "list"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "API quota exceeded" in result.output
 
     def test_list_pagination(self):
@@ -192,7 +191,7 @@ class TestAccountsGet:
         with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
             result = runner.invoke(app, ["accounts", "get", "--account-id", "999"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Account not found" in result.output
 
 
@@ -265,7 +264,7 @@ class TestAccountsUpdate:
                 app, ["accounts", "update", "--account-id", "123456", "--name", "New Name"]
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Permission denied" in result.output
 
     def test_update_respects_config_output_format(self):
@@ -273,9 +272,8 @@ class TestAccountsUpdate:
 
         with (
             patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client),
-            patch("ga_cli.commands.accounts.get_effective_value") as mock_effective,
+            patch("ga_cli.commands.accounts.resolve_output_format", return_value="json"),
         ):
-            mock_effective.return_value = "json"
             result = runner.invoke(
                 app, ["accounts", "update", "--account-id", "123456", "--name", "New Name"]
             )
@@ -445,7 +443,7 @@ class TestChangeHistory:
         with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
             result = runner.invoke(app, ["accounts", "change-history", "--account-id", "123456"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Permission denied" in result.output
 
     def test_uses_config_account_id(self):
@@ -518,7 +516,7 @@ class TestAccountsDelete:
         with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
             result = runner.invoke(app, ["accounts", "delete", "-a", "123456", "--yes"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Permission denied" in result.output
 
 
@@ -568,5 +566,5 @@ class TestAccountsGetDataSharing:
         with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
             result = runner.invoke(app, ["accounts", "get-data-sharing", "-a", "999"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Not found" in result.output

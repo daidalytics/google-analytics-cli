@@ -200,7 +200,7 @@ class TestAccessBindingsList:
                 ["access-bindings", "list", "-p", "123"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
 
 class TestAccessBindingsGet:
@@ -270,7 +270,7 @@ class TestAccessBindingsGet:
                 ["access-bindings", "get", "-p", "123", "-b", "missing"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestAccessBindingsCreate:
@@ -379,7 +379,7 @@ class TestAccessBindingsCreate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestAccessBindingsUpdate:
@@ -434,7 +434,7 @@ class TestAccessBindingsUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestAccessBindingsDelete:
@@ -517,4 +517,4 @@ class TestAccessBindingsDelete:
                 ["access-bindings", "delete", "-p", "123", "-b", "b1", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3

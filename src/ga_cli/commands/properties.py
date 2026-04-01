@@ -7,7 +7,7 @@ import typer
 
 from ..api.client import get_admin_client, get_data_alpha_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, info, output, require_options, success
+from ..utils import handle_error, info, output, require_options, resolve_output_format, success
 from ..utils.pagination import paginate_all
 
 properties_app = typer.Typer(name="properties", help="Manage GA4 properties", no_args_is_help=True)
@@ -24,7 +24,7 @@ def list_cmd(
     try:
         effective_account = get_effective_value(account_id, "default_account_id")
         require_options({"account_id": effective_account}, ["account_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_client()
         properties = paginate_all(
@@ -60,7 +60,7 @@ def get_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_client()
         prop = admin.properties().get(name=f"properties/{effective_property}").execute()
@@ -83,7 +83,7 @@ def create_cmd(
     try:
         effective_account = get_effective_value(account_id, "default_account_id")
         require_options({"account_id": effective_account}, ["account_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_client()
         body = {
@@ -119,7 +119,7 @@ def update_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         # Map CLI options to API field names
         field_map = {
@@ -247,7 +247,7 @@ def quotas_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         data_alpha = get_data_alpha_client()
         result = (

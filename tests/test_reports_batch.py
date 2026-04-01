@@ -169,7 +169,7 @@ class TestBatchReport:
         config_path = _write_config(tmp_path, BATCH_CONFIG)
         result = runner.invoke(app, ["reports", "batch", "-p", "12345", "-c", config_path])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_batch_empty_reports_array(self, tmp_path):
         config_path = _write_config(tmp_path, {"reports": []})

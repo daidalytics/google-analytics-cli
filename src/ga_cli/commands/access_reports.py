@@ -9,7 +9,7 @@ import typer
 
 from ..api.client import get_admin_client
 from ..config.store import get_effective_value
-from ..utils import console, handle_error, info, output, require_options
+from ..utils import console, handle_error, info, output, require_options, resolve_output_format
 
 access_reports_app = typer.Typer(
     name="access-reports",
@@ -94,7 +94,7 @@ def run_account_cmd(
     try:
         effective_account = get_effective_value(account_id, "default_account_id")
         require_options({"account_id": effective_account}, ["account_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         body = _build_access_report_body(
             dimensions,
@@ -162,7 +162,7 @@ def run_property_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         body = _build_access_report_body(
             dimensions,

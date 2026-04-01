@@ -441,7 +441,7 @@ class TestPropertiesAcknowledgeUdc:
         with patch("ga_cli.commands.properties.get_admin_client", return_value=mock_client):
             result = runner.invoke(app, ["properties", "acknowledge-udc", "-p", "111111", "--yes"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Permission denied" in result.output
 
 
@@ -516,7 +516,7 @@ class TestPropertiesQuotas:
         with patch("ga_cli.commands.properties.get_data_alpha_client", return_value=mock_client):
             result = runner.invoke(app, ["properties", "quotas", "-p", "111111"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Quota API error" in result.output
 
     def test_quotas_empty_response(self):

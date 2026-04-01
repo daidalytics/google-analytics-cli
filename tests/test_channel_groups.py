@@ -128,7 +128,7 @@ class TestChannelGroupsList:
         ):
             result = runner.invoke(app, ["channel-groups", "list", "-p", "123"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_list_missing_property_id(self):
         result = runner.invoke(app, ["channel-groups", "list"])
@@ -198,7 +198,7 @@ class TestChannelGroupsGet:
                 ["channel-groups", "get", "-p", "123", "-g", "missing"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestChannelGroupsCreate:
@@ -304,7 +304,7 @@ class TestChannelGroupsCreate:
                 ["channel-groups", "create", "-p", "123", "--config", str(config_file)],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestChannelGroupsUpdate:
@@ -414,7 +414,7 @@ class TestChannelGroupsUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestChannelGroupsDelete:
@@ -493,4 +493,4 @@ class TestChannelGroupsDelete:
                 ["channel-groups", "delete", "-p", "123", "-g", "1002", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3

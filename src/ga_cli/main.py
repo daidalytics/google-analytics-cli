@@ -73,12 +73,17 @@ def main(
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output"),
 ):
     """GA CLI — Command-line interface for Google Analytics 4."""
-    from .utils.output import set_no_color, set_quiet
+    from .config.store import get_effective_value
+    from .utils.output import is_tty, set_no_color, set_output_format, set_quiet
 
     if quiet:
         set_quiet(True)
     if no_color:
         set_no_color(True)
+
+    # Resolve output format early so errors are structured when appropriate
+    effective_fmt = get_effective_value(None, "output_format") or ("table" if is_tty() else "json")
+    set_output_format(effective_fmt)
 
     if version:
         from . import __version__

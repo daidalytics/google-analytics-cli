@@ -94,7 +94,7 @@ class TestFirebaseLinksList:
                 app, ["firebase-links", "list", "-p", "123"]
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_list_missing_property_id(self):
         result = runner.invoke(app, ["firebase-links", "list"])
@@ -168,7 +168,7 @@ class TestFirebaseLinksCreate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestFirebaseLinksDelete:
@@ -245,4 +245,4 @@ class TestFirebaseLinksDelete:
                 ["firebase-links", "delete", "-p", "123", "--link-id", "abc123", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3

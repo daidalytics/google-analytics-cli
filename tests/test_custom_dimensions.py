@@ -117,7 +117,7 @@ class TestCustomDimensionsList:
                 app, ["custom-dimensions", "list", "-p", "123"]
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_list_missing_property_id(self):
         result = runner.invoke(app, ["custom-dimensions", "list"])
@@ -188,7 +188,7 @@ class TestCustomDimensionsGet:
                 ["custom-dimensions", "get", "-p", "123", "-d", "999"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestCustomDimensionsCreate:
@@ -333,7 +333,7 @@ class TestCustomDimensionsCreate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestCustomDimensionsUpdate:
@@ -443,7 +443,7 @@ class TestCustomDimensionsUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestCustomDimensionsArchive:
@@ -522,4 +522,4 @@ class TestCustomDimensionsArchive:
                 ["custom-dimensions", "archive", "-p", "123", "-d", "1", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3

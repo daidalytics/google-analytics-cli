@@ -126,7 +126,7 @@ class TestAccessReportsRunAccount:
         with patch("ga_cli.commands.access_reports.get_admin_client", return_value=mock_client):
             result = runner.invoke(app, ["access-reports", "run-account", "-a", "123456"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Insufficient permissions" in result.output
 
     def test_run_with_include_all_users(self):
@@ -198,7 +198,7 @@ class TestAccessReportsRunProperty:
         with patch("ga_cli.commands.access_reports.get_admin_client", return_value=mock_client):
             result = runner.invoke(app, ["access-reports", "run-property", "-p", "999"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Not found" in result.output
 
     def test_run_with_offset(self):

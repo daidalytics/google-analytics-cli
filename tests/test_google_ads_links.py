@@ -105,7 +105,7 @@ class TestGoogleAdsLinksList:
                 app, ["google-ads-links", "list", "-p", "123"]
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_list_missing_property_id(self):
         result = runner.invoke(app, ["google-ads-links", "list"])
@@ -202,7 +202,7 @@ class TestGoogleAdsLinksCreate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestGoogleAdsLinksUpdate:
@@ -266,7 +266,7 @@ class TestGoogleAdsLinksUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestGoogleAdsLinksDelete:
@@ -343,4 +343,4 @@ class TestGoogleAdsLinksDelete:
                 ["google-ads-links", "delete", "-p", "123", "--link-id", "456", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3

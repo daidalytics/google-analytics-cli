@@ -174,7 +174,7 @@ class TestPivotReport:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
     def test_pivot_empty_response(self):
         empty_response = {

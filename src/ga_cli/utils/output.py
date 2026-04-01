@@ -24,6 +24,18 @@ OutputFormat = str  # "json" | "table" | "compact"
 
 # Global flags set from main.py callback
 _quiet = False
+_current_output_format: str = "table"
+
+
+def set_output_format(fmt: str) -> None:
+    """Store the resolved output format for use by error handling."""
+    global _current_output_format
+    _current_output_format = fmt
+
+
+def get_current_output_format() -> str:
+    """Return the current output format. Used by errors.py for structured errors."""
+    return _current_output_format
 
 
 def set_quiet(value: bool) -> None:
@@ -50,6 +62,22 @@ def get_output_format(requested: Optional[str] = None) -> str:
     if requested:
         return requested
     return "table" if is_tty() else "json"
+
+
+def resolve_output_format(cli_value: Optional[str] = None) -> str:
+    """Resolve and track the output format from a subcommand's -o flag.
+
+    Replaces the common pattern:
+        effective_format = get_effective_value(output_format, "output_format") or "table"
+
+    This resolves CLI flag > config > TTY detection, then updates the
+    global format so that handle_error() uses the correct format.
+    """
+    from ..config.store import get_effective_value
+
+    fmt = get_effective_value(cli_value, "output_format") or ("table" if is_tty() else "json")
+    set_output_format(fmt)
+    return fmt
 
 
 def output(

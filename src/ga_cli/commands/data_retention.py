@@ -6,7 +6,7 @@ import typer
 
 from ..api.client import get_admin_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, output, require_options, success
+from ..utils import handle_error, output, require_options, resolve_output_format, success
 
 data_retention_app = typer.Typer(
     name="data-retention",
@@ -36,7 +36,7 @@ def get_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_client()
         settings = (
@@ -92,7 +92,7 @@ def update_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         field_map = {
             "eventDataRetention": event_data_retention,

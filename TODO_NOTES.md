@@ -21,3 +21,4 @@
 | 39 | WS-AA16: SKAdNetwork Schema | 5 | iOS attribution |
 
 Also not covered: batchRunPivotReports and accounts.runAccessReport / accounts.searchChangeHistoryEvents / accounts.getDataSharingSettings at the account level (property-level equivalents are done).
+

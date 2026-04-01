@@ -8,10 +8,12 @@ from ga_cli.utils.output import (
     _format_value,
     _get_default_columns,
     error,
+    get_current_output_format,
     get_output_format,
     info,
     is_tty,
     output,
+    set_output_format,
     success,
     warn,
 )
@@ -145,6 +147,24 @@ class TestOutputTable:
         """Table output should not raise for a single dict."""
         data = {"name": "test", "value": "123"}
         output(data, fmt="table")
+
+
+class TestOutputFormatTracking:
+    def test_default_format_is_table(self):
+        assert get_current_output_format() == "table"
+
+    def test_set_and_get_format(self):
+        set_output_format("json")
+        assert get_current_output_format() == "json"
+
+        set_output_format("compact")
+        assert get_current_output_format() == "compact"
+
+    def test_set_format_persists(self):
+        set_output_format("json")
+        # Call get twice to verify it doesn't reset
+        assert get_current_output_format() == "json"
+        assert get_current_output_format() == "json"
 
 
 class TestConvenienceFunctions:

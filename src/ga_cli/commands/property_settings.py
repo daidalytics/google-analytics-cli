@@ -6,7 +6,7 @@ import typer
 
 from ..api.client import get_admin_alpha_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, output, require_options, success
+from ..utils import handle_error, output, require_options, resolve_output_format, success
 
 property_settings_app = typer.Typer(
     name="property-settings",
@@ -82,7 +82,7 @@ def attribution_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         resource_name = f"properties/{effective_property}/attributionSettings"
         admin = get_admin_alpha_client()
@@ -155,7 +155,7 @@ def google_signals_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         resource_name = f"properties/{effective_property}/googleSignalsSettings"
         admin = get_admin_alpha_client()
@@ -239,7 +239,7 @@ def enhanced_measurement_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         resource_name = (
             f"properties/{effective_property}/dataStreams/{stream_id}"

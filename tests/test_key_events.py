@@ -117,7 +117,7 @@ class TestKeyEventsList:
                 app, ["key-events", "list", "-p", "123"]
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_list_missing_property_id(self):
         result = runner.invoke(app, ["key-events", "list"])
@@ -188,7 +188,7 @@ class TestKeyEventsGet:
                 ["key-events", "get", "-p", "123", "-k", "999"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestKeyEventsCreate:
@@ -284,7 +284,7 @@ class TestKeyEventsCreate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestKeyEventsUpdate:
@@ -367,7 +367,7 @@ class TestKeyEventsUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestKeyEventsDelete:
@@ -444,4 +444,4 @@ class TestKeyEventsDelete:
                 ["key-events", "delete", "-p", "123", "-k", "1", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3

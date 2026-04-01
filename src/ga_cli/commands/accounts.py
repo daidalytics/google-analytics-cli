@@ -7,7 +7,7 @@ import typer
 
 from ..api.client import get_admin_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, info, output, require_options, success
+from ..utils import handle_error, info, output, require_options, resolve_output_format, success
 from ..utils.pagination import paginate_all
 
 accounts_app = typer.Typer(name="accounts", help="Manage GA4 accounts", no_args_is_help=True)
@@ -21,7 +21,7 @@ def list_cmd(
 ):
     """List all accessible GA4 accounts."""
     try:
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_client()
         accounts = paginate_all(
@@ -52,7 +52,7 @@ def get_cmd(
     try:
         effective_account = get_effective_value(account_id, "default_account_id")
         require_options({"account_id": effective_account}, ["account_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_client()
         account = admin.accounts().get(name=f"accounts/{effective_account}").execute()
@@ -75,7 +75,7 @@ def update_cmd(
     try:
         effective_account = get_effective_value(account_id, "default_account_id")
         require_options({"account_id": effective_account}, ["account_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_client()
         account = (
@@ -135,7 +135,7 @@ def get_data_sharing_cmd(
     try:
         effective_account = get_effective_value(account_id, "default_account_id")
         require_options({"account_id": effective_account}, ["account_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         admin = get_admin_client()
         settings = (
@@ -223,7 +223,7 @@ def change_history_cmd(
     try:
         effective_account = get_effective_value(account_id, "default_account_id")
         require_options({"account_id": effective_account}, ["account_id"])
-        effective_format = get_effective_value(output_format, "output_format") or "table"
+        effective_format = resolve_output_format(output_format)
 
         body: dict = {}
         if property_id:

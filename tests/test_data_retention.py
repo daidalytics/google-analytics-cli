@@ -67,7 +67,7 @@ class TestDataRetentionGet:
         with patch("ga_cli.commands.data_retention.get_admin_client", return_value=mock_client):
             result = runner.invoke(app, ["data-retention", "get", "-p", "999"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Not found" in result.output
 
 
@@ -220,5 +220,5 @@ class TestDataRetentionUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Permission denied" in result.output

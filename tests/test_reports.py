@@ -214,7 +214,7 @@ class TestReportsRun:
                 app, ["reports", "run", "-p", "111"]
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Quota exceeded" in result.output
 
     def test_run_shows_row_count_in_table_mode(self):
@@ -542,7 +542,7 @@ class TestCheckCompatibility:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestTransformReportRows:

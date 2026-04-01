@@ -108,7 +108,7 @@ class TestCalculatedMetricsList:
                 app, ["calculated-metrics", "list", "-p", "123"]
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_list_missing_property_id(self):
         result = runner.invoke(app, ["calculated-metrics", "list"])
@@ -178,7 +178,7 @@ class TestCalculatedMetricsGet:
                 ["calculated-metrics", "get", "-p", "123", "-m", "missing"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestCalculatedMetricsCreate:
@@ -318,7 +318,7 @@ class TestCalculatedMetricsCreate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestCalculatedMetricsUpdate:
@@ -469,7 +469,7 @@ class TestCalculatedMetricsUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestCalculatedMetricsDelete:
@@ -548,4 +548,4 @@ class TestCalculatedMetricsDelete:
                 ["calculated-metrics", "delete", "-p", "123", "-m", "revenuePerUser", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3

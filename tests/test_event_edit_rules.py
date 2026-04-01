@@ -140,7 +140,7 @@ class TestEventEditRulesList:
                 ["event-edit-rules", "list", "-p", "123", "-s", "456"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_list_missing_property_id(self):
         result = runner.invoke(
@@ -224,7 +224,7 @@ class TestEventEditRulesGet:
                 ["event-edit-rules", "get", "-p", "123", "-s", "456", "-r", "missing"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestEventEditRulesCreate:
@@ -337,7 +337,7 @@ class TestEventEditRulesCreate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestEventEditRulesUpdate:
@@ -451,7 +451,7 @@ class TestEventEditRulesUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestEventEditRulesDelete:
@@ -542,7 +542,7 @@ class TestEventEditRulesDelete:
                 ["event-edit-rules", "delete", "-p", "123", "-s", "456", "-r", "r1", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestEventEditRulesReorder:
@@ -602,7 +602,7 @@ class TestEventEditRulesReorder:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
     def test_reorder_missing_property_id(self):
         result = runner.invoke(

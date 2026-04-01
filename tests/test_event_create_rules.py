@@ -137,7 +137,7 @@ class TestEventCreateRulesList:
                 ["event-create-rules", "list", "-p", "123", "-s", "456"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
 
     def test_list_missing_property_id(self):
         result = runner.invoke(
@@ -221,7 +221,7 @@ class TestEventCreateRulesGet:
                 ["event-create-rules", "get", "-p", "123", "-s", "456", "-r", "missing"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestEventCreateRulesCreate:
@@ -332,7 +332,7 @@ class TestEventCreateRulesCreate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestEventCreateRulesUpdate:
@@ -446,7 +446,7 @@ class TestEventCreateRulesUpdate:
                 ],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestEventCreateRulesDelete:
@@ -537,4 +537,4 @@ class TestEventCreateRulesDelete:
                 ["event-create-rules", "delete", "-p", "123", "-s", "456", "-r", "r1", "--yes"],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
