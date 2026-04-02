@@ -24,7 +24,7 @@ build/
 
 # Claude
 CLAUDE.md
-.claude/
+.claude/*
 
 # Archive
 archive/
