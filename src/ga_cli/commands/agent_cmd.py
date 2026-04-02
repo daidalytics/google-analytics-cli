@@ -74,7 +74,7 @@ ga account-summaries list [-o json]
 
 ### Properties
 ```bash
-ga properties list [-a ACCOUNT_ID] [-o json]
+ga properties list [-a ACCOUNT_ID] [-o json]       # pipe: | jq '.[] | select(.displayName | test("prod"; "i"))'
 ga properties get [-p PROPERTY_ID] [-o json]
 ga properties create -a ACCOUNT_ID --name "Name" [--timezone TZ] [--currency CODE]
 ga properties update -p PROPERTY_ID [--name NAME] [--timezone TZ] [--currency CODE] [--industry CAT]
@@ -237,7 +237,7 @@ Get/set hybrid: no update flags = GET, any update flag = PATCH. Enhanced measure
 
 ### Reports
 ```bash
-ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE [--limit N] [-o json]
+ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE [--limit N] [-o json]  # pipe: | jq '[.[] | {date, sessions, users}]'
 ga reports pivot [-p PROPERTY_ID] -m metrics -d dimensions --pivot-field FIELD [--start-date DATE] [-o json]
 ga reports check-compatibility [-p PROPERTY_ID] [-m metrics] [-d dimensions] [-o json]
 ga reports metadata [-p PROPERTY_ID] [--type metrics|dimensions] [--search TEXT] [-o json]
@@ -262,6 +262,28 @@ ga completions bash|zsh|fish
 | `GOOGLE_APPLICATION_CREDENTIALS` | GCP credential path (fallback) |
 | `GA_CLI_CONFIG_DIR` | Override config directory |
 | `NO_COLOR` | Disable colored output |
+
+## Parsing Output
+
+`-o json` produces machine-parseable output **meant for jq**. Always pipe through jq — never parse raw JSON manually.
+
+### Reusable jq recipes
+```bash
+# Extract numeric IDs from resource names ("accounts/123" → "123")
+ga accounts list -o json | jq -r '.[].name' | grep -o '[0-9]*$'
+
+# Filter resources by display name (case-insensitive regex)
+ga properties list -o json | jq '.[] | select(.displayName | test("prod"; "i"))'
+
+# Pick specific fields
+ga data-streams list -o json | jq '[.[] | {id: (.name | split("/") | last), displayName, type}]'
+
+# Count results
+ga custom-dimensions list -o json | jq 'length'
+
+# Get first result's ID (useful for chaining)
+ga properties list -o json | jq -r '.[0].name' | grep -o '[0-9]*$'
+```
 
 ## Agent Workflow
 Typical discover → act pattern:
@@ -299,7 +321,7 @@ ga data-streams list -o json | jq -r '.[].name' | grep -o '[0-9]*$'
 - **Start with `ga --describe`** — discover every command, parameter, type, and flag in one JSON call; cache the result
 - **Use `--dry-run` before mutations** — preview the exact API request before executing creates, updates, and deletes
 - **Set defaults first** — eliminates repetitive `--account-id` / `--property-id` flags from every command
-- **Always use `-o json`** — structured output is easier to parse than tables
+- **Always use `-o json` and pipe through `jq`** — JSON output is machine-parseable; always pipe through `jq` to filter, extract IDs, or reshape — never parse raw output manually (see "Parsing Output" above)
 - **Use `check-compatibility` before complex reports** — avoids API errors from incompatible metric/dimension combos
 - **Use `metadata` to discover available metrics/dimensions** — `ga reports metadata -p ID --search revenue -o json`
 - **Parallelize independent operations** — run creates/deletes concurrently with `&` and `wait`
