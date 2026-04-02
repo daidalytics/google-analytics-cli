@@ -15,6 +15,7 @@ Manage GA4 accounts, properties, data streams, and run reports — all from your
 - **Reporting** — Run custom reports, pivot reports, real-time reports with live polling, check compatibility, and build reports interactively
 - **Flexible output** — Table (default), JSON, and compact output formats
 - **Self-update** — Check for and install updates via `ga upgrade`
+- **Schema introspection** — `ga --describe` outputs JSON Schema for all commands (agent/MCP-ready)
 - **Shell completions** — Generate completion scripts for bash, zsh, and fish
 - **Interactive setup** — Guided configuration wizard via `ga config setup`
 
@@ -151,7 +152,7 @@ export GA_CLI_SERVICE_ACCOUNT="/path/to/key.json"
 | `ga upgrade` | `--check`, `--force` | Check for and install updates |
 | `ga completions` | `bash`, `zsh`, `fish` | Generate shell completion scripts |
 
-Use `ga <command> --help` for detailed usage of any command.
+Use `ga <command> --help` for detailed usage of any command, or `ga --describe` for the full CLI schema as JSON.
 
 ### Output formats
 
@@ -170,6 +171,7 @@ ga accounts list --output compact   # Minimal ID + name output
 --version, -v   Show version
 --quiet, -q     Suppress non-essential output
 --no-color      Disable colored output
+--describe      Show full CLI schema as JSON (for agents and tooling)
 ```
 
 ## Shell Completions

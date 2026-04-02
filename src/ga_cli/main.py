@@ -71,6 +71,7 @@ def main(
     version: bool = typer.Option(False, "--version", "-v", help="Show version"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress non-essential output"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output"),
+    describe: bool = typer.Option(False, "--describe", help="Show CLI schema as JSON"),
 ):
     """GA CLI — Command-line interface for Google Analytics 4."""
     from .config.store import get_effective_value
@@ -90,6 +91,11 @@ def main(
 
         print(f"ga-cli {__version__}")
         raise typer.Exit()
+
+    if describe:
+        from .utils.describe import handle_describe_all
+
+        handle_describe_all(app)
 
 
 def run():

@@ -33,6 +33,8 @@ ga config set output_format json               # Recommended for agents
 | `--quiet` / `-q` | Suppress info/warnings (errors still shown) |
 | `--no-color` | Disable colored output |
 | `--yes` / `-y` | Skip confirmation prompts |
+| `--describe` | Output full CLI schema as JSON (all commands, parameters, types) |
+| `--dry-run` | Preview mutative requests without executing (on create/update/delete commands) |
 
 ## Resource Hierarchy
 ```
@@ -264,6 +266,9 @@ ga completions bash|zsh|fish
 ## Agent Workflow
 Typical discover → act pattern:
 ```bash
+# 0. Introspect: discover all commands, parameters, and types in one call
+ga --describe | jq '.commands["ga properties create"]'
+
 # 1. Discover: find the right IDs
 ACCT=$(ga accounts list -o json | jq -r '.[0].name' | grep -o '[0-9]*$')
 ga config set default_account_id "$ACCT"
@@ -271,7 +276,10 @@ ga config set default_account_id "$ACCT"
 PROP=$(ga properties list -o json | jq -r '.[0].name' | grep -o '[0-9]*$')
 ga config set default_property_id "$PROP"
 
-# 2. Act: run reports, create resources, etc.
+# 2. Preview: dry-run a mutation to verify parameters
+ga properties create -a "$ACCT" --name "New Site" --timezone Europe/Berlin --dry-run
+
+# 3. Act: run reports, create resources, etc.
 ga reports run -m sessions,users -d date --start-date 7daysAgo -o json
 ```
 
@@ -288,6 +296,8 @@ ga data-streams list -o json | jq -r '.[].name' | grep -o '[0-9]*$'
 ```
 
 ## Agent Best Practices
+- **Start with `ga --describe`** — discover every command, parameter, type, and flag in one JSON call; cache the result
+- **Use `--dry-run` before mutations** — preview the exact API request before executing creates, updates, and deletes
 - **Set defaults first** — eliminates repetitive `--account-id` / `--property-id` flags from every command
 - **Always use `-o json`** — structured output is easier to parse than tables
 - **Use `check-compatibility` before complex reports** — avoids API errors from incompatible metric/dimension combos
