@@ -128,7 +128,7 @@ _SUCCESS_HTML = """\
         </p>
         <div class="command">ga accounts list</div>
         <div class="footer">
-            Powered by <a href="https://github.com/gunnargriese/google-analytics-cli"
+            Powered by <a href="https://github.com/daidalytics/google-analytics-cli"
                           target="_blank" rel="noopener">ga-cli</a>
         </div>
     </div>

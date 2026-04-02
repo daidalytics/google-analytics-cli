@@ -37,24 +37,24 @@ pip install google-analytics-cli
 ### Quick install (script)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gunnargriese/ga-cli/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/daidalytics/google-analytics-cli/master/install.sh | bash
 ```
 
 ### From GitHub
 
 ```bash
 # With uv
-uv pip install git+https://github.com/gunnargriese/ga-cli.git
+uv pip install git+https://github.com/daidalytics/google-analytics-cli.git
 
 # With pip
-pip install git+https://github.com/gunnargriese/ga-cli.git
+pip install git+https://github.com/daidalytics/google-analytics-cli.git
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/gunnargriese/ga-cli.git
-cd ga-cli
+git clone https://github.com/daidalytics/google-analytics-cli.git
+cd google-analytics-cli
 uv sync
 uv run ga --help
 ```
@@ -62,7 +62,7 @@ uv run ga --help
 ### One-off execution (no install)
 
 ```bash
-uvx --from git+https://github.com/gunnargriese/ga-cli.git ga --help
+uvx --from git+https://github.com/daidalytics/google-analytics-cli.git ga --help
 ```
 
 ## Quick Start

@@ -41,9 +41,9 @@ build-backend = "hatchling.build"
 packages = ["src/ga_cli"]
 
 [project.urls]
-Homepage = "https://github.com/gunnargriese/ga-cli"
-Repository = "https://github.com/gunnargriese/ga-cli"
-Issues = "https://github.com/gunnargriese/ga-cli/issues"
+Homepage = "https://github.com/daidalytics/google-analytics-cli"
+Repository = "https://github.com/daidalytics/google-analytics-cli"
+Issues = "https://github.com/daidalytics/google-analytics-cli/issues"
 
 [dependency-groups]
 dev = [
