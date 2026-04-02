@@ -17,7 +17,7 @@ Based on recommendations from [Rewrite Your CLI for AI Agents](https://justin.po
 |---|---|---|---|
 | JSON output | 17/19 commands | **A** | Auto-JSON on non-TTY, `--quiet` flag |
 | Structured errors | **Implemented** | **A** | JSON errors on stderr, exit codes 1/2/3/4, `resolve_output_format()` |
-| Dry-run mode | Not implemented | **F** | Mutations execute immediately |
+| Dry-run mode | **Implemented** | **A** | `--dry-run` on all mutative commands, JSON preview output |
 | Schema introspection | Partial | **C** | `ga reports metadata` exists, no general `--describe` |
 | Raw JSON input | Not implemented | **F** | Agents must construct individual flags |
 | Headless auth | Strong | **A** | `GA_CLI_SERVICE_ACCOUNT`, env vars, `--yes` to skip prompts |
@@ -30,7 +30,7 @@ Based on recommendations from [Rewrite Your CLI for AI Agents](https://justin.po
 Ordered by agent value and dependency chain:
 
 1. [Structured Error Output](#1-structured-error-output) — foundational; everything else builds on predictable error handling
-2. [`--dry-run`](#2---dry-run-on-mutative-commands) — agent safety; highest immediate value for mutation commands
+2. ~~[`--dry-run`](#2---dry-run-on-mutative-commands) — agent safety; highest immediate value for mutation commands~~ **DONE**
 3. [`--describe` Schema Introspection](#3---describe-schema-introspection) — self-documenting CLI; future MCP bridge
 4. [`--json-input`](#4---json-input-on-createupdate-commands) — full agent autonomy for mutations
 
