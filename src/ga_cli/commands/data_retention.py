@@ -6,7 +6,14 @@ import typer
 
 from ..api.client import get_admin_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, output, require_options, resolve_output_format, success
+from ..utils import (
+    handle_dry_run,
+    handle_error,
+    output,
+    require_options,
+    resolve_output_format,
+    success,
+)
 
 data_retention_app = typer.Typer(
     name="data-retention",
@@ -84,6 +91,9 @@ def update_cmd(
         "--reset-on-new-activity/--no-reset-on-new-activity",
         help="Reset user data retention on new activity",
     ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -118,6 +128,13 @@ def update_cmd(
 
         update_mask = ",".join(body.keys())
 
+        if dry_run:
+            handle_dry_run(
+                "update", "PATCH",
+                f"properties/{effective_property}/dataRetentionSettings",
+                body, update_mask=update_mask,
+            )
+
         admin = get_admin_client()
         settings = (
             admin.properties()
@@ -130,7 +147,7 @@ def update_cmd(
         )
         success("Data retention settings updated.")
         output(settings, effective_format)
-    except typer.BadParameter:
+    except (typer.BadParameter, typer.Exit):
         raise
     except Exception as e:
         handle_error(e)

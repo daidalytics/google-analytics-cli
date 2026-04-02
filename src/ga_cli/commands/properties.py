@@ -7,7 +7,15 @@ import typer
 
 from ..api.client import get_admin_client, get_data_alpha_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, info, output, require_options, resolve_output_format, success
+from ..utils import (
+    handle_dry_run,
+    handle_error,
+    info,
+    output,
+    require_options,
+    resolve_output_format,
+    success,
+)
 from ..utils.pagination import paginate_all
 
 properties_app = typer.Typer(name="properties", help="Manage GA4 properties", no_args_is_help=True)
@@ -75,6 +83,9 @@ def create_cmd(
     account_id: Optional[str] = typer.Option(None, "--account-id", "-a", help="Account ID"),
     timezone: str = typer.Option("America/Los_Angeles", "--timezone", help="Reporting time zone"),
     currency: str = typer.Option("USD", "--currency", help="Currency code"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -85,15 +96,20 @@ def create_cmd(
         require_options({"account_id": effective_account}, ["account_id"])
         effective_format = resolve_output_format(output_format)
 
-        admin = get_admin_client()
         body = {
             "parent": f"accounts/{effective_account}",
             "displayName": display_name,
             "timeZone": timezone,
             "currencyCode": currency,
         }
+        if dry_run:
+            handle_dry_run("create", "POST", f"accounts/{effective_account}", body)
+
+        admin = get_admin_client()
         prop = admin.properties().create(body=body).execute()
         output(prop, effective_format)
+    except typer.Exit:
+        raise
     except Exception as e:
         handle_error(e)
 
@@ -111,6 +127,9 @@ def update_cmd(
         None, "--currency", help="Currency code (e.g., USD, EUR)"
     ),
     industry: Optional[str] = typer.Option(None, "--industry", help="Industry category"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -137,6 +156,12 @@ def update_cmd(
 
         update_mask = ",".join(body.keys())
 
+        if dry_run:
+            handle_dry_run(
+                "update", "PATCH", f"properties/{effective_property}",
+                body, update_mask=update_mask,
+            )
+
         admin = get_admin_client()
         prop = (
             admin.properties()
@@ -148,7 +173,7 @@ def update_cmd(
             .execute()
         )
         output(prop, effective_format)
-    except typer.BadParameter:
+    except (typer.BadParameter, typer.Exit):
         raise
     except Exception as e:
         handle_error(e)
@@ -160,11 +185,17 @@ def delete_cmd(
         None, "--property-id", "-p", help="Property ID (numeric)"
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
 ):
     """Delete a GA4 property (soft delete)."""
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
+
+        if dry_run:
+            handle_dry_run("delete", "DELETE", f"properties/{effective_property}", None)
 
         if not yes:
             confirmed = questionary.confirm(
@@ -197,6 +228,9 @@ def acknowledge_udc_cmd(
         None, "--property-id", "-p", help="Property ID (numeric)"
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
 ):
     """Acknowledge user data collection for a property.
 
@@ -205,6 +239,12 @@ def acknowledge_udc_cmd(
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
+
+        if dry_run:
+            handle_dry_run(
+                "acknowledge", "POST", f"properties/{effective_property}",
+                {"acknowledgement": _UDC_ACKNOWLEDGEMENT},
+            )
 
         if not yes:
             info(f'You are about to acknowledge:\n\n  "{_UDC_ACKNOWLEDGEMENT}"\n')

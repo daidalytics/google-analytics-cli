@@ -7,7 +7,15 @@ import typer
 
 from ..api.client import get_admin_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, info, output, require_options, resolve_output_format, success
+from ..utils import (
+    handle_dry_run,
+    handle_error,
+    info,
+    output,
+    require_options,
+    resolve_output_format,
+    success,
+)
 from ..utils.pagination import paginate_all
 
 accounts_app = typer.Typer(name="accounts", help="Manage GA4 accounts", no_args_is_help=True)
@@ -67,6 +75,9 @@ def update_cmd(
         None, "--account-id", "-a", help="Account ID (numeric)"
     ),
     name: str = typer.Option(..., "--name", help="New display name"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -77,17 +88,26 @@ def update_cmd(
         require_options({"account_id": effective_account}, ["account_id"])
         effective_format = resolve_output_format(output_format)
 
+        body = {"displayName": name}
+        if dry_run:
+            handle_dry_run(
+                "update", "PATCH", f"accounts/{effective_account}",
+                body, update_mask="displayName",
+            )
+
         admin = get_admin_client()
         account = (
             admin.accounts()
             .patch(
                 name=f"accounts/{effective_account}",
-                body={"displayName": name},
+                body=body,
                 updateMask="displayName",
             )
             .execute()
         )
         output(account, effective_format)
+    except typer.Exit:
+        raise
     except Exception as e:
         handle_error(e)
 
@@ -98,11 +118,17 @@ def delete_cmd(
         None, "--account-id", "-a", help="Account ID (numeric)"
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
 ):
     """Delete a GA4 account (soft delete, moves to trash)."""
     try:
         effective_account = get_effective_value(account_id, "default_account_id")
         require_options({"account_id": effective_account}, ["account_id"])
+
+        if dry_run:
+            handle_dry_run("delete", "DELETE", f"accounts/{effective_account}", None)
 
         if not yes:
             confirmed = questionary.confirm(

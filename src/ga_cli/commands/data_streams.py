@@ -7,7 +7,15 @@ import typer
 
 from ..api.client import get_admin_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, info, output, require_options, resolve_output_format, success
+from ..utils import (
+    handle_dry_run,
+    handle_error,
+    info,
+    output,
+    require_options,
+    resolve_output_format,
+    success,
+)
 from ..utils.pagination import paginate_all
 
 data_streams_app = typer.Typer(
@@ -107,6 +115,9 @@ def create_cmd(
     bundle_id: Optional[str] = typer.Option(
         None, "--bundle-id", help="App bundle ID (required for app streams)"
     ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -142,6 +153,9 @@ def create_cmd(
                 )
             body["iosAppStreamData"] = {"bundleId": bundle_id}
 
+        if dry_run:
+            handle_dry_run("create", "POST", f"properties/{effective_property}", body)
+
         admin = get_admin_client()
         stream = (
             admin.properties()
@@ -150,7 +164,7 @@ def create_cmd(
             .execute()
         )
         output(stream, effective_format)
-    except typer.BadParameter:
+    except (typer.BadParameter, typer.Exit):
         raise
     except Exception as e:
         handle_error(e)
@@ -166,6 +180,9 @@ def update_cmd(
     ),
     display_name: Optional[str] = typer.Option(
         None, "--display-name", help="New display name"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
     ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
@@ -189,6 +206,13 @@ def update_cmd(
 
         update_mask = ",".join(body.keys())
 
+        if dry_run:
+            handle_dry_run(
+                "update", "PATCH",
+                f"properties/{effective_property}/dataStreams/{stream_id}",
+                body, update_mask=update_mask,
+            )
+
         admin = get_admin_client()
         stream = (
             admin.properties()
@@ -201,7 +225,7 @@ def update_cmd(
             .execute()
         )
         output(stream, effective_format)
-    except typer.BadParameter:
+    except (typer.BadParameter, typer.Exit):
         raise
     except Exception as e:
         handle_error(e)
@@ -218,11 +242,21 @@ def delete_cmd(
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip confirmation prompt"
     ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
 ):
     """Delete a data stream."""
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
+
+        if dry_run:
+            handle_dry_run(
+                "delete", "DELETE",
+                f"properties/{effective_property}/dataStreams/{stream_id}",
+                None,
+            )
 
         if not yes:
             confirmed = questionary.confirm(

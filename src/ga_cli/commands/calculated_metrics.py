@@ -7,7 +7,15 @@ import typer
 
 from ..api.client import get_admin_alpha_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, info, output, require_options, resolve_output_format, success
+from ..utils import (
+    handle_dry_run,
+    handle_error,
+    info,
+    output,
+    require_options,
+    resolve_output_format,
+    success,
+)
 from ..utils.pagination import paginate_all
 
 calculated_metrics_app = typer.Typer(
@@ -125,6 +133,9 @@ def create_cmd(
         ..., "--metric-unit", help="Metric unit (STANDARD, CURRENCY, etc.)"
     ),
     description: str = typer.Option("", "--description", help="Description"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -142,13 +153,16 @@ def create_cmd(
                 f"Must be one of: {', '.join(_VALID_METRIC_UNITS)}"
             )
 
-        admin = get_admin_alpha_client()
         body = {
             "displayName": display_name,
             "description": description,
             "formula": formula,
             "metricUnit": unit_upper,
         }
+        if dry_run:
+            handle_dry_run("create", "POST", f"properties/{effective_property}", body)
+
+        admin = get_admin_alpha_client()
         metric = (
             admin.properties()
             .calculatedMetrics()
@@ -160,7 +174,7 @@ def create_cmd(
             .execute()
         )
         output(metric, effective_format)
-    except typer.BadParameter:
+    except (typer.BadParameter, typer.Exit):
         raise
     except Exception as e:
         handle_error(e)
@@ -183,6 +197,9 @@ def update_cmd(
     formula: Optional[str] = typer.Option(None, "--formula", help="New formula"),
     metric_unit: Optional[str] = typer.Option(
         None, "--metric-unit", help="New metric unit"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
     ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
@@ -221,10 +238,16 @@ def update_cmd(
                 "--display-name, --description, --formula, --metric-unit"
             )
 
-        admin = get_admin_alpha_client()
         resource_name = (
             f"properties/{effective_property}/calculatedMetrics/{metric_id}"
         )
+        if dry_run:
+            handle_dry_run(
+                "update", "PATCH", resource_name,
+                body, update_mask=",".join(mask_fields),
+            )
+
+        admin = get_admin_alpha_client()
         metric = (
             admin.properties()
             .calculatedMetrics()
@@ -236,7 +259,7 @@ def update_cmd(
             .execute()
         )
         output(metric, effective_format)
-    except typer.BadParameter:
+    except (typer.BadParameter, typer.Exit):
         raise
     except Exception as e:
         handle_error(e)
@@ -251,11 +274,21 @@ def delete_cmd(
         ..., "--metric-id", "-m", help="Calculated metric ID"
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
 ):
     """Delete a calculated metric."""
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
+
+        if dry_run:
+            handle_dry_run(
+                "delete", "DELETE",
+                f"properties/{effective_property}/calculatedMetrics/{metric_id}",
+                None,
+            )
 
         if not yes:
             confirmed = questionary.confirm(

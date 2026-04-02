@@ -7,7 +7,15 @@ import typer
 
 from ..api.client import get_admin_alpha_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, info, output, require_options, resolve_output_format, success
+from ..utils import (
+    handle_dry_run,
+    handle_error,
+    info,
+    output,
+    require_options,
+    resolve_output_format,
+    success,
+)
 from ..utils.pagination import paginate_all
 
 annotations_app = typer.Typer(
@@ -107,6 +115,9 @@ def create_cmd(
     ),
     description: str = typer.Option("", "--description", help="Annotation description"),
     color: Optional[str] = typer.Option(None, "--color", help="Annotation color"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -117,7 +128,6 @@ def create_cmd(
         require_options({"property_id": effective_property}, ["property_id"])
         effective_format = resolve_output_format(output_format)
 
-        admin = get_admin_alpha_client()
         body = {
             "title": title,
             "annotationDate": annotation_date,
@@ -126,6 +136,10 @@ def create_cmd(
         if color is not None:
             body["color"] = color
 
+        if dry_run:
+            handle_dry_run("create", "POST", f"properties/{effective_property}", body)
+
+        admin = get_admin_alpha_client()
         annotation = (
             admin.properties()
             .reportingDataAnnotations()
@@ -133,6 +147,8 @@ def create_cmd(
             .execute()
         )
         output(annotation, effective_format)
+    except typer.Exit:
+        raise
     except Exception as e:
         handle_error(e)
 
@@ -148,6 +164,9 @@ def update_cmd(
     title: Optional[str] = typer.Option(None, "--title", help="New title"),
     description: Optional[str] = typer.Option(None, "--description", help="New description"),
     color: Optional[str] = typer.Option(None, "--color", help="New color"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -175,8 +194,14 @@ def update_cmd(
                 "At least one field must be specified: --title, --description, --color"
             )
 
-        admin = get_admin_alpha_client()
         resource_name = f"properties/{effective_property}/reportingDataAnnotations/{annotation_id}"
+        if dry_run:
+            handle_dry_run(
+                "update", "PATCH", resource_name,
+                body, update_mask=",".join(mask_fields),
+            )
+
+        admin = get_admin_alpha_client()
         annotation = (
             admin.properties()
             .reportingDataAnnotations()
@@ -188,7 +213,7 @@ def update_cmd(
             .execute()
         )
         output(annotation, effective_format)
-    except typer.BadParameter:
+    except (typer.BadParameter, typer.Exit):
         raise
     except Exception as e:
         handle_error(e)
@@ -203,11 +228,21 @@ def delete_cmd(
         ..., "--annotation-id", "-a", help="Annotation ID"
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
 ):
     """Delete a reporting data annotation."""
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
+
+        if dry_run:
+            handle_dry_run(
+                "delete", "DELETE",
+                f"properties/{effective_property}/reportingDataAnnotations/{annotation_id}",
+                None,
+            )
 
         if not yes:
             confirmed = questionary.confirm(

@@ -1,5 +1,6 @@
 """Utility re-exports."""
 
+from .dry_run import handle_dry_run as handle_dry_run
 from .errors import classify_error as classify_error
 from .errors import format_api_error as format_api_error
 from .errors import handle_error as handle_error

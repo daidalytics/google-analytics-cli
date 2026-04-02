@@ -7,7 +7,15 @@ import typer
 
 from ..api.client import get_admin_client
 from ..config.store import get_effective_value
-from ..utils import handle_error, info, output, require_options, resolve_output_format, success
+from ..utils import (
+    handle_dry_run,
+    handle_error,
+    info,
+    output,
+    require_options,
+    resolve_output_format,
+    success,
+)
 from ..utils.pagination import paginate_all
 
 firebase_links_app = typer.Typer(
@@ -60,6 +68,9 @@ def create_cmd(
     project: str = typer.Option(
         ..., "--project", help="Firebase project resource name (e.g., projects/my-project)"
     ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -70,8 +81,11 @@ def create_cmd(
         require_options({"property_id": effective_property}, ["property_id"])
         effective_format = resolve_output_format(output_format)
 
-        admin = get_admin_client()
         body = {"project": project}
+        if dry_run:
+            handle_dry_run("create", "POST", f"properties/{effective_property}", body)
+
+        admin = get_admin_client()
         link = (
             admin.properties()
             .firebaseLinks()
@@ -79,6 +93,8 @@ def create_cmd(
             .execute()
         )
         output(link, effective_format)
+    except typer.Exit:
+        raise
     except Exception as e:
         handle_error(e)
 
@@ -92,11 +108,21 @@ def delete_cmd(
         ..., "--link-id", help="Firebase link ID"
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the request without executing"
+    ),
 ):
     """Delete a Firebase link."""
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
+
+        if dry_run:
+            handle_dry_run(
+                "delete", "DELETE",
+                f"properties/{effective_property}/firebaseLinks/{link_id}",
+                None,
+            )
 
         if not yes:
             confirmed = questionary.confirm(
