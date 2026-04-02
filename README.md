@@ -6,11 +6,24 @@ Manage GA4 accounts, properties, data streams, and run reports — all from your
 
 ## Features
 
-- **Authentication** — OAuth 2.0 (browser-based) and service account support
-- **Account management** — List, inspect, update, delete accounts; view data sharing settings and change history
+### Authentication
+
+- **OAuth 2.0** — Browser-based login flow with automatic token refresh
+- **Service accounts** — Key-file authentication for CI/CD and server environments
+
+### [GA4 Data API](https://developers.google.com/analytics/devguides/reporting/data/v1)
+
+- **Reporting** — Run standard, pivot, batch, funnel, and real-time reports
+- **Report builder** — Interactive metric/dimension selection via `ga reports build`
+- **Compatibility checks** — Validate metric/dimension combinations before running reports
+- **Metadata** — Browse and search available metrics and dimensions
+
+### [GA4 Admin API](https://developers.google.com/analytics/devguides/config/admin/v1)
+
+- **Accounts** — List, inspect, update, delete accounts; view data sharing settings and change history
 - **Account summaries** — Quick overview of all accounts and their properties
-- **Property management** — List, create, inspect, update, delete properties; acknowledge user data collection; view API quotas
-- **Data stream management** — List, create, inspect, update, and delete web, Android, and iOS data streams
+- **Properties** — List, create, inspect, update, delete properties; acknowledge user data collection; view API quotas
+- **Data streams** — List, create, inspect, update, and delete web, Android, and iOS data streams
 - **Custom dimensions & metrics** — List, create, inspect, update, and archive custom definitions
 - **Calculated metrics** — List, create, inspect, update, and delete calculated metrics
 - **Key events** — List, create, inspect, update, and delete key events (conversions)
@@ -26,14 +39,20 @@ Manage GA4 accounts, properties, data streams, and run reports — all from your
 - **Firebase links** — List, create, and delete Firebase project links
 - **Google Ads links** — List, create, update, and delete Google Ads account links
 - **Property settings** — View and update attribution, Google Signals, and enhanced measurement settings
-- **Reporting** — Run standard, pivot, batch, funnel, and real-time reports; check metric/dimension compatibility; browse metadata; build reports interactively
+
+### Interactive usage
+
 - **Flexible output** — Table (default), JSON, and compact output formats
-- **Dry run** — Preview mutative requests (create, update, delete) without executing them
-- **Self-update** — Check for and install updates via `ga upgrade`
-- **Agent guide** — Built-in AI agent quick reference via `ga agent guide`
-- **Schema introspection** — `ga --describe` outputs JSON Schema for all commands (agent/MCP-ready)
 - **Shell completions** — Generate completion scripts for bash, zsh, and fish
 - **Interactive setup** — Guided configuration wizard via `ga config setup`
+- **Self-update** — Check for and install updates via `ga upgrade`
+
+### Automation & agent integration
+
+- **Schema introspection** — `ga --describe` outputs JSON Schema for all commands (MCP/agent-ready)
+- **Dry run** — Preview mutative requests (create, update, delete) without executing them
+- **Structured errors** — Categorized exit codes and JSON error output for programmatic handling
+- **Agent guide** — Built-in AI agent quick reference via `ga agent guide`
 
 ## Installation
 
