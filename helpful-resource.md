@@ -1,1 +1,0 @@
-https://justin.poehnelt.com/posts/rewrite-your-cli-for-ai-agents/
