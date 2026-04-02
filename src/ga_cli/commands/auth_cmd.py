@@ -18,6 +18,82 @@ from ..utils import error, info, output, success
 
 auth_app = typer.Typer(name="auth", help="Manage authentication", no_args_is_help=True)
 
+_SETUP_GUIDE = r"""# GA CLI — OAuth Credential Setup
+
+GA CLI requires your own Google Cloud Platform OAuth credentials.
+Follow these steps to create them.
+
+## Step 1: Create or Select a GCP Project
+
+1. Go to the Google Cloud Console: https://console.cloud.google.com/
+2. Create a new project or select an existing one
+3. Note your project ID
+
+## Step 2: Enable Required APIs
+
+In the GCP Console, go to APIs & Services > Library and enable:
+- Google Analytics Admin API
+- Google Analytics Data API
+
+Or via gcloud CLI:
+
+    gcloud services enable analyticsadmin.googleapis.com analyticsdata.googleapis.com
+
+## Step 3: Configure OAuth Consent Screen
+
+1. Go to APIs & Services > OAuth consent screen
+2. Choose "External" user type (or "Internal" if using Google Workspace)
+3. Fill in the required fields: app name, user support email, developer contact
+4. No scopes need to be added manually — GA CLI requests them at login time
+5. For personal use, leave the app in "Testing" mode — it works for the
+   project owner and up to 100 added test users without Google verification
+
+## Step 4: Create OAuth Client ID
+
+1. Go to APIs & Services > Credentials
+2. Click "Create Credentials" > "OAuth client ID"
+3. Choose "Desktop app" as the application type
+4. Give it a name (e.g., "GA CLI")
+5. Click "Create" and download the JSON file
+
+## Step 5: Provide Credentials to GA CLI
+
+Option A — Place the downloaded JSON file (recommended):
+
+    mkdir -p ~/.config/ga-cli
+    cp /path/to/downloaded/client_secret_*.json ~/.config/ga-cli/client_secret.json
+
+Option B — Set environment variables:
+
+    export GA_CLI_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+    export GA_CLI_CLIENT_SECRET="your-client-secret"
+
+## Step 6: Authenticate
+
+    ga auth login
+
+This opens your browser for Google OAuth consent and stores the token
+locally at ~/.config/ga-cli/credentials.json.
+
+## Verification
+
+    ga auth status          # Check authentication state
+    ga accounts list        # Verify API access
+
+## Notes
+
+- "Testing" mode is sufficient for personal use — no Google verification needed
+- For team use, publish the consent screen to "Production" within your GCP project
+- Service account auth (ga auth login --service-account /path/key.json) does not
+  require OAuth credentials and works independently
+"""
+
+
+@auth_app.command("setup")
+def setup_cmd():
+    """Show step-by-step instructions for obtaining GCP OAuth credentials."""
+    print(_SETUP_GUIDE)
+
 
 @auth_app.command("login")
 def login_cmd(

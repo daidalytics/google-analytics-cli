@@ -210,7 +210,7 @@ def login() -> Credentials:
             "  [green]GA_CLI_CLIENT_ID[/green] and "
             "[green]GA_CLI_CLIENT_SECRET[/green]\n\n"
             "For step-by-step setup instructions, run:\n"
-            "  [bold yellow]ga agent guide --section setup[/bold yellow]\n\n"
+            "  [bold yellow]ga auth setup[/bold yellow]\n\n"
             "Create OAuth credentials in the GCP Console:\n"
             "  APIs & Services > Credentials > Create OAuth client ID (Desktop app)",
             title="[red]Missing Credentials[/red]",
