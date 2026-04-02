@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(uv run:*)",
-      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f''''{len\\(d[\"\"commands\"\"]\\)} commands described''''\\)\")"
-    ]
-  }
-}
