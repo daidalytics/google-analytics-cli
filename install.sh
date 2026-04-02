@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PACKAGE="ga-cli"
+PACKAGE="google-analytics-cli"
 
 echo "Installing ${PACKAGE}..."
 
