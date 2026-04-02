@@ -15,9 +15,11 @@
 - His core insight: "Human DX optimizes for discoverability. Agent DX optimizes for predictability."
 - Key agent-DX principles (from the article) and how GA CLI implements them:
   - **Structured output** → `--output json` on every command; agents parse JSON, not tables
+  - **Structured errors** → JSON errors on stderr with classified exit codes (0=success, 1=client error, 2=auth error, 3=API error, 4=network error). Agents branch on failure type programmatically instead of parsing human-readable strings.
   - **Context window discipline** → concise, predictable responses; `--output compact` for minimal ID+name output
   - **Agent-specific documentation** → `ga agent guide` ships a reference (like Poehnelt's "SKILL.md" concept) encoding invariants agents can't intuit
-  - **Self-documenting** → `--help` on every command, plus runtime metadata (`ga reports metadata`)
+  - **Schema introspection** → `ga --describe` outputs JSON Schema for all 115 commands in a single call — parameter names, types, flags, aliases, defaults, required fields, plus metadata (`mutative`, `supports_dry_run`). An agent calls this once, caches the result, and knows exactly how to construct any command. This is also the bridge to auto-generating MCP tool definitions from the CLI.
+  - **Safe mutations / dry-run** → `--dry-run` on every create, update, and delete command previews the exact API request as JSON without executing. Agents can verify parameters and catch mistakes before they become live changes. Example: `ga properties create --name "EU Site" --timezone Europe/Berlin --dry-run` outputs the request body and exits.
   - **Composable** → agents chain commands just like shell scripts; no browser/UI automation needed
   - **Safety rails** → confirmation prompts on destructive operations (`--yes` to skip in automation)
 - GA CLI was designed with this in mind: the `ga agent guide` command ships a reference specifically for AI agents
@@ -61,7 +63,12 @@
 - **Reporting**: custom reports, pivot reports, real-time, batch reports, compatibility checks, metadata browsing, interactive report builder
 - **Access reports**: audit who accessed what data and when
 - **Developer experience**: shell completions (bash/zsh/fish), self-update (`ga upgrade`), `--output json|table|compact`
-- **Agent-ready**: `ga agent guide` with sections for reports, admin, and worked examples
+- **Agent-ready**:
+  - `ga agent guide` — concise reference with sections for reports, admin, and worked examples
+  - `ga --describe` — JSON Schema for all 115 commands in one call (parameter types, flags, defaults, required fields)
+  - `--dry-run` — preview any mutation as JSON before executing
+  - Structured JSON errors on stderr with classified exit codes (auth vs API vs network)
+  - Auto-JSON output when piped (non-TTY detection)
 
 ## 7. Application Scenarios
 
@@ -101,6 +108,16 @@
 - Problem: Properties that should be identical slowly diverge over time
 - Solution: Dump configs from multiple properties as JSON, diff them
 - Detect missing custom dimensions, inconsistent key events, different data retention settings
+
+### 7h. Agent-Driven Property Setup
+- Problem: An AI agent needs to create and configure a GA4 property but doesn't know the CLI's interface
+- Solution: The agent uses the CLI's built-in introspection to discover, preview, and execute — zero external docs needed
+- Example workflow:
+  1. `ga --describe` → agent discovers all commands, parameters, types, and which commands are mutative
+  2. `ga properties create --name "EU Website" --account-id 123456 --timezone Europe/Berlin --dry-run` → agent previews the request body as JSON
+  3. Agent verifies the dry-run output, then executes without `--dry-run`
+  4. If the API returns an error, the agent reads the structured JSON error on stderr (with exit code 3 for API errors) and adjusts
+- Rationale: `--describe` + `--dry-run` + structured errors form a complete agent feedback loop — discover → preview → execute → handle errors — without any external documentation or human intervention
 
 ## 8. Getting Started
 - Installation (`pipx install ga-cli`)
