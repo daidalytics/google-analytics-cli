@@ -1,5 +1,6 @@
 """Tests for reports commands (run, realtime, build)."""
 
+import re
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
@@ -8,6 +9,12 @@ from ga_cli.config.store import UserConfig, save_config
 from ga_cli.main import app
 
 runner = CliRunner()
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
 
 SAMPLE_REPORT_RESPONSE = {
     "dimensionHeaders": [{"name": "date"}],
@@ -180,7 +187,7 @@ class TestReportsRun:
         result = runner.invoke(app, ["reports", "run"])
 
         assert result.exit_code != 0
-        assert "property-id" in result.output.lower()
+        assert "property-id" in _strip_ansi(result.output).lower()
 
     def test_run_empty_results(self):
         empty_response = {
@@ -288,7 +295,7 @@ class TestReportsRealtime:
         result = runner.invoke(app, ["reports", "realtime"])
 
         assert result.exit_code != 0
-        assert "property-id" in result.output.lower()
+        assert "property-id" in _strip_ansi(result.output).lower()
 
 
 class TestReportsBuild:
