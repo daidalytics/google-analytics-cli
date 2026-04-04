@@ -6,6 +6,13 @@ from .errors import classify_error as classify_error
 from .errors import format_api_error as format_api_error
 from .errors import handle_error as handle_error
 from .errors import require_options as require_options
+from .filters import parse_date_ranges as parse_date_ranges
+from .filters import parse_dim_filters as parse_dim_filters
+from .filters import parse_filter_json as parse_filter_json
+from .filters import parse_metric_filters as parse_metric_filters
+from .filters import parse_minute_ranges as parse_minute_ranges
+from .filters import parse_order_bys as parse_order_bys
+from .filters import validate_metric_aggregations as validate_metric_aggregations
 from .output import OutputFormat as OutputFormat
 from .output import console as console
 from .output import error as error

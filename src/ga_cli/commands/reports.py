@@ -14,6 +14,15 @@ import typer
 from ..api.client import get_data_alpha_client, get_data_client
 from ..config.store import get_effective_value
 from ..utils import console, handle_error, info, output, require_options, resolve_output_format
+from ..utils.filters import (
+    parse_date_ranges,
+    parse_dim_filters,
+    parse_filter_json,
+    parse_metric_filters,
+    parse_minute_ranges,
+    parse_order_bys,
+    validate_metric_aggregations,
+)
 
 reports_app = typer.Typer(
     name="reports", help="Run GA4 reports", no_args_is_help=True
@@ -22,7 +31,7 @@ reports_app = typer.Typer(
 # Fallback metrics/dimensions when metadata API is unavailable
 _FALLBACK_METRICS = [
     "sessions",
-    "users",
+    "totalUsers",
     "newUsers",
     "screenPageViews",
     "eventCount",
@@ -85,13 +94,155 @@ def _fetch_metadata(data_client, effective_property: str) -> tuple[list[str], li
         return _FALLBACK_METRICS, _FALLBACK_DIMENSIONS
 
 
+def _resolve_filters(
+    dim_filter: list[str] | None,
+    metric_filter: list[str] | None,
+    filter_json: str | None,
+) -> tuple[dict | None, dict | None]:
+    """Resolve dimension and metric filters from DSL flags and/or JSON.
+
+    Returns (dimensionFilter, metricFilter) dicts or None.
+    """
+    dim_result = None
+    met_result = None
+
+    if filter_json:
+        if dim_filter or metric_filter:
+            raise typer.BadParameter(
+                "Cannot combine --dim-filter/--metric-filter with --filter-json. "
+                "Use one approach or the other."
+            )
+        parsed = parse_filter_json(filter_json)
+        # filter-json can be a single FilterExpression (applied as dimensionFilter)
+        # or an object with "dimensionFilter" and/or "metricFilter" keys
+        if "dimensionFilter" in parsed or "metricFilter" in parsed:
+            dim_result = parsed.get("dimensionFilter")
+            met_result = parsed.get("metricFilter")
+        else:
+            dim_result = parsed
+    else:
+        if dim_filter:
+            dim_result = parse_dim_filters(dim_filter)
+        if metric_filter:
+            met_result = parse_metric_filters(metric_filter)
+
+    return dim_result, met_result
+
+
+def _build_report_body(
+    *,
+    metrics: str,
+    dimensions: str | None,
+    start_date: str,
+    end_date: str,
+    limit: int,
+    dim_filter: list[str] | None = None,
+    metric_filter: list[str] | None = None,
+    filter_json: str | None = None,
+    order_by: list[str] | None = None,
+    offset: int | None = None,
+    date_ranges: list[str] | None = None,
+    metric_aggregations: list[str] | None = None,
+    currency_code: str | None = None,
+    keep_empty_rows: bool = False,
+    return_property_quota: bool = False,
+) -> dict:
+    """Build a runReport request body from CLI parameters."""
+    metric_list = [m.strip() for m in metrics.split(",")]
+    dim_list = [d.strip() for d in dimensions.split(",")] if dimensions else []
+
+    body: dict = {
+        "metrics": [{"name": m} for m in metric_list],
+        "limit": limit,
+    }
+
+    # Date ranges
+    if date_ranges:
+        body["dateRanges"] = parse_date_ranges(date_ranges)
+    else:
+        body["dateRanges"] = [{"startDate": start_date, "endDate": end_date}]
+
+    if dim_list:
+        body["dimensions"] = [{"name": d} for d in dim_list]
+
+    # Filters
+    dim_f, met_f = _resolve_filters(dim_filter, metric_filter, filter_json)
+    if dim_f:
+        body["dimensionFilter"] = dim_f
+    if met_f:
+        body["metricFilter"] = met_f
+
+    # Order by
+    if order_by:
+        body["orderBys"] = parse_order_bys(
+            order_by, metrics=metric_list, dimensions=dim_list
+        )
+
+    # Offset
+    if offset is not None:
+        body["offset"] = offset
+
+    # Metric aggregations
+    if metric_aggregations:
+        body["metricAggregations"] = validate_metric_aggregations(metric_aggregations)
+
+    # Simple scalar options
+    if currency_code:
+        body["currencyCode"] = currency_code
+    if keep_empty_rows:
+        body["keepEmptyRows"] = True
+    if return_property_quota:
+        body["returnPropertyQuota"] = True
+
+    return body
+
+
+def _display_aggregations(result: dict, effective_format: str) -> None:
+    """Render totals/minimums/maximums as a summary table below the main data."""
+    met_headers = [h.get("name", "") for h in result.get("metricHeaders", [])]
+    agg_rows = []
+    for agg_type in ("totals", "minimums", "maximums"):
+        for i, row in enumerate(result.get(agg_type, [])):
+            entry: dict = {"aggregation": agg_type.rstrip("s").upper()}
+            if len(result.get("dateRanges", result.get("dateRanges", []))) > 1:
+                entry["dateRange"] = str(i)
+            vals = row.get("metricValues", [])
+            for j, name in enumerate(met_headers):
+                entry[name] = vals[j].get("value", "") if j < len(vals) else ""
+            agg_rows.append(entry)
+
+    if not agg_rows:
+        return
+
+    columns = list(agg_rows[0].keys())
+    headers = list(agg_rows[0].keys())
+    if effective_format == "table":
+        console.print("\n[bold]Aggregations[/bold]")
+    output(agg_rows, effective_format, columns=columns, headers=headers)
+
+
+def _display_quota(result: dict) -> None:
+    """Display property quota information if present."""
+    quota = result.get("propertyQuota")
+    if not quota:
+        return
+    parts = []
+    for key in ("tokensPerDay", "tokensPerHour", "concurrentRequests",
+                "serverErrorsPerProjectPerHour", "potentiallyThresholdedRequestsPerHour"):
+        q = quota.get(key)
+        if q:
+            parts.append(f"{key}: {q.get('consumed', '?')}/{q.get('remaining', '?')}")
+    if parts:
+        info(f"Quota: {', '.join(parts)}")
+
+
 @reports_app.command("run")
 def run_cmd(
     property_id: Optional[str] = typer.Option(
         None, "--property-id", "-p", help="Property ID (numeric)"
     ),
     metrics: str = typer.Option(
-        "sessions,users", "--metrics", "-m", help="Comma-separated metrics"
+        "sessions,totalUsers", "--metrics", "-m", help="Comma-separated metrics"
     ),
     dimensions: Optional[str] = typer.Option(
         None, "--dimensions", "-d", help="Comma-separated dimensions"
@@ -99,6 +250,37 @@ def run_cmd(
     start_date: str = typer.Option("7daysAgo", "--start-date", help="Start date"),
     end_date: str = typer.Option("today", "--end-date", help="End date"),
     limit: int = typer.Option(100, "--limit", help="Max rows to return"),
+    dim_filter: Optional[list[str]] = typer.Option(
+        None, "--dim-filter", help="Dimension filter (repeatable). E.g. 'country==US'"
+    ),
+    metric_filter: Optional[list[str]] = typer.Option(
+        None, "--metric-filter", help="Metric filter (repeatable). E.g. 'sessions>100'"
+    ),
+    filter_json: Optional[str] = typer.Option(
+        None, "--filter-json", help="Raw JSON FilterExpression or @file.json"
+    ),
+    order_by: Optional[list[str]] = typer.Option(
+        None, "--order-by", help="Sort expression (repeatable). E.g. 'sessions:desc'"
+    ),
+    offset: Optional[int] = typer.Option(
+        None, "--offset", help="Row offset for pagination"
+    ),
+    date_ranges: Optional[list[str]] = typer.Option(
+        None, "--date-range",
+        help="Date range as start,end (repeatable, overrides --start-date/--end-date)",
+    ),
+    metric_aggregations: Optional[list[str]] = typer.Option(
+        None, "--metric-aggregation", help="Request aggregation rows: TOTAL, MINIMUM, MAXIMUM"
+    ),
+    currency_code: Optional[str] = typer.Option(
+        None, "--currency-code", help="ISO 4217 currency code (e.g. USD)"
+    ),
+    keep_empty_rows: bool = typer.Option(
+        False, "--keep-empty-rows", help="Include rows with all zero metric values"
+    ),
+    return_property_quota: bool = typer.Option(
+        False, "--return-property-quota", help="Return property quota information"
+    ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -111,13 +293,23 @@ def run_cmd(
 
         data = get_data_client()
 
-        body = {
-            "metrics": [{"name": m.strip()} for m in metrics.split(",")],
-            "dateRanges": [{"startDate": start_date, "endDate": end_date}],
-            "limit": limit,
-        }
-        if dimensions:
-            body["dimensions"] = [{"name": d.strip()} for d in dimensions.split(",")]
+        body = _build_report_body(
+            metrics=metrics,
+            dimensions=dimensions,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+            dim_filter=dim_filter,
+            metric_filter=metric_filter,
+            filter_json=filter_json,
+            order_by=order_by,
+            offset=offset,
+            date_ranges=date_ranges,
+            metric_aggregations=metric_aggregations,
+            currency_code=currency_code,
+            keep_empty_rows=keep_empty_rows,
+            return_property_quota=return_property_quota,
+        )
 
         result = data.properties().runReport(
             property=f"properties/{effective_property}",
@@ -132,6 +324,14 @@ def run_cmd(
         if effective_format == "table" and row_count > 0:
             console.print(f"\n[dim]{row_count} total rows[/dim]")
 
+        if metric_aggregations:
+            _display_aggregations(result, effective_format)
+
+        if return_property_quota:
+            _display_quota(result)
+
+    except typer.BadParameter:
+        raise
     except Exception as e:
         handle_error(e)
 
@@ -150,6 +350,27 @@ def realtime_cmd(
     interval: Optional[int] = typer.Option(
         None, "--interval", help="Refresh interval in seconds (enables polling)"
     ),
+    dim_filter: Optional[list[str]] = typer.Option(
+        None, "--dim-filter", help="Dimension filter (repeatable). E.g. 'country==US'"
+    ),
+    metric_filter: Optional[list[str]] = typer.Option(
+        None, "--metric-filter", help="Metric filter (repeatable). E.g. 'activeUsers>10'"
+    ),
+    filter_json: Optional[str] = typer.Option(
+        None, "--filter-json", help="Raw JSON FilterExpression or @file.json"
+    ),
+    order_by: Optional[list[str]] = typer.Option(
+        None, "--order-by", help="Sort expression (repeatable). E.g. 'activeUsers:desc'"
+    ),
+    minute_ranges: Optional[list[str]] = typer.Option(
+        None, "--minute-range", help="Minute range as start,end (repeatable). E.g. '0,4'"
+    ),
+    metric_aggregations: Optional[list[str]] = typer.Option(
+        None, "--metric-aggregation", help="Request aggregation rows: TOTAL, MINIMUM, MAXIMUM"
+    ),
+    return_property_quota: bool = typer.Option(
+        False, "--return-property-quota", help="Return property quota information"
+    ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -162,11 +383,38 @@ def realtime_cmd(
 
         data_client = get_data_client()
 
-        body = {
-            "metrics": [{"name": m.strip()} for m in metrics.split(",")],
+        metric_list = [m.strip() for m in metrics.split(",")]
+        dim_list = [d.strip() for d in dimensions.split(",")] if dimensions else []
+
+        body: dict = {
+            "metrics": [{"name": m} for m in metric_list],
         }
-        if dimensions:
-            body["dimensions"] = [{"name": d.strip()} for d in dimensions.split(",")]
+        if dim_list:
+            body["dimensions"] = [{"name": d} for d in dim_list]
+
+        # Filters
+        dim_f, met_f = _resolve_filters(dim_filter, metric_filter, filter_json)
+        if dim_f:
+            body["dimensionFilter"] = dim_f
+        if met_f:
+            body["metricFilter"] = met_f
+
+        # Order by
+        if order_by:
+            body["orderBys"] = parse_order_bys(
+                order_by, metrics=metric_list, dimensions=dim_list
+            )
+
+        # Minute ranges
+        if minute_ranges:
+            body["minuteRanges"] = parse_minute_ranges(minute_ranges)
+
+        # Metric aggregations
+        if metric_aggregations:
+            body["metricAggregations"] = validate_metric_aggregations(metric_aggregations)
+
+        if return_property_quota:
+            body["returnPropertyQuota"] = True
 
         if interval:
             info(f"Monitoring real-time data (refresh every {interval}s). Press Ctrl+C to stop.")
@@ -193,6 +441,14 @@ def realtime_cmd(
             rows, columns, headers = _transform_report_rows(result)
             output(rows, effective_format, columns=columns, headers=headers)
 
+            if metric_aggregations:
+                _display_aggregations(result, effective_format)
+
+            if return_property_quota:
+                _display_quota(result)
+
+    except typer.BadParameter:
+        raise
     except Exception as e:
         handle_error(e)
 
@@ -657,6 +913,91 @@ def funnel_cmd(
         handle_error(e)
 
 
+_DIM_FILTER_OPERATORS = [
+    "equals (==)",
+    "not equals (!=)",
+    "contains",
+    "begins_with",
+    "ends_with",
+    "regex (=~)",
+    "in list",
+]
+
+_METRIC_FILTER_OPERATORS = [
+    "greater than (>)",
+    "greater or equal (>=)",
+    "less than (<)",
+    "less or equal (<=)",
+    "between",
+]
+
+_OPERATOR_SYMBOL_MAP = {
+    "equals (==)": "==",
+    "not equals (!=)": "!=",
+    "contains": " contains ",
+    "begins_with": " begins_with ",
+    "ends_with": " ends_with ",
+    "regex (=~)": "=~",
+    "in list": " in ",
+    "greater than (>)": ">",
+    "greater or equal (>=)": ">=",
+    "less than (<)": "<",
+    "less or equal (<=)": "<=",
+    "between": " between ",
+}
+
+
+def _interactive_filters(
+    selected_fields: list[str], operators: list[str], label: str
+) -> list[str]:
+    """Interactively build filter DSL expressions."""
+    filters: list[str] = []
+    while True:
+        add = questionary.confirm(f"Add a {label} filter?", default=False).ask()
+        if not add:
+            break
+
+        field = questionary.select(f"Select {label}:", choices=selected_fields).ask()
+        op = questionary.select("Operator:", choices=operators).ask()
+        value = questionary.text("Value (comma-separated for 'in list'/'between'):").ask()
+        if not value:
+            continue
+
+        symbol = _OPERATOR_SYMBOL_MAP[op]
+        filters.append(f"{field}{symbol}{value}")
+
+    return filters
+
+
+def _interactive_order_bys(
+    selected_metrics: list[str], selected_dims: list[str]
+) -> list[str]:
+    """Interactively build order-by expressions."""
+    order_bys: list[str] = []
+    while True:
+        add = questionary.confirm("Add a sort?", default=False).ask()
+        if not add:
+            break
+
+        all_fields = selected_metrics + (selected_dims or [])
+        field = questionary.select("Sort by:", choices=all_fields).ask()
+        direction = questionary.select("Direction:", choices=["desc", "asc"], default="desc").ask()
+        expr = f"{field}:{direction}"
+
+        if field in (selected_dims or []):
+            ot = questionary.select(
+                "Order type:",
+                choices=["default", "alpha", "ialpha", "numeric"],
+                default="default",
+            ).ask()
+            if ot != "default":
+                expr += f":{ot}"
+
+        order_bys.append(expr)
+
+    return order_bys
+
+
 @reports_app.command("build")
 def build_cmd(
     property_id: Optional[str] = typer.Option(
@@ -700,14 +1041,58 @@ def build_cmd(
             default="7daysAgo",
         ).ask()
 
+        # --- Filters ---
+        dim_filter_exprs: list[str] = []
+        if selected_dims:
+            dim_filter_exprs = _interactive_filters(
+                selected_dims, _DIM_FILTER_OPERATORS, "dimension"
+            )
+
+        metric_filter_exprs = _interactive_filters(
+            selected_metrics, _METRIC_FILTER_OPERATORS, "metric"
+        )
+
+        # --- Order by ---
+        order_by_exprs = _interactive_order_bys(selected_metrics, selected_dims or [])
+
+        # --- Additional options ---
+        extra_options = questionary.checkbox(
+            "Additional options (optional, press Enter to skip):",
+            choices=["Keep empty rows", "Return property quota",
+                     "Aggregation: TOTAL", "Aggregation: MINIMUM", "Aggregation: MAXIMUM"],
+        ).ask()
+        extra_options = extra_options or []
+
+        keep_empty = "Keep empty rows" in extra_options
+        return_quota = "Return property quota" in extra_options
+        agg_values = []
+        for opt in extra_options:
+            if opt.startswith("Aggregation: "):
+                agg_values.append(opt.split(": ", 1)[1])
+
         info(f"Running report: metrics={selected_metrics}, dimensions={selected_dims or []}")
 
-        body = {
+        body: dict = {
             "metrics": [{"name": m} for m in selected_metrics],
             "dateRanges": [{"startDate": date_range, "endDate": "today"}],
         }
         if selected_dims:
             body["dimensions"] = [{"name": d} for d in selected_dims]
+
+        if dim_filter_exprs:
+            body["dimensionFilter"] = parse_dim_filters(dim_filter_exprs)
+        if metric_filter_exprs:
+            body["metricFilter"] = parse_metric_filters(metric_filter_exprs)
+        if order_by_exprs:
+            body["orderBys"] = parse_order_bys(
+                order_by_exprs, metrics=selected_metrics, dimensions=selected_dims
+            )
+        if keep_empty:
+            body["keepEmptyRows"] = True
+        if return_quota:
+            body["returnPropertyQuota"] = True
+        if agg_values:
+            body["metricAggregations"] = validate_metric_aggregations(agg_values)
 
         result = data_client.properties().runReport(
             property=f"properties/{effective_property}",
@@ -721,6 +1106,12 @@ def build_cmd(
 
         if effective_format == "table" and row_count > 0:
             console.print(f"\n[dim]{row_count} total rows[/dim]")
+
+        if agg_values:
+            _display_aggregations(result, effective_format)
+
+        if return_quota:
+            _display_quota(result)
 
     except Exception as e:
         handle_error(e)

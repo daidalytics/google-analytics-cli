@@ -305,8 +305,10 @@ class TestReportsBuild:
             mock_q.checkbox.return_value.ask.side_effect = [
                 ["sessions", "users"],  # metrics
                 ["date"],  # dimensions
+                [],  # additional options
             ]
             mock_q.select.return_value.ask.return_value = "7daysAgo"
+            mock_q.confirm.return_value.ask.return_value = False  # skip filters/sorts
 
             result = runner.invoke(
                 app, ["reports", "build", "-p", "111"]
@@ -347,8 +349,10 @@ class TestReportsBuild:
             mock_q.checkbox.return_value.ask.side_effect = [
                 ["sessions"],  # metrics
                 [],  # no dimensions
+                [],  # additional options
             ]
             mock_q.select.return_value.ask.return_value = "30daysAgo"
+            mock_q.confirm.return_value.ask.return_value = False
 
             result = runner.invoke(
                 app, ["reports", "build", "-p", "111"]
@@ -369,8 +373,10 @@ class TestReportsBuild:
             mock_q.checkbox.return_value.ask.side_effect = [
                 ["sessions"],
                 [],
+                [],  # additional options
             ]
             mock_q.select.return_value.ask.return_value = "7daysAgo"
+            mock_q.confirm.return_value.ask.return_value = False
 
             runner.invoke(app, ["reports", "build", "-p", "111"])
 
@@ -395,8 +401,10 @@ class TestReportsBuild:
             mock_q.checkbox.return_value.ask.side_effect = [
                 ["sessions"],
                 [],
+                [],  # additional options
             ]
             mock_q.select.return_value.ask.return_value = "7daysAgo"
+            mock_q.confirm.return_value.ask.return_value = False
 
             result = runner.invoke(
                 app, ["reports", "build", "-p", "111"]
@@ -728,3 +736,358 @@ class TestMetadata:
 
         assert result.exit_code == 0
         assert "No metadata" in result.output
+
+
+# ---------------------------------------------------------------------------
+# New feature tests: filters, order-by, date ranges, misc options
+# ---------------------------------------------------------------------------
+
+class TestReportsRunFilters:
+    def test_run_with_dim_filter(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "run", "-p", "111", "--dim-filter", "country==US"]
+            )
+
+        assert result.exit_code == 0
+        call_args = mock_client.properties.return_value.runReport.call_args
+        body = call_args[1]["body"]
+        assert "dimensionFilter" in body
+        assert body["dimensionFilter"]["filter"]["fieldName"] == "country"
+
+    def test_run_with_multiple_dim_filters(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "reports", "run", "-p", "111",
+                    "--dim-filter", "country==US",
+                    "--dim-filter", "pagePath contains /blog",
+                ],
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert "andGroup" in body["dimensionFilter"]
+        assert len(body["dimensionFilter"]["andGroup"]["expressions"]) == 2
+
+    def test_run_with_metric_filter(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "run", "-p", "111", "--metric-filter", "sessions>100"]
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert "metricFilter" in body
+        assert body["metricFilter"]["filter"]["numericFilter"]["operation"] == "GREATER_THAN"
+
+    def test_run_with_filter_json_inline(self):
+        import json as json_mod
+
+        filter_expr = json_mod.dumps({
+            "filter": {
+                "fieldName": "country",
+                "stringFilter": {"matchType": "EXACT", "value": "US"},
+            }
+        })
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "run", "-p", "111", "--filter-json", filter_expr]
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert body["dimensionFilter"]["filter"]["fieldName"] == "country"
+
+    def test_run_cannot_combine_dsl_and_json(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "reports", "run", "-p", "111",
+                    "--dim-filter", "country==US",
+                    "--filter-json", '{"filter":{}}',
+                ],
+            )
+
+        assert result.exit_code != 0
+
+    def test_run_invalid_filter_syntax(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "run", "-p", "111", "--dim-filter", "badfilter"]
+            )
+
+        assert result.exit_code != 0
+
+
+class TestReportsRunOrderBy:
+    def test_run_with_order_by_metric(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "run", "-p", "111", "--order-by", "sessions:desc"]
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert body["orderBys"] == [{"metric": {"metricName": "sessions"}, "desc": True}]
+
+    def test_run_with_order_by_dimension(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "reports", "run", "-p", "111",
+                    "-d", "country",
+                    "--order-by", "country:asc:alpha",
+                ],
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert body["orderBys"][0]["dimension"]["dimensionName"] == "country"
+        assert body["orderBys"][0]["dimension"]["orderType"] == "ALPHANUMERIC"
+
+    def test_run_with_multiple_order_bys(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "reports", "run", "-p", "111",
+                    "--order-by", "sessions:desc",
+                    "--order-by", "users:asc",
+                ],
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert len(body["orderBys"]) == 2
+
+
+class TestReportsRunDateRanges:
+    def test_run_with_single_date_range_flag(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                ["reports", "run", "-p", "111", "--date-range", "30daysAgo,today"],
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert body["dateRanges"] == [{"startDate": "30daysAgo", "endDate": "today"}]
+
+    def test_run_with_multiple_date_ranges(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "reports", "run", "-p", "111",
+                    "--date-range", "7daysAgo,today",
+                    "--date-range", "30daysAgo,8daysAgo",
+                ],
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert len(body["dateRanges"]) == 2
+
+    def test_date_range_overrides_start_end(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "reports", "run", "-p", "111",
+                    "--start-date", "90daysAgo",
+                    "--end-date", "yesterday",
+                    "--date-range", "7daysAgo,today",
+                ],
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        # --date-range should take precedence
+        assert body["dateRanges"] == [{"startDate": "7daysAgo", "endDate": "today"}]
+
+
+class TestReportsRunMiscOptions:
+    def test_run_with_offset(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            runner.invoke(
+                app, ["reports", "run", "-p", "111", "--offset", "50"]
+            )
+
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert body["offset"] == 50
+
+    def test_run_with_currency_code(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            runner.invoke(
+                app, ["reports", "run", "-p", "111", "--currency-code", "EUR"]
+            )
+
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert body["currencyCode"] == "EUR"
+
+    def test_run_with_keep_empty_rows(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            runner.invoke(
+                app, ["reports", "run", "-p", "111", "--keep-empty-rows"]
+            )
+
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert body["keepEmptyRows"] is True
+
+    def test_run_with_return_property_quota(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            runner.invoke(
+                app, ["reports", "run", "-p", "111", "--return-property-quota"]
+            )
+
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert body["returnPropertyQuota"] is True
+
+    def test_run_with_metric_aggregations(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "reports", "run", "-p", "111",
+                    "--metric-aggregation", "TOTAL",
+                    "--metric-aggregation", "MAXIMUM",
+                ],
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert body["metricAggregations"] == ["TOTAL", "MAXIMUM"]
+
+
+class TestRealtimeFilters:
+    def test_realtime_with_dim_filter(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                ["reports", "realtime", "-p", "111", "--dim-filter", "country==US"],
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runRealtimeReport.call_args[1]["body"]
+        assert "dimensionFilter" in body
+
+    def test_realtime_with_order_by(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                ["reports", "realtime", "-p", "111", "--order-by", "activeUsers:desc"],
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runRealtimeReport.call_args[1]["body"]
+        assert "orderBys" in body
+
+    def test_realtime_with_minute_range(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                ["reports", "realtime", "-p", "111", "--minute-range", "0,4"],
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runRealtimeReport.call_args[1]["body"]
+        assert body["minuteRanges"] == [{"startMinutesAgo": 0, "endMinutesAgo": 4}]
+
+    def test_realtime_with_metric_aggregation(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app,
+                ["reports", "realtime", "-p", "111", "--metric-aggregation", "TOTAL"],
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runRealtimeReport.call_args[1]["body"]
+        assert body["metricAggregations"] == ["TOTAL"]
