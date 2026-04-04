@@ -13,7 +13,7 @@ SAMPLE_BATCH_RESPONSE = {
     "reports": [
         {
             "dimensionHeaders": [{"name": "date"}],
-            "metricHeaders": [{"name": "sessions"}, {"name": "users"}],
+            "metricHeaders": [{"name": "sessions"}, {"name": "totalUsers"}],
             "rows": [
                 {
                     "dimensionValues": [{"value": "20240101"}],
@@ -39,7 +39,7 @@ SAMPLE_BATCH_RESPONSE = {
 BATCH_CONFIG = {
     "reports": [
         {
-            "metrics": ["sessions", "users"],
+            "metrics": ["sessions", "totalUsers"],
             "dimensions": ["date"],
             "dateRanges": [{"startDate": "7daysAgo", "endDate": "yesterday"}],
             "limit": 100,

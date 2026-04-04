@@ -237,7 +237,7 @@ Get/set hybrid: no update flags = GET, any update flag = PATCH. Enhanced measure
 
 ### Reports
 ```bash
-ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE [--limit N] [-o json]  # pipe: | jq '[.[] | {date, sessions, users}]'
+ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE [--limit N] [-o json]  # pipe: | jq '[.[] | {date, sessions, totalUsers}]'
 ga reports pivot [-p PROPERTY_ID] -m metrics -d dimensions --pivot-field FIELD [--start-date DATE] [-o json]
 ga reports check-compatibility [-p PROPERTY_ID] [-m metrics] [-d dimensions] [-o json]
 ga reports metadata [-p PROPERTY_ID] [--type metrics|dimensions] [--search TEXT] [-o json]
@@ -302,7 +302,7 @@ ga config set default_property_id "$PROP"
 ga properties create -a "$ACCT" --name "New Site" --timezone Europe/Berlin --dry-run
 
 # 3. Act: run reports, create resources, etc.
-ga reports run -m sessions,users -d date --start-date 7daysAgo -o json
+ga reports run -m sessions,totalUsers -d date --start-date 7daysAgo -o json
 ```
 
 ### Extracting IDs from JSON output
@@ -348,7 +348,7 @@ _SECTION_REPORTS = r"""# Reports — Detailed Reference
 | Metric | Description |
 |--------|-------------|
 | `sessions` | Total sessions |
-| `users` | Total users |
+| `totalUsers` | Total users |
 | `newUsers` | New users |
 | `screenPageViews` | Page/screen views |
 | `eventCount` | Total events |
@@ -375,7 +375,7 @@ _SECTION_REPORTS = r"""# Reports — Detailed Reference
 ## Pivot Reports
 The `--pivot-field` must be one of the `--dimensions`. It becomes column headers in table output.
 ```bash
-ga reports pivot -p 987654321 -m sessions,users -d country,deviceCategory --pivot-field deviceCategory --start-date 7daysAgo -o json
+ga reports pivot -p 987654321 -m sessions,totalUsers -d country,deviceCategory --pivot-field deviceCategory --start-date 7daysAgo -o json
 ```
 
 ## Compatibility Check
@@ -672,9 +672,9 @@ done
 ## Traffic Report (Last 30 Days)
 ```bash
 P=987654321
-ga reports run -p $P -m sessions,users,engagementRate -d sessionDefaultChannelGroup --start-date 30daysAgo -o json
-ga reports run -p $P -m sessions,users -d deviceCategory --start-date 30daysAgo -o json
-ga reports run -p $P -m screenPageViews,users -d pagePath --start-date 30daysAgo --limit 20 -o json
+ga reports run -p $P -m sessions,totalUsers,engagementRate -d sessionDefaultChannelGroup --start-date 30daysAgo -o json
+ga reports run -p $P -m sessions,totalUsers -d deviceCategory --start-date 30daysAgo -o json
+ga reports run -p $P -m screenPageViews,totalUsers -d pagePath --start-date 30daysAgo --limit 20 -o json
 ```
 
 ## Create Property with Streams

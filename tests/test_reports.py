@@ -11,7 +11,7 @@ runner = CliRunner()
 
 SAMPLE_REPORT_RESPONSE = {
     "dimensionHeaders": [{"name": "date"}],
-    "metricHeaders": [{"name": "sessions"}, {"name": "users"}],
+    "metricHeaders": [{"name": "sessions"}, {"name": "totalUsers"}],
     "rows": [
         {
             "dimensionValues": [{"value": "20240101"}],
@@ -39,7 +39,7 @@ SAMPLE_REALTIME_RESPONSE = {
 SAMPLE_METADATA = {
     "metrics": [
         {"apiName": "sessions"},
-        {"apiName": "users"},
+        {"apiName": "totalUsers"},
         {"apiName": "screenPageViews"},
     ],
     "dimensions": [
@@ -303,7 +303,7 @@ class TestReportsBuild:
             patch("ga_cli.commands.reports.questionary") as mock_q,
         ):
             mock_q.checkbox.return_value.ask.side_effect = [
-                ["sessions", "users"],  # metrics
+                ["sessions", "totalUsers"],  # metrics
                 ["date"],  # dimensions
                 [],  # additional options
             ]
@@ -560,9 +560,9 @@ class TestTransformReportRows:
         rows, columns, headers = _transform_report_rows(SAMPLE_REPORT_RESPONSE)
 
         assert len(rows) == 2
-        assert rows[0] == {"date": "20240101", "sessions": "150", "users": "100"}
-        assert rows[1] == {"date": "20240102", "sessions": "200", "users": "120"}
-        assert columns == ["date", "sessions", "users"]
+        assert rows[0] == {"date": "20240101", "sessions": "150", "totalUsers": "100"}
+        assert rows[1] == {"date": "20240102", "sessions": "200", "totalUsers": "120"}
+        assert columns == ["date", "sessions", "totalUsers"]
 
     def test_transform_empty_response(self):
         from ga_cli.commands.reports import _transform_report_rows
