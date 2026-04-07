@@ -110,7 +110,7 @@ class TestUpgradeRun:
             "ga_cli.commands.upgrade_cmd.subprocess.run"
         ) as mock_run, patch(
             "ga_cli.commands.upgrade_cmd._detect_installer",
-            return_value=["pip", "install", "--upgrade", "ga-cli"],
+            return_value=["pip", "install", "--upgrade", "google-analytics-cli"],
         ):
             mock_run.return_value = MagicMock(returncode=0)
             result = runner.invoke(app, ["upgrade"])
@@ -137,7 +137,7 @@ class TestUpgradeRun:
             "ga_cli.commands.upgrade_cmd.subprocess.run"
         ) as mock_run, patch(
             "ga_cli.commands.upgrade_cmd._detect_installer",
-            return_value=["pip", "install", "--upgrade", "ga-cli"],
+            return_value=["pip", "install", "--upgrade", "google-analytics-cli"],
         ):
             mock_run.return_value = MagicMock(returncode=0)
             result = runner.invoke(app, ["upgrade", "--force"])
@@ -152,7 +152,7 @@ class TestUpgradeRun:
             "ga_cli.commands.upgrade_cmd.subprocess.run"
         ) as mock_run, patch(
             "ga_cli.commands.upgrade_cmd._detect_installer",
-            return_value=["pip", "install", "--upgrade", "ga-cli"],
+            return_value=["pip", "install", "--upgrade", "google-analytics-cli"],
         ):
             mock_run.return_value = MagicMock(returncode=1, stderr="install error")
             result = runner.invoke(app, ["upgrade"])
@@ -160,18 +160,61 @@ class TestUpgradeRun:
         assert "Upgrade failed" in result.output
 
     def test_upgrade_detects_pipx(self):
+        def _which(name):
+            return "/usr/local/bin/pipx" if name == "pipx" else None
+
         with patch(
             "ga_cli.commands.upgrade_cmd._check_pypi_version", return_value="2.0.0"
         ), patch("ga_cli.commands.upgrade_cmd.__version__", "0.1.0"), patch(
             "ga_cli.commands.upgrade_cmd.subprocess.run"
         ) as mock_run, patch(
-            "ga_cli.commands.upgrade_cmd.shutil.which", return_value="/usr/local/bin/pipx"
+            "ga_cli.commands.upgrade_cmd.shutil.which", side_effect=_which
         ):
             mock_run.return_value = MagicMock(returncode=0)
             result = runner.invoke(app, ["upgrade"])
         assert result.exit_code == 0
         cmd_args = mock_run.call_args[0][0]
         assert "pipx" in cmd_args
+
+    def test_upgrade_detects_uv(self):
+        def _which(name):
+            return "/usr/local/bin/uv" if name == "uv" else None
+
+        with patch(
+            "ga_cli.commands.upgrade_cmd._check_pypi_version", return_value="2.0.0"
+        ), patch("ga_cli.commands.upgrade_cmd.__version__", "0.1.0"), patch(
+            "ga_cli.commands.upgrade_cmd.subprocess.run"
+        ) as mock_run, patch(
+            "ga_cli.commands.upgrade_cmd.shutil.which", side_effect=_which
+        ):
+            mock_run.return_value = MagicMock(returncode=0)
+            result = runner.invoke(app, ["upgrade"])
+        assert result.exit_code == 0
+        cmd_args = mock_run.call_args[0][0]
+        assert "uv" in cmd_args
+
+    def test_upgrade_uv_preferred_over_pipx(self):
+        """When both uv and pipx are available, uv should be preferred."""
+        def _which(name):
+            if name == "uv":
+                return "/usr/local/bin/uv"
+            if name == "pipx":
+                return "/usr/local/bin/pipx"
+            return None
+
+        with patch(
+            "ga_cli.commands.upgrade_cmd._check_pypi_version", return_value="2.0.0"
+        ), patch("ga_cli.commands.upgrade_cmd.__version__", "0.1.0"), patch(
+            "ga_cli.commands.upgrade_cmd.subprocess.run"
+        ) as mock_run, patch(
+            "ga_cli.commands.upgrade_cmd.shutil.which", side_effect=_which
+        ):
+            mock_run.return_value = MagicMock(returncode=0)
+            result = runner.invoke(app, ["upgrade"])
+        assert result.exit_code == 0
+        cmd_args = mock_run.call_args[0][0]
+        assert "uv" in cmd_args
+        assert "pipx" not in cmd_args
 
 
 class TestDailyUpdateCheck:

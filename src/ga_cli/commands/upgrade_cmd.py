@@ -20,7 +20,7 @@ upgrade_app = typer.Typer(
     name="upgrade", help="Check for and install updates", invoke_without_command=True
 )
 
-PYPI_URL = "https://pypi.org/pypi/ga-cli/json"
+PYPI_URL = "https://pypi.org/pypi/google-analytics-cli/json"
 PYPI_TIMEOUT = 5
 UPDATE_CHECK_INTERVAL = 86400  # 24 hours in seconds
 
@@ -49,11 +49,13 @@ def _is_newer(latest: str, current: str) -> bool:
 def _detect_installer() -> list[str]:
     """Detect the best install command to upgrade ga-cli.
 
-    Checks for pipx first, then falls back to pip via the current interpreter.
+    Checks for uv first, then pipx, then falls back to pip.
     """
+    if shutil.which("uv"):
+        return ["uv", "pip", "install", "--upgrade", "google-analytics-cli"]
     if shutil.which("pipx"):
-        return ["pipx", "upgrade", "ga-cli"]
-    return [sys.executable, "-m", "pip", "install", "--upgrade", "ga-cli"]
+        return ["pipx", "upgrade", "google-analytics-cli"]
+    return [sys.executable, "-m", "pip", "install", "--upgrade", "google-analytics-cli"]
 
 
 @upgrade_app.callback(invoke_without_command=True)
@@ -78,11 +80,12 @@ def upgrade_cmd(
     if force:
         info(f"Force-reinstalling ga-cli {current}...")
         cmd = _detect_installer()
-        # Append --force-reinstall for pip-based installs
-        if cmd[0] != "pipx":
-            cmd.append("--force-reinstall")
+        if cmd[0] == "pipx":
+            cmd = ["pipx", "install", "--force", "google-analytics-cli"]
+        elif cmd[0] == "uv":
+            cmd.append("--reinstall")
         else:
-            cmd = ["pipx", "install", "--force", "ga-cli"]
+            cmd.append("--force-reinstall")
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
             success(f"Reinstalled ga-cli {current}.")
