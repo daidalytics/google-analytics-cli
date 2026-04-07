@@ -19,6 +19,7 @@ from .commands.custom_dimensions import custom_dimensions_app
 from .commands.custom_metrics import custom_metrics_app
 from .commands.data_retention import data_retention_app
 from .commands.data_streams import data_streams_app
+from .commands.enhanced_measurement import enhanced_measurement_app
 from .commands.event_create_rules import event_create_rules_app
 from .commands.event_edit_rules import event_edit_rules_app
 from .commands.firebase_links import firebase_links_app
@@ -53,6 +54,7 @@ app.add_typer(audiences_app, name="audiences")
 app.add_typer(bigquery_links_app, name="bigquery-links")
 app.add_typer(calculated_metrics_app, name="calculated-metrics")
 app.add_typer(channel_groups_app, name="channel-groups")
+app.add_typer(enhanced_measurement_app, name="enhanced-measurement")
 app.add_typer(event_create_rules_app, name="event-create-rules")
 app.add_typer(event_edit_rules_app, name="event-edit-rules")
 app.add_typer(firebase_links_app, name="firebase-links")

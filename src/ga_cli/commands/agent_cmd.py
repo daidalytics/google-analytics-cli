@@ -231,9 +231,15 @@ Requires both `--property-id` and `--stream-id`. Create/update use `--config` JS
 ```bash
 ga property-settings attribution [-p PROPERTY_ID] [--attribution-model MODEL] [--acquisition-lookback VAL] [--other-lookback VAL] [--ads-export-scope VAL] [-o json]
 ga property-settings google-signals [-p PROPERTY_ID] [--state GOOGLE_SIGNALS_ENABLED|GOOGLE_SIGNALS_DISABLED] [-o json]
-ga property-settings enhanced-measurement [-p PROPERTY_ID] -s STREAM_ID [--scrolls/--no-scrolls] [--outbound-clicks/--no-outbound-clicks] [...] [-o json]
 ```
-Get/set hybrid: no update flags = GET, any update flag = PATCH. Enhanced measurement requires `--stream-id`.
+Get/set hybrid: no update flags = GET, any update flag = PATCH.
+
+### Enhanced Measurement Settings (alpha)
+```bash
+ga enhanced-measurement get -p PROPERTY_ID -s STREAM_ID [-o json]
+ga enhanced-measurement update -p PROPERTY_ID -s STREAM_ID [--scrolls/--no-scrolls] [--outbound-clicks/--no-outbound-clicks] [--site-search/--no-site-search] [--video-engagement/--no-video-engagement] [--file-downloads/--no-file-downloads] [--page-changes/--no-page-changes] [--form-interactions/--no-form-interactions] [--stream-enabled/--no-stream-enabled] [--search-query-parameter VAL] [--uri-query-parameter VAL] [--dry-run] [-o json]
+```
+Requires both `--property-id` and `--stream-id`. `get` retrieves current settings; `update` requires at least one toggle flag.
 
 ### Reports
 ```bash

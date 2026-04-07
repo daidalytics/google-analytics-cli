@@ -38,7 +38,8 @@ Manage GA4 accounts, properties, data streams, and run reports — all from your
 - **Event create & edit rules** — Manage server-side event creation and modification rules
 - **Firebase links** — List, create, and delete Firebase project links
 - **Google Ads links** — List, create, update, and delete Google Ads account links
-- **Property settings** — View and update attribution, Google Signals, and enhanced measurement settings
+- **Property settings** — View and update attribution and Google Signals settings
+- **Enhanced measurement** — View and update enhanced measurement settings per data stream
 
 ### Interactive usage
 
@@ -196,7 +197,8 @@ export GA_CLI_SERVICE_ACCOUNT="/path/to/key.json"
 | `ga event-edit-rules` | `list`, `get`, `create`, `update`, `delete`, `reorder` | Manage event editing rules |
 | `ga firebase-links` | `list`, `create`, `delete` | Manage Firebase links |
 | `ga google-ads-links` | `list`, `create`, `update`, `delete` | Manage Google Ads links |
-| `ga property-settings` | `attribution`, `google-signals`, `enhanced-measurement` | View and update property settings |
+| `ga enhanced-measurement` | `get`, `update` | Manage enhanced measurement settings |
+| `ga property-settings` | `attribution`, `google-signals` | View and update property settings |
 | `ga reports` | `run`, `pivot`, `batch`, `funnel`, `check-compatibility`, `metadata`, `realtime`, `build` | Run and build reports |
 | `ga agent` | `guide` | AI agent quick reference |
 | `ga upgrade` | `--check`, `--force` | Check for and install updates |
