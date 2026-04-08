@@ -122,14 +122,14 @@ _SUCCESS_HTML = """\
             </svg>
         </div>
         <div class="brand">GA CLI</div>
-        <h1>Authentication Successful</h1>
+        <h1>Connected to Google Analytics</h1>
         <p class="subtitle">
-            You're all set! You can close this window and<br>return to your terminal.
+            Authentication complete. Head back to your terminal<br>to start exploring your GA4 data.
         </p>
-        <div class="command">ga accounts list</div>
+        <div class="command">ga account-summaries list</div>
         <div class="footer">
             Powered by <a href="https://github.com/daidalytics/google-analytics-cli"
-                          target="_blank" rel="noopener">ga-cli</a>
+                          target="_blank" rel="noopener">google-analytics-cli</a>
         </div>
     </div>
 </body>
