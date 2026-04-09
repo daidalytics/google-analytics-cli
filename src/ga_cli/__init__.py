@@ -3,6 +3,6 @@
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    __version__ = version("ga-cli")
+    __version__ = version("google-analytics-cli")
 except PackageNotFoundError:
     __version__ = "0.0.0-dev"
