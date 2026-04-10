@@ -28,7 +28,6 @@ dependencies = [
     "google-auth>=2.0",
     "rich>=13.0",
     "questionary>=2.0",
-    "platformdirs>=4.0",
     "packaging>=23.0",
 ]
 

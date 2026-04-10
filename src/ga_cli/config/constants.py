@@ -1,9 +1,8 @@
 """Application constants and configuration paths."""
 
 import os
+import shutil
 from pathlib import Path
-
-from platformdirs import user_config_dir
 
 # App identity
 APP_NAME = "ga-cli"
@@ -21,14 +20,49 @@ OAUTH_SCOPES = [
 # OAuth callback server
 OAUTH_CALLBACK_PORT = 8085
 
+# Track whether we've already attempted the legacy macOS migration this process.
+_legacy_migration_attempted = False
+
+
+def _migrate_legacy_macos_config(new_dir: Path) -> None:
+    """Move config from the legacy macOS path to the new XDG-style path.
+
+    Versions <=0.2.1 used ``platformdirs``, which on macOS resolves to
+    ``~/Library/Application Support/ga-cli/``. We now standardize on
+    ``~/.config/ga-cli/`` across all platforms. If the legacy directory exists
+    and the new one doesn't, move it. Runs at most once per process.
+    """
+    global _legacy_migration_attempted
+    if _legacy_migration_attempted:
+        return
+    _legacy_migration_attempted = True
+
+    legacy_dir = Path.home() / "Library" / "Application Support" / APP_NAME
+    if legacy_dir.is_dir() and not new_dir.exists():
+        try:
+            new_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(legacy_dir), str(new_dir))
+        except OSError:
+            # Migration is best-effort; fall through and let callers create
+            # the new directory themselves if needed.
+            pass
+
+
 # Configuration directory
-# Priority: GA_CLI_CONFIG_DIR env var > platformdirs (XDG-compliant)
+# Priority: GA_CLI_CONFIG_DIR env var > ~/.config/ga-cli/ (all platforms)
 def get_config_dir() -> Path:
-    """Get the configuration directory path."""
+    """Get the configuration directory path.
+
+    Resolution order:
+      1. ``GA_CLI_CONFIG_DIR`` environment variable (used in tests too).
+      2. ``~/.config/ga-cli/`` on all platforms.
+    """
     env_dir = os.environ.get("GA_CLI_CONFIG_DIR")
     if env_dir:
         return Path(env_dir)
-    return Path(user_config_dir(APP_NAME))  # ~/.config/ga-cli/ on Linux/macOS
+    config_dir = Path.home() / ".config" / APP_NAME
+    _migrate_legacy_macos_config(config_dir)
+    return config_dir
 
 
 def get_credentials_path() -> Path:

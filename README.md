@@ -265,6 +265,20 @@ jobs:
           rm /tmp/sa-key.json
 ```
 
+## Troubleshooting
+
+**`ga` runs `git add` instead of GA CLI.** You have a shell alias shadowing the command — commonly `alias ga='git add'` in `~/.gitconfig`-style setups or `~/.zshrc`/`~/.bashrc`. Run `type ga` to confirm, then `unalias ga` (or remove the alias from your shell config) and restart your shell.
+
+**`ga: command not found` after install.** Your Python user bin directory isn't on `PATH`. For `pip install --user`, `pipx`, or `uv tool install`, the binary lives in `~/.local/bin` on Linux/macOS. Add it to your shell config:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc  # or ~/.bashrc
+```
+
+Then restart your shell. `pipx ensurepath` and `uv tool update-shell` can do this automatically.
+
+**Upgrading from 0.2.1 or earlier on macOS.** Older versions stored config at `~/Library/Application Support/ga-cli/`. GA CLI now uses `~/.config/ga-cli/` on all platforms and will migrate the directory automatically the first time you run any command. No action required.
+
 ## Privacy
 
 GA CLI stores authentication credentials locally on your machine. No data is sent to any third party — all communication is directly between your machine and Google's APIs.
