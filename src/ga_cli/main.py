@@ -30,6 +30,7 @@ from .commands.properties import properties_app
 from .commands.property_settings import property_settings_app
 from .commands.reports import reports_app
 from .commands.upgrade_cmd import upgrade_app
+from .commands.user_provided_data import user_provided_data_app
 
 app = typer.Typer(
     name="ga",
@@ -65,6 +66,7 @@ app.add_typer(property_settings_app, name="property-settings")
 app.add_typer(reports_app, name="reports")
 app.add_typer(agent_app, name="agent")
 app.add_typer(upgrade_app, name="upgrade")
+app.add_typer(user_provided_data_app, name="user-provided-data")
 app.add_typer(completions_app, name="completions")
 
 
