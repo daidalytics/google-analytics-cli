@@ -4,6 +4,8 @@ Command-line interface for Google Analytics 4.
 
 Manage GA4 accounts, properties, data streams, and run reports — all from your terminal.
 
+Read an introductory blog post on the GA CLI on [gunnargriese.com](https://gunnargriese.com/posts/google-analytics-cli/).
+
 ## Features
 
 ### Authentication
