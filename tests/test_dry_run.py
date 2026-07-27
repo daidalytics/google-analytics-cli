@@ -454,7 +454,7 @@ class TestAnnotationsCreateDryRun:
         data = _parse_dry_run(result)
         assert data["action"] == "create"
         assert data["body"]["title"] == "Deploy v2"
-        assert data["body"]["annotationDate"] == "2025-01-15"
+        assert data["body"]["annotationDate"] == {"year": 2025, "month": 1, "day": 15}
 
 
 class TestAnnotationsUpdateDryRun:

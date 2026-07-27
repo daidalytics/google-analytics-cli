@@ -1,5 +1,6 @@
 """Reporting data annotation management commands."""
 
+import datetime
 from typing import Optional
 
 import questionary
@@ -114,7 +115,11 @@ def create_cmd(
         ..., "--annotation-date", help="Date in YYYY-MM-DD format"
     ),
     description: str = typer.Option("", "--description", help="Annotation description"),
-    color: Optional[str] = typer.Option(None, "--color", help="Annotation color"),
+    color: str = typer.Option(
+        "BLUE",
+        "--color",
+        help="Annotation color (PURPLE, BROWN, BLUE, GREEN, RED, CYAN)",
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Preview the request without executing"
     ),
@@ -123,18 +128,36 @@ def create_cmd(
     ),
 ):
     """Create a reporting data annotation."""
+    VALID_COLORS = {"PURPLE", "BROWN", "BLUE", "GREEN", "RED", "CYAN"}
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
         effective_format = resolve_output_format(output_format)
 
+        try:
+            d = datetime.date.fromisoformat(annotation_date)
+        except ValueError:
+            raise typer.BadParameter(
+                f"Invalid date '{annotation_date}'. Use YYYY-MM-DD format."
+            )
+
+        if len(description) > 150:
+            raise typer.BadParameter(
+                "Description must be 150 characters or fewer."
+            )
+
+        color_upper = color.upper()
+        if color_upper not in VALID_COLORS:
+            raise typer.BadParameter(
+                f"Invalid color '{color}'. Must be one of: {', '.join(sorted(VALID_COLORS))}"
+            )
+
         body = {
             "title": title,
-            "annotationDate": annotation_date,
+            "annotationDate": {"year": d.year, "month": d.month, "day": d.day},
             "description": description,
+            "color": color_upper,
         }
-        if color is not None:
-            body["color"] = color
 
         if dry_run:
             handle_dry_run("create", "POST", f"properties/{effective_property}", body)
@@ -147,7 +170,7 @@ def create_cmd(
             .execute()
         )
         output(annotation, effective_format)
-    except typer.Exit:
+    except (typer.BadParameter, typer.Exit):
         raise
     except Exception as e:
         handle_error(e)
@@ -163,7 +186,9 @@ def update_cmd(
     ),
     title: Optional[str] = typer.Option(None, "--title", help="New title"),
     description: Optional[str] = typer.Option(None, "--description", help="New description"),
-    color: Optional[str] = typer.Option(None, "--color", help="New color"),
+    color: Optional[str] = typer.Option(
+        None, "--color", help="New color (PURPLE, BROWN, BLUE, GREEN, RED, CYAN)"
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Preview the request without executing"
     ),
@@ -172,6 +197,7 @@ def update_cmd(
     ),
 ):
     """Update a reporting data annotation."""
+    VALID_COLORS = {"PURPLE", "BROWN", "BLUE", "GREEN", "RED", "CYAN"}
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
@@ -183,10 +209,19 @@ def update_cmd(
             body["title"] = title
             mask_fields.append("title")
         if description is not None:
+            if len(description) > 150:
+                raise typer.BadParameter(
+                    "Description must be 150 characters or fewer."
+                )
             body["description"] = description
             mask_fields.append("description")
         if color is not None:
-            body["color"] = color
+            color_upper = color.upper()
+            if color_upper not in VALID_COLORS:
+                raise typer.BadParameter(
+                    f"Invalid color '{color}'. Must be one of: {', '.join(sorted(VALID_COLORS))}"
+                )
+            body["color"] = color_upper
             mask_fields.append("color")
 
         if not mask_fields:

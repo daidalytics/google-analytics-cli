@@ -203,7 +203,7 @@ class TestAnnotationsCreate:
         call_args = ann.create.call_args
         body = call_args[1]["body"]
         assert body["title"] == "Site Redesign Launch"
-        assert body["annotationDate"] == "2025-03-15"
+        assert body["annotationDate"] == {"year": 2025, "month": 3, "day": 15}
 
     def test_create_with_all_fields(self):
         mock_client = _mock_admin_alpha_client()
@@ -230,6 +230,54 @@ class TestAnnotationsCreate:
         assert body["description"] == "Spring campaign"
         assert body["color"] == "GREEN"
 
+    def test_create_date_as_google_type_date(self):
+        mock_client = _mock_admin_alpha_client()
+
+        with patch(
+            "ga_cli.commands.annotations.get_admin_alpha_client",
+            return_value=mock_client,
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "annotations", "create",
+                    "-p", "123",
+                    "--title", "Test",
+                    "--annotation-date", "2026-07-22",
+                ],
+            )
+
+        assert result.exit_code == 0
+        ann = mock_client.properties.return_value.reportingDataAnnotations.return_value
+        body = ann.create.call_args[1]["body"]
+        assert body["annotationDate"] == {"year": 2026, "month": 7, "day": 22}
+
+    def test_create_invalid_date(self):
+        result = runner.invoke(
+            app,
+            [
+                "annotations", "create",
+                "-p", "123",
+                "--title", "Test",
+                "--annotation-date", "not-a-date",
+            ],
+        )
+
+        assert result.exit_code != 0
+
+    def test_create_invalid_date_values(self):
+        result = runner.invoke(
+            app,
+            [
+                "annotations", "create",
+                "-p", "123",
+                "--title", "Test",
+                "--annotation-date", "2025-13-01",
+            ],
+        )
+
+        assert result.exit_code != 0
+
     def test_create_requires_title(self):
         result = runner.invoke(
             app,
@@ -253,6 +301,41 @@ class TestAnnotationsCreate:
         )
 
         assert result.exit_code != 0
+
+    def test_create_description_too_long(self):
+        result = runner.invoke(
+            app,
+            [
+                "annotations", "create",
+                "-p", "123",
+                "--title", "Test",
+                "--annotation-date", "2025-03-15",
+                "--description", "x" * 151,
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "150" in result.output
+
+    def test_create_description_at_limit(self):
+        mock_client = _mock_admin_alpha_client()
+
+        with patch(
+            "ga_cli.commands.annotations.get_admin_alpha_client",
+            return_value=mock_client,
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "annotations", "create",
+                    "-p", "123",
+                    "--title", "Test",
+                    "--annotation-date", "2025-03-15",
+                    "--description", "x" * 150,
+                ],
+            )
+
+        assert result.exit_code == 0
 
     def test_create_api_error(self):
         from googleapiclient.errors import HttpError
@@ -371,6 +454,34 @@ class TestAnnotationsUpdate:
         assert "title" in mask
         assert "description" in mask
         assert "color" in mask
+
+    def test_update_invalid_color(self):
+        result = runner.invoke(
+            app,
+            [
+                "annotations", "update",
+                "-p", "123",
+                "-a", "1",
+                "--color", "INVALID",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "Must be one of" in result.output
+
+    def test_update_description_too_long(self):
+        result = runner.invoke(
+            app,
+            [
+                "annotations", "update",
+                "-p", "123",
+                "-a", "1",
+                "--description", "x" * 151,
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "150" in result.output
 
     def test_update_no_fields(self):
         mock_client = _mock_admin_alpha_client()
