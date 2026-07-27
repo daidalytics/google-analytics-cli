@@ -128,7 +128,7 @@ def create_cmd(
     ),
 ):
     """Create a reporting data annotation."""
-    VALID_COLORS = {"PURPLE", "BROWN", "BLUE", "GREEN", "RED", "CYAN"}
+    valid_colors = {"PURPLE", "BROWN", "BLUE", "GREEN", "RED", "CYAN"}
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
@@ -147,9 +147,9 @@ def create_cmd(
             )
 
         color_upper = color.upper()
-        if color_upper not in VALID_COLORS:
+        if color_upper not in valid_colors:
             raise typer.BadParameter(
-                f"Invalid color '{color}'. Must be one of: {', '.join(sorted(VALID_COLORS))}"
+                f"Invalid color '{color}'. Must be one of: {', '.join(sorted(valid_colors))}"
             )
 
         body = {
@@ -197,7 +197,7 @@ def update_cmd(
     ),
 ):
     """Update a reporting data annotation."""
-    VALID_COLORS = {"PURPLE", "BROWN", "BLUE", "GREEN", "RED", "CYAN"}
+    valid_colors = {"PURPLE", "BROWN", "BLUE", "GREEN", "RED", "CYAN"}
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
         require_options({"property_id": effective_property}, ["property_id"])
@@ -217,9 +217,9 @@ def update_cmd(
             mask_fields.append("description")
         if color is not None:
             color_upper = color.upper()
-            if color_upper not in VALID_COLORS:
+            if color_upper not in valid_colors:
                 raise typer.BadParameter(
-                    f"Invalid color '{color}'. Must be one of: {', '.join(sorted(VALID_COLORS))}"
+                    f"Invalid color '{color}'. Must be one of: {', '.join(sorted(valid_colors))}"
                 )
             body["color"] = color_upper
             mask_fields.append("color")
