@@ -1057,13 +1057,40 @@ def _render_chat_blocks(blocks: list[dict], effective_format: str) -> None:
             output(rows, effective_format, columns=headers, headers=headers)
 
 
+def _display_chat_quota(result: dict) -> None:
+    """Render PropertyChatQuota.
+
+    Deliberately separate from _display_quota: PropertyChatQuota exposes only
+    tokensPerDay and tokensPerHour, while _display_quota iterates five keys
+    that do not exist on this type.
+    """
+    quota = result.get("propertyQuota")
+    if not quota:
+        return
+
+    parts = []
+    for key in ("tokensPerDay", "tokensPerHour"):
+        q = quota.get(key)
+        if q:
+            parts.append(f"{key}: {q.get('consumed', '?')}/{q.get('remaining', '?')}")
+
+    if parts:
+        info(f"Quota: {', '.join(parts)}")
+
+
 def _chat_execute(
-    data_alpha, property_id: str, query: str, session_id: str | None
+    data_alpha,
+    property_id: str,
+    query: str,
+    session_id: str | None,
+    return_quota: bool = False,
 ) -> dict:
     """Send one chat turn, translating chat-specific API failures."""
     body: dict = {"userQuery": query}
     if session_id:
         body["sessionId"] = session_id
+    if return_quota:
+        body["returnPropertyQuota"] = True
 
     try:
         return (
@@ -1101,6 +1128,7 @@ def _chat_repl(
     first_query: str | None,
     session_id: str | None,
     effective_format: str,
+    return_quota: bool = True,
 ) -> None:
     """Run a multi-turn conversation, threading the session between turns."""
     current_session = session_id
@@ -1123,7 +1151,9 @@ def _chat_repl(
         if not turn or turn.lower() in _REPL_EXIT_WORDS:
             break
 
-        result = _chat_execute(data_alpha, property_id, turn, current_session)
+        result = _chat_execute(
+            data_alpha, property_id, turn, current_session, return_quota
+        )
 
         returned = result.get("sessionId")
         if returned:
@@ -1135,6 +1165,10 @@ def _chat_repl(
             print(json.dumps(result, default=str))
         else:
             _render_chat_blocks(result.get("blocks", []), effective_format)
+
+        if return_quota:
+            # Show consumption as it accumulates, not after a limit is hit.
+            _display_chat_quota(result)
 
     if current_session:
         _print_chat_session(current_session, effective_format)
@@ -1156,6 +1190,11 @@ def chat_cmd(
     ),
     interactive: bool = typer.Option(
         False, "--interactive", "-i", help="Start a multi-turn conversation"
+    ),
+    return_property_quota: Optional[bool] = typer.Option(
+        None,
+        "--return-property-quota/--no-return-property-quota",
+        help="Show chat token quota. Defaults on in --interactive, off otherwise.",
     ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
@@ -1195,6 +1234,13 @@ def chat_cmd(
 
         data_alpha = get_data_alpha_client()
 
+        # Tri-state: an explicit flag always wins. Left unset, quota is on in
+        # the REPL where consumption accumulates, off for one-shot calls so
+        # scripted output stays clean.
+        show_quota = (
+            interactive if return_property_quota is None else return_property_quota
+        )
+
         if interactive:
             _chat_repl(
                 data_alpha,
@@ -1202,11 +1248,12 @@ def chat_cmd(
                 query,
                 session_id,
                 effective_format,
+                show_quota,
             )
             return
 
         result = _chat_execute(
-            data_alpha, effective_property, query.strip(), session_id
+            data_alpha, effective_property, query.strip(), session_id, show_quota
         )
 
         returned_session = result.get("sessionId")
@@ -1223,6 +1270,9 @@ def chat_cmd(
 
         if returned_session:
             _print_chat_session(returned_session, effective_format)
+
+        if show_quota:
+            _display_chat_quota(result)
 
     except typer.BadParameter:
         raise

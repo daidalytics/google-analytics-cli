@@ -693,3 +693,114 @@ class TestChatInteractive:
             result = runner.invoke(app, ["reports", "chat", "-p", "111", "--interactive"])
 
         assert result.exit_code == 0
+
+
+QUOTA_RESPONSE = {
+    "sessionId": "s1",
+    "blocks": [{"text": "answer"}],
+    "propertyQuota": {
+        "tokensPerDay": {"consumed": 1240, "remaining": 8760},
+        "tokensPerHour": {"consumed": 180, "remaining": 820},
+    },
+}
+
+
+class TestChatQuota:
+    def test_one_shot_does_not_request_quota_by_default(self, isolated_config_dir):
+        """Scripted output stays clean unless the caller asks."""
+        mock_client = _mock_chat_client()
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            runner.invoke(app, ["reports", "chat", "-p", "111", "q"])
+
+        assert not _chat_body(mock_client).get("returnPropertyQuota")
+
+    def test_explicit_flag_requests_quota_in_one_shot(self, isolated_config_dir):
+        mock_client = _mock_chat_client(QUOTA_RESPONSE)
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["reports", "chat", "-p", "111", "q", "--return-property-quota"]
+            )
+
+        assert result.exit_code == 0
+        assert _chat_body(mock_client)["returnPropertyQuota"] is True
+
+    def test_interactive_requests_quota_by_default(self, isolated_config_dir):
+        """Chat is token-metered; show consumption where it accumulates."""
+        client = _mock_chat_sequence([QUOTA_RESPONSE])
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client), \
+             _prompts("one", "exit"):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "--interactive"])
+
+        assert result.exit_code == 0
+        assert _chat_bodies(client)[0]["returnPropertyQuota"] is True
+
+    def test_interactive_quota_can_be_turned_off(self, isolated_config_dir):
+        client = _mock_chat_sequence([{"sessionId": "s1", "blocks": []}])
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client), \
+             _prompts("one", "exit"):
+            result = runner.invoke(
+                app,
+                ["reports", "chat", "-p", "111", "--interactive",
+                 "--no-return-property-quota"],
+            )
+
+        assert result.exit_code == 0
+        assert not _chat_bodies(client)[0].get("returnPropertyQuota")
+
+    def test_renders_both_chat_quota_fields(self, isolated_config_dir):
+        mock_client = _mock_chat_client(QUOTA_RESPONSE)
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["reports", "chat", "-p", "111", "q", "--return-property-quota"]
+            )
+
+        combined = _strip_ansi(result.output)
+        assert "tokensPerDay" in combined
+        assert "1240" in combined
+        assert "tokensPerHour" in combined
+        assert "180" in combined
+
+    def test_tolerates_a_partial_quota_payload(self, isolated_config_dir):
+        """PropertyChatQuota exposes only two fields; either may be absent."""
+        mock_client = _mock_chat_client({
+            "sessionId": "s1",
+            "blocks": [{"text": "a"}],
+            "propertyQuota": {"tokensPerDay": {"consumed": 5, "remaining": 95}},
+        })
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["reports", "chat", "-p", "111", "q", "--return-property-quota"]
+            )
+
+        assert result.exit_code == 0
+        assert "tokensPerDay" in _strip_ansi(result.output)
+
+    def test_no_quota_in_response_renders_nothing(self, isolated_config_dir):
+        mock_client = _mock_chat_client()
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["reports", "chat", "-p", "111", "q", "--return-property-quota"]
+            )
+
+        assert result.exit_code == 0
+        assert "Quota" not in _strip_ansi(result.output)
+
+    def test_quota_stays_off_stdout_in_json_mode(self, isolated_config_dir):
+        """The raw response already carries propertyQuota; stdout stays valid JSON."""
+        mock_client = _mock_chat_client(QUOTA_RESPONSE)
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                ["reports", "chat", "-p", "111", "q", "--return-property-quota", "-o", "json"],
+            )
+
+        assert result.exit_code == 0
+        assert json.loads(result.stdout) == QUOTA_RESPONSE
