@@ -913,6 +913,88 @@ def funnel_cmd(
         handle_error(e)
 
 
+def _render_chat_blocks(blocks: list[dict], effective_format: str) -> None:
+    """Render ChatResponse blocks in document order.
+
+    Block order is meaningful — a text block typically introduces the table
+    that follows it — so blocks are emitted exactly as returned. Blocks whose
+    type we don't recognise are skipped rather than raising: this is an alpha
+    surface and new block types are expected.
+    """
+    for block in blocks:
+        text = block.get("text")
+        if text:
+            if effective_format == "compact":
+                print(text)
+            else:
+                # markup=False: response text is model-generated and may contain
+                # square brackets that Rich would otherwise parse as style tags.
+                console.print(text, markup=False)
+
+
+@reports_app.command("chat")
+def chat_cmd(
+    query: Optional[str] = typer.Argument(
+        None, help="Your question, in plain language"
+    ),
+    property_id: Optional[str] = typer.Option(
+        None, "--property-id", "-p", help="Property ID (numeric)"
+    ),
+    session_id: Optional[str] = typer.Option(
+        None, "--session-id", help="Continue a specific chat session"
+    ),
+    output_format: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output format (json, table, compact)"
+    ),
+):
+    """Ask a question about a property in plain language (alpha).
+
+    Chat is an alpha feature with limited availability; it may not be enabled
+    for your account. Uses AI and may return inaccurate information.
+    """
+    try:
+        effective_property = get_effective_value(property_id, "default_property_id")
+        require_options({"property_id": effective_property}, ["property_id"])
+        effective_format = resolve_output_format(output_format)
+
+        if query is None or not query.strip():
+            raise typer.BadParameter(
+                'A question is required. Example: ga reports chat "how many users last week?"'
+            )
+
+        body: dict = {"userQuery": query.strip()}
+        if session_id:
+            body["sessionId"] = session_id
+
+        data_alpha = get_data_alpha_client()
+        result = (
+            data_alpha.properties()
+            .chat(property=f"properties/{effective_property}", body=body)
+            .execute()
+        )
+
+        # Raw passthrough: agents get sessionId, blocks and propertyQuota
+        # exactly as the API returned them.
+        if effective_format == "json":
+            output(result, effective_format)
+            return
+
+        _render_chat_blocks(result.get("blocks", []), effective_format)
+
+        returned_session = result.get("sessionId")
+        if returned_session:
+            if effective_format == "compact":
+                # Keep stdout pipeable.
+                info(f"Session: {returned_session}")
+            else:
+                console.print(f"\n[dim]Session: {returned_session}[/dim]")
+
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        handle_error(e)
+
+
 _DIM_FILTER_OPERATORS = [
     "equals (==)",
     "not equals (!=)",
