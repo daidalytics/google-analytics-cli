@@ -4,16 +4,27 @@ Uses the Analytics Data API v1beta.
 """
 
 import json
+import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import NoReturn, Optional
 
 import questionary
 import typer
 
 from ..api.client import get_data_alpha_client, get_data_client
+from ..auth.credentials import has_scope
+from ..config.constants import CHAT_SCOPE
 from ..config.store import get_effective_value
-from ..utils import console, handle_error, info, output, require_options, resolve_output_format
+from ..utils import (
+    console,
+    error,
+    handle_error,
+    info,
+    output,
+    require_options,
+    resolve_output_format,
+)
 from ..utils.filters import (
     parse_date_ranges,
     parse_dim_filters,
@@ -913,6 +924,68 @@ def funnel_cmd(
         handle_error(e)
 
 
+def _chat_auth_error(message: str, status_code: int | None = None) -> NoReturn:
+    """Exit with an auth error, matching handle_error's output contract.
+
+    Kept local to chat rather than added to utils.errors: only this command
+    needs to substitute its own message for an API error. Promote it if a
+    second caller ever appears.
+    """
+    from ..utils.output import get_current_output_format
+
+    if get_current_output_format() == "json":
+        payload: dict = {
+            "error": True,
+            "exit_code": 2,
+            "category": "auth_error",
+            "message": message,
+        }
+        if status_code is not None:
+            payload["status_code"] = status_code
+        print(json.dumps(payload), file=sys.stderr)
+    else:
+        error(message)
+
+    sys.exit(2)
+
+
+def _require_chat_scope() -> None:
+    """Fail early when stored credentials predate the chat scope.
+
+    A refresh token cannot gain a scope it was never granted, so users who
+    authenticated before 0.3.0 must log in again. Catching it here turns an
+    opaque "Request had insufficient authentication scopes" 403 into an
+    instruction.
+    """
+    if has_scope(CHAT_SCOPE):
+        return
+
+    _chat_auth_error(
+        "Your saved credentials do not include the GA chat scope.\n"
+        "Run 'ga auth login' to re-authenticate and grant it.\n"
+        f"(scope: {CHAT_SCOPE})"
+    )
+
+
+def _chat_forbidden_error(property_id: str, status_code: int) -> NoReturn:
+    """Explain a 403 without asserting a cause we cannot determine.
+
+    The API returns the generic Data API permission message whether the
+    caller lacks property access or chat simply is not enabled for their
+    account, so both are named and a command that distinguishes them is
+    suggested.
+    """
+    _chat_auth_error(
+        f"The GA4 chat API refused this request ({status_code}).\n"
+        "This means either:\n"
+        f"  - your account lacks access to property {property_id}, or\n"
+        "  - the chat feature is not enabled for your account.\n"
+        "Chat is an alpha feature with limited availability.\n"
+        f"Verify your access with: ga properties get -p {property_id}",
+        status_code=status_code,
+    )
+
+
 def _render_chat_blocks(blocks: list[dict], effective_format: str) -> None:
     """Render ChatResponse blocks in document order.
 
@@ -987,16 +1060,25 @@ def chat_cmd(
                 'A question is required. Example: ga reports chat "how many users last week?"'
             )
 
+        _require_chat_scope()
+
         body: dict = {"userQuery": query.strip()}
         if session_id:
             body["sessionId"] = session_id
 
         data_alpha = get_data_alpha_client()
-        result = (
-            data_alpha.properties()
-            .chat(property=f"properties/{effective_property}", body=body)
-            .execute()
-        )
+        try:
+            result = (
+                data_alpha.properties()
+                .chat(property=f"properties/{effective_property}", body=body)
+                .execute()
+            )
+        except Exception as exc:
+            from googleapiclient.errors import HttpError
+
+            if isinstance(exc, HttpError) and exc.resp.status == 403:
+                _chat_forbidden_error(effective_property, exc.resp.status)
+            raise
 
         # Raw passthrough: agents get sessionId, blocks and propertyQuota
         # exactly as the API returned them.

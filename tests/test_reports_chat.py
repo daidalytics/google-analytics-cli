@@ -305,3 +305,125 @@ class TestChatCompactOutput:
         # stdout-only accessor to prove the session ID never reaches a pipe.
         assert "session-t1" not in _strip_ansi(result.stdout)
         assert "session-t1" in _strip_ansi(result.stderr)
+
+
+def _http_error(status: int, message: str, api_status: str = ""):
+    """Build a googleapiclient HttpError with a realistic error body."""
+    from googleapiclient.errors import HttpError
+
+    resp = MagicMock()
+    resp.status = status
+    resp.reason = "Forbidden" if status == 403 else "Error"
+    content = json.dumps({
+        "error": {"code": status, "message": message, "status": api_status}
+    }).encode()
+    return HttpError(resp, content)
+
+
+def _failing_chat_client(exc):
+    mock_client = MagicMock()
+    mock_client.properties.return_value.chat.return_value.execute.side_effect = exc
+    return mock_client
+
+
+class TestChatScopePreflight:
+    def test_missing_scope_exits_2_without_calling_the_api(self):
+        mock_client = _mock_chat_client()
+
+        with patch("ga_cli.commands.reports.has_scope", return_value=False), \
+             patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q"])
+
+        assert result.exit_code == 2
+        mock_client.properties.return_value.chat.assert_not_called()
+
+    def test_missing_scope_message_tells_the_user_to_re_authenticate(self):
+        with patch("ga_cli.commands.reports.has_scope", return_value=False):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q"])
+
+        combined = _strip_ansi(result.output)
+        assert "ga auth login" in combined
+        assert "analytics.chatbot.read" in combined
+
+    def test_missing_scope_emits_structured_json_error(self):
+        with patch("ga_cli.commands.reports.has_scope", return_value=False):
+            result = runner.invoke(
+                app, ["reports", "chat", "-p", "111", "q", "-o", "json"]
+            )
+
+        assert result.exit_code == 2
+        payload = json.loads(_strip_ansi(result.stderr).strip())
+        assert payload["error"] is True
+        assert payload["exit_code"] == 2
+        assert payload["category"] == "auth_error"
+        assert "ga auth login" in payload["message"]
+
+    def test_present_scope_proceeds_to_the_api(self):
+        mock_client = _mock_chat_client()
+
+        with patch("ga_cli.commands.reports.has_scope", return_value=True), \
+             patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q"])
+
+        assert result.exit_code == 0
+        mock_client.properties.return_value.chat.assert_called_once()
+
+
+class TestChatForbidden:
+    """The API returns the generic Data API permission message for both
+    'no property access' and 'chat not enabled', so the CLI must name both."""
+
+    def test_403_names_both_possible_causes(self):
+        exc = _http_error(
+            403,
+            "User does not have sufficient permissions for this property.",
+            "PERMISSION_DENIED",
+        )
+        client = _failing_chat_client(exc)
+
+        with patch("ga_cli.commands.reports.has_scope", return_value=True), \
+             patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q"])
+
+        combined = _strip_ansi(result.output).lower()
+        assert result.exit_code == 2
+        assert "access" in combined
+        assert "not enabled" in combined
+
+    def test_403_suggests_a_command_that_distinguishes_the_causes(self):
+        exc = _http_error(403, "User does not have sufficient permissions.", "PERMISSION_DENIED")
+        client = _failing_chat_client(exc)
+
+        with patch("ga_cli.commands.reports.has_scope", return_value=True), \
+             patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q"])
+
+        assert "ga properties get -p 111" in _strip_ansi(result.output)
+
+    def test_403_emits_structured_json_error(self):
+        exc = _http_error(403, "User does not have sufficient permissions.", "PERMISSION_DENIED")
+        client = _failing_chat_client(exc)
+
+        with patch("ga_cli.commands.reports.has_scope", return_value=True), \
+             patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client):
+            result = runner.invoke(
+                app, ["reports", "chat", "-p", "111", "q", "-o", "json"]
+            )
+
+        assert result.exit_code == 2
+        payload = json.loads(_strip_ansi(result.stderr).strip())
+        assert payload["category"] == "auth_error"
+        assert payload["status_code"] == 403
+
+    def test_non_403_errors_use_the_standard_handler(self):
+        """A 500 must not be dressed up as a permissions problem."""
+        exc = _http_error(500, "Internal error")
+        client = _failing_chat_client(exc)
+
+        with patch("ga_cli.commands.reports.has_scope", return_value=True), \
+             patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q"])
+
+        combined = _strip_ansi(result.output).lower()
+        assert result.exit_code == 3
+        assert "not enabled" not in combined
