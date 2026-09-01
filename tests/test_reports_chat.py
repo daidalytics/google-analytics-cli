@@ -195,3 +195,113 @@ class TestChatValidation:
         assert mock_client.properties.return_value.chat.call_args.kwargs["property"] == (
             "properties/654321"
         )
+
+
+TABLE_RESPONSE = {
+    "sessionId": "session-t1",
+    "blocks": [
+        {"text": "Your top pages:"},
+        {
+            "table": {
+                "headers": [
+                    {"header": "pagePath", "dataType": "STRING"},
+                    {"header": "views", "dataType": "INTEGER"},
+                ],
+                "rows": [
+                    {"columns": [{"value": "/home"}, {"value": "4210"}]},
+                    {"columns": [{"value": "/pricing"}, {"value": "1884"}]},
+                ],
+            }
+        },
+    ],
+}
+
+
+class TestChatTableRendering:
+    def test_renders_table_headers_and_values(self):
+        mock_client = _mock_chat_client(TABLE_RESPONSE)
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q"])
+
+        out = _strip_ansi(result.output)
+        assert result.exit_code == 0
+        assert "pagePath" in out
+        assert "views" in out
+        assert "/home" in out
+        assert "4210" in out
+        assert "/pricing" in out
+
+    def test_renders_text_before_the_table_it_introduces(self):
+        """Block order is meaningful — text introduces the table that follows."""
+        mock_client = _mock_chat_client(TABLE_RESPONSE)
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q"])
+
+        out = _strip_ansi(result.output)
+        assert out.index("Your top pages:") < out.index("/home")
+
+    def test_renders_ragged_rows_without_raising(self):
+        """Alpha responses may return fewer cells than headers."""
+        mock_client = _mock_chat_client({
+            "sessionId": "s1",
+            "blocks": [{
+                "table": {
+                    "headers": [
+                        {"header": "country"},
+                        {"header": "users"},
+                        {"header": "sessions"},
+                    ],
+                    "rows": [{"columns": [{"value": "Sweden"}]}],
+                }
+            }],
+        })
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q"])
+
+        assert result.exit_code == 0
+        assert "Sweden" in _strip_ansi(result.output)
+
+    def test_handles_table_with_no_rows(self):
+        mock_client = _mock_chat_client({
+            "sessionId": "s1",
+            "blocks": [{"table": {"headers": [{"header": "country"}], "rows": []}}],
+        })
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q"])
+
+        assert result.exit_code == 0
+
+
+class TestChatCompactOutput:
+    def test_emits_tab_separated_rows_with_a_header_line(self):
+        mock_client = _mock_chat_client(TABLE_RESPONSE)
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["reports", "chat", "-p", "111", "q", "-o", "compact"]
+            )
+
+        assert result.exit_code == 0
+        lines = _strip_ansi(result.output).strip().splitlines()
+        assert "pagePath\tviews" in lines
+        assert "/home\t4210" in lines
+        assert "/pricing\t1884" in lines
+
+    def test_keeps_session_id_off_stdout(self):
+        """stdout must stay pipeable; the session ID belongs on stderr."""
+        mock_client = _mock_chat_client(TABLE_RESPONSE)
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["reports", "chat", "-p", "111", "q", "-o", "compact"]
+            )
+
+        assert result.exit_code == 0
+        # Result.output combines both streams in click >= 8.2; assert on the
+        # stdout-only accessor to prove the session ID never reaches a pipe.
+        assert "session-t1" not in _strip_ansi(result.stdout)
+        assert "session-t1" in _strip_ansi(result.stderr)

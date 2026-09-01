@@ -930,6 +930,31 @@ def _render_chat_blocks(blocks: list[dict], effective_format: str) -> None:
                 # markup=False: response text is model-generated and may contain
                 # square brackets that Rich would otherwise parse as style tags.
                 console.print(text, markup=False)
+            continue
+
+        table = block.get("table")
+        if not table:
+            continue
+
+        headers = [h.get("header", "") for h in table.get("headers", [])]
+        rows = []
+        for row in table.get("rows", []):
+            cells = row.get("columns", [])
+            # Guard the index: alpha responses may return fewer cells than headers.
+            rows.append({
+                name: cells[i].get("value", "") if i < len(cells) else ""
+                for i, name in enumerate(headers)
+            })
+
+        if not rows:
+            continue
+
+        if effective_format == "compact":
+            print("\t".join(headers))
+            for entry in rows:
+                print("\t".join(entry[name] for name in headers))
+        else:
+            output(rows, effective_format, columns=headers, headers=headers)
 
 
 @reports_app.command("chat")
