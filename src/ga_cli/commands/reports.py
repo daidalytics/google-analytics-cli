@@ -14,6 +14,7 @@ import typer
 
 from ..api.client import get_data_alpha_client, get_data_client
 from ..auth.credentials import has_scope
+from ..config.chat_session import clear_session, load_session, save_session
 from ..config.constants import CHAT_SCOPE
 from ..config.store import get_effective_value
 from ..utils import (
@@ -924,8 +925,14 @@ def funnel_cmd(
         handle_error(e)
 
 
-def _chat_auth_error(message: str, status_code: int | None = None) -> NoReturn:
-    """Exit with an auth error, matching handle_error's output contract.
+def _chat_error(
+    message: str,
+    *,
+    exit_code: int = 2,
+    category: str = "auth_error",
+    status_code: int | None = None,
+) -> NoReturn:
+    """Exit with a chat-specific error, matching handle_error's contract.
 
     Kept local to chat rather than added to utils.errors: only this command
     needs to substitute its own message for an API error. Promote it if a
@@ -936,8 +943,8 @@ def _chat_auth_error(message: str, status_code: int | None = None) -> NoReturn:
     if get_current_output_format() == "json":
         payload: dict = {
             "error": True,
-            "exit_code": 2,
-            "category": "auth_error",
+            "exit_code": exit_code,
+            "category": category,
             "message": message,
         }
         if status_code is not None:
@@ -946,7 +953,7 @@ def _chat_auth_error(message: str, status_code: int | None = None) -> NoReturn:
     else:
         error(message)
 
-    sys.exit(2)
+    sys.exit(exit_code)
 
 
 def _require_chat_scope() -> None:
@@ -960,7 +967,7 @@ def _require_chat_scope() -> None:
     if has_scope(CHAT_SCOPE):
         return
 
-    _chat_auth_error(
+    _chat_error(
         "Your saved credentials do not include the GA chat scope.\n"
         "Run 'ga auth login' to re-authenticate and grant it.\n"
         f"(scope: {CHAT_SCOPE})"
@@ -975,13 +982,33 @@ def _chat_forbidden_error(property_id: str, status_code: int) -> NoReturn:
     account, so both are named and a command that distinguishes them is
     suggested.
     """
-    _chat_auth_error(
+    _chat_error(
         f"The GA4 chat API refused this request ({status_code}).\n"
         "This means either:\n"
         f"  - your account lacks access to property {property_id}, or\n"
         "  - the chat feature is not enabled for your account.\n"
         "Chat is an alpha feature with limited availability.\n"
         f"Verify your access with: ga properties get -p {property_id}",
+        status_code=status_code,
+    )
+
+
+def _chat_expired_session_error(
+    property_id: str, session_id: str, status_code: int
+) -> NoReturn:
+    """Report a rejected session after forgetting it.
+
+    Never fall back to starting a fresh session: that would answer a
+    follow-up question without the context it depends on, and look like it
+    worked.
+    """
+    clear_session(property_id)
+    _chat_error(
+        f"The chat session '{session_id}' is no longer valid — it may have expired.\n"
+        f"The saved session for property {property_id} has been cleared.\n"
+        "Re-run without --continue to start a new conversation.",
+        exit_code=3,
+        category="api_error",
         status_code=status_code,
     )
 
@@ -1041,6 +1068,9 @@ def chat_cmd(
     session_id: Optional[str] = typer.Option(
         None, "--session-id", help="Continue a specific chat session"
     ),
+    continue_session: bool = typer.Option(
+        False, "--continue", help="Continue this property's most recent session"
+    ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -1060,6 +1090,19 @@ def chat_cmd(
                 'A question is required. Example: ga reports chat "how many users last week?"'
             )
 
+        if session_id and continue_session:
+            raise typer.BadParameter(
+                "Use either --session-id or --continue, not both."
+            )
+
+        if continue_session:
+            session_id = load_session(effective_property)
+            if not session_id:
+                raise typer.BadParameter(
+                    f"No saved chat session for property {effective_property}. "
+                    "Ask a question without --continue first, or pass --session-id."
+                )
+
         _require_chat_scope()
 
         body: dict = {"userQuery": query.strip()}
@@ -1076,9 +1119,20 @@ def chat_cmd(
         except Exception as exc:
             from googleapiclient.errors import HttpError
 
-            if isinstance(exc, HttpError) and exc.resp.status == 403:
-                _chat_forbidden_error(effective_property, exc.resp.status)
+            if isinstance(exc, HttpError):
+                status = exc.resp.status
+                if status == 403:
+                    _chat_forbidden_error(effective_property, status)
+                # Only blame the session when we actually sent one.
+                if session_id and status in (400, 404):
+                    _chat_expired_session_error(
+                        effective_property, session_id, status
+                    )
             raise
+
+        returned_session = result.get("sessionId")
+        if returned_session:
+            save_session(effective_property, returned_session)
 
         # Raw passthrough: agents get sessionId, blocks and propertyQuota
         # exactly as the API returned them.
@@ -1088,7 +1142,6 @@ def chat_cmd(
 
         _render_chat_blocks(result.get("blocks", []), effective_format)
 
-        returned_session = result.get("sessionId")
         if returned_session:
             if effective_format == "compact":
                 # Keep stdout pipeable.

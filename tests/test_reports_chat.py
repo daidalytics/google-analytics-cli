@@ -427,3 +427,136 @@ class TestChatForbidden:
         combined = _strip_ansi(result.output).lower()
         assert result.exit_code == 3
         assert "not enabled" not in combined
+
+
+class TestChatContinue:
+    def test_continue_sends_the_cached_session_id(self, isolated_config_dir):
+        from ga_cli.config.chat_session import save_session
+
+        save_session("111", "cached-session-1")
+        mock_client = _mock_chat_client()
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q", "--continue"])
+
+        assert result.exit_code == 0
+        assert _chat_body(mock_client)["sessionId"] == "cached-session-1"
+
+    def test_successful_call_caches_the_returned_session(self, isolated_config_dir):
+        from ga_cli.config.chat_session import load_session
+
+        mock_client = _mock_chat_client()
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q"])
+
+        assert result.exit_code == 0
+        assert load_session("111") == "session-abc123"
+
+    def test_explicit_session_id_also_updates_the_cache(self, isolated_config_dir):
+        from ga_cli.config.chat_session import load_session
+
+        mock_client = _mock_chat_client()
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["reports", "chat", "-p", "111", "q", "--session-id", "explicit-1"]
+            )
+
+        assert result.exit_code == 0
+        assert load_session("111") == "session-abc123"
+
+    def test_rejects_session_id_together_with_continue(self, isolated_config_dir):
+        """Ambiguity here is a user mistake worth surfacing, not resolving."""
+        mock_client = _mock_chat_client()
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                ["reports", "chat", "-p", "111", "q", "--continue", "--session-id", "x"],
+            )
+
+        assert result.exit_code != 0
+        mock_client.properties.return_value.chat.assert_not_called()
+
+    def test_continue_without_a_cached_session_errors_actionably(self, isolated_config_dir):
+        mock_client = _mock_chat_client()
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q", "--continue"])
+
+        assert result.exit_code != 0
+        mock_client.properties.return_value.chat.assert_not_called()
+        assert "no saved chat session" in _strip_ansi(result.output).lower()
+
+    def test_sessions_do_not_leak_between_properties(self, isolated_config_dir):
+        from ga_cli.config.chat_session import save_session
+
+        save_session("111", "cached-for-111")
+        mock_client = _mock_chat_client()
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "222", "q", "--continue"])
+
+        assert result.exit_code != 0
+        mock_client.properties.return_value.chat.assert_not_called()
+
+
+class TestChatExpiredSession:
+    """A rejected session must fail loudly. Silently starting a new one would
+    answer a follow-up without its context and look like it worked."""
+
+    def test_expired_session_clears_the_cache(self, isolated_config_dir):
+        from ga_cli.config.chat_session import load_session, save_session
+
+        save_session("111", "stale-session")
+        client = _failing_chat_client(
+            _http_error(400, "Invalid session ID.", "INVALID_ARGUMENT")
+        )
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q", "--continue"])
+
+        assert result.exit_code != 0
+        assert load_session("111") is None
+
+    def test_expired_session_explains_what_happened(self, isolated_config_dir):
+        from ga_cli.config.chat_session import save_session
+
+        save_session("111", "stale-session")
+        client = _failing_chat_client(
+            _http_error(400, "Invalid session ID.", "INVALID_ARGUMENT")
+        )
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q", "--continue"])
+
+        combined = _strip_ansi(result.output).lower()
+        assert "session" in combined
+        assert "no longer valid" in combined or "expired" in combined
+
+    def test_expired_session_does_not_retry_as_a_new_session(self, isolated_config_dir):
+        from ga_cli.config.chat_session import save_session
+
+        save_session("111", "stale-session")
+        client = _failing_chat_client(
+            _http_error(400, "Invalid session ID.", "INVALID_ARGUMENT")
+        )
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client):
+            runner.invoke(app, ["reports", "chat", "-p", "111", "q", "--continue"])
+
+        assert client.properties.return_value.chat.return_value.execute.call_count == 1
+
+    def test_a_400_without_a_session_is_not_reported_as_expiry(self, isolated_config_dir):
+        """Only blame the session when we actually sent one."""
+        client = _failing_chat_client(
+            _http_error(400, "Query cannot be parsed.", "INVALID_ARGUMENT")
+        )
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "q"])
+
+        combined = _strip_ansi(result.output).lower()
+        assert result.exit_code != 0
+        assert "no longer valid" not in combined
