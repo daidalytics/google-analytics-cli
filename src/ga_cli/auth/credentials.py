@@ -103,6 +103,30 @@ def has_credentials() -> bool:
     return get_credentials_path().exists()
 
 
+def has_scope(scope: str) -> bool:
+    """Check whether the credentials we would authenticate with carry ``scope``.
+
+    Returns False only when stored OAuth credentials *demonstrably* lack the
+    scope — the case worth warning about, since a refresh token cannot gain
+    scopes it was never granted and the user must re-run ``ga auth login``.
+
+    Anything undeterminable returns True: service accounts (built with
+    OAUTH_SCOPES, so always current), no stored credentials, or an unreadable
+    file. In those cases the caller's own API call surfaces the real
+    authentication error rather than a misleading re-auth instruction.
+    """
+    from .service_account import get_service_account_credentials
+
+    if get_service_account_credentials() is not None:
+        return True
+
+    creds = load_credentials()
+    if creds is None or not creds.scopes:
+        return True
+
+    return scope in creds.scopes
+
+
 def get_valid_credentials() -> Optional[Credentials]:
     """Load credentials and refresh if expired.
 

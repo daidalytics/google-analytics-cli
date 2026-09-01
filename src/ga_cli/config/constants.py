@@ -7,6 +7,11 @@ from pathlib import Path
 # App identity
 APP_NAME = "ga-cli"
 
+# Scope required by the Analytics Data API chat method (v1alpha).
+# Added in 0.3.0 — credentials stored before then will not carry it, so
+# commands that need it check with auth.credentials.has_scope() first.
+CHAT_SCOPE = "https://www.googleapis.com/auth/analytics.chatbot.read"
+
 # OAuth 2.0 scopes
 OAUTH_SCOPES = [
     "openid",
@@ -15,6 +20,7 @@ OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/analytics.manage.users",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
+    CHAT_SCOPE,
 ]
 
 # OAuth callback server

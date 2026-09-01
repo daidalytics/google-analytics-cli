@@ -124,3 +124,102 @@ class TestGetValidCredentials:
         assert loaded is not None
         # Non-expired creds won't trigger refresh
         assert loaded.refresh_token == "test-refresh-token"
+
+
+class TestChatScopeConstant:
+    """The chat scope must be requested at login so new tokens carry it."""
+
+    def test_chat_scope_is_in_oauth_scopes(self):
+        from ga_cli.config.constants import CHAT_SCOPE, OAUTH_SCOPES
+
+        assert CHAT_SCOPE == "https://www.googleapis.com/auth/analytics.chatbot.read"
+        assert CHAT_SCOPE in OAUTH_SCOPES
+
+    def test_existing_scopes_are_preserved(self):
+        """Adding chat must not drop any scope users already rely on."""
+        from ga_cli.config.constants import OAUTH_SCOPES
+
+        for scope in (
+            "openid",
+            "https://www.googleapis.com/auth/analytics.readonly",
+            "https://www.googleapis.com/auth/analytics.edit",
+            "https://www.googleapis.com/auth/analytics.manage.users",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/userinfo.profile",
+        ):
+            assert scope in OAUTH_SCOPES
+
+
+class TestHasScope:
+    """has_scope() answers: do the credentials we would use carry this scope?
+
+    It returns False only when stored OAuth credentials *demonstrably* lack
+    the scope. Anything undeterminable returns True so that the caller's own
+    authentication error surfaces instead of a misleading re-auth message.
+    """
+
+    def test_returns_true_when_stored_credentials_have_the_scope(self, isolated_config_dir):
+        from ga_cli.auth.credentials import has_scope
+        from ga_cli.config.constants import CHAT_SCOPE
+
+        save_credentials(_make_mock_credentials(
+            scopes=["https://www.googleapis.com/auth/analytics.readonly", CHAT_SCOPE]
+        ))
+
+        assert has_scope(CHAT_SCOPE) is True
+
+    def test_returns_false_when_stored_credentials_lack_the_scope(self, isolated_config_dir):
+        """The pre-0.3.0 upgrade case: a token granted before chat existed."""
+        from ga_cli.auth.credentials import has_scope
+        from ga_cli.config.constants import CHAT_SCOPE
+
+        save_credentials(_make_mock_credentials(scopes=[
+            "openid",
+            "https://www.googleapis.com/auth/analytics.readonly",
+            "https://www.googleapis.com/auth/analytics.edit",
+            "https://www.googleapis.com/auth/analytics.manage.users",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/userinfo.profile",
+        ]))
+
+        assert has_scope(CHAT_SCOPE) is False
+
+    def test_returns_true_when_no_credentials_are_stored(self, isolated_config_dir):
+        """Undeterminable — let the real 'Not authenticated' error surface."""
+        from ga_cli.auth.credentials import has_scope
+        from ga_cli.config.constants import CHAT_SCOPE
+
+        assert has_scope(CHAT_SCOPE) is True
+
+    def test_returns_true_when_credentials_file_is_corrupt(self, isolated_config_dir):
+        from ga_cli.auth.credentials import has_scope
+        from ga_cli.config.constants import CHAT_SCOPE, get_credentials_path
+
+        get_credentials_path().write_text("{not valid json")
+
+        assert has_scope(CHAT_SCOPE) is True
+
+    def test_returns_true_when_scopes_key_is_absent(self, isolated_config_dir):
+        """A legacy file without a scopes list tells us nothing."""
+        from ga_cli.auth.credentials import has_scope
+        from ga_cli.config.constants import CHAT_SCOPE, get_credentials_path
+
+        get_credentials_path().write_text(json.dumps({"token": "abc"}))
+
+        assert has_scope(CHAT_SCOPE) is True
+
+    def test_returns_true_for_service_accounts_lacking_stored_oauth_scope(
+        self, isolated_config_dir, monkeypatch
+    ):
+        """Service account creds are built with OAUTH_SCOPES, so they always
+        carry the scope — never tell an SA user to run 'ga auth login'."""
+        from ga_cli.auth import service_account
+        from ga_cli.auth.credentials import has_scope
+        from ga_cli.config.constants import CHAT_SCOPE
+
+        save_credentials(_make_mock_credentials(scopes=["openid"]))
+        monkeypatch.setattr(
+            service_account, "get_service_account_credentials", lambda: MagicMock()
+        )
+
+        assert has_scope(CHAT_SCOPE) is True
