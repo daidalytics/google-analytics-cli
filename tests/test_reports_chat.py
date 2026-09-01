@@ -560,3 +560,136 @@ class TestChatExpiredSession:
         combined = _strip_ansi(result.output).lower()
         assert result.exit_code != 0
         assert "no longer valid" not in combined
+
+
+def _mock_chat_sequence(responses):
+    """Mock client returning each response in turn."""
+    mock_client = MagicMock()
+    mock_client.properties.return_value.chat.return_value.execute.side_effect = responses
+    return mock_client
+
+
+def _chat_bodies(mock_client) -> list:
+    """Every request body the command sent, in order."""
+    return [c.kwargs["body"] for c in mock_client.properties.return_value.chat.call_args_list]
+
+
+def _prompts(*answers):
+    """Patch the REPL prompt to yield `answers` in order."""
+    prompt = MagicMock()
+    prompt.return_value.ask.side_effect = list(answers)
+    return patch("ga_cli.commands.reports.questionary.text", prompt)
+
+
+class TestChatInteractive:
+    def test_loops_until_the_user_types_exit(self, isolated_config_dir):
+        client = _mock_chat_sequence([
+            {"sessionId": "s1", "blocks": [{"text": "first answer"}]},
+            {"sessionId": "s1", "blocks": [{"text": "second answer"}]},
+        ])
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client), \
+             _prompts("first question", "second question", "exit"):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "--interactive"])
+
+        out = _strip_ansi(result.output)
+        assert result.exit_code == 0
+        assert len(_chat_bodies(client)) == 2
+        assert "first answer" in out
+        assert "second answer" in out
+
+    def test_threads_the_session_between_turns(self, isolated_config_dir):
+        client = _mock_chat_sequence([
+            {"sessionId": "server-session", "blocks": [{"text": "a"}]},
+            {"sessionId": "server-session", "blocks": [{"text": "b"}]},
+        ])
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client), \
+             _prompts("one", "two", "exit"):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "--interactive"])
+
+        bodies = _chat_bodies(client)
+        assert result.exit_code == 0
+        assert "sessionId" not in bodies[0]
+        assert bodies[1]["sessionId"] == "server-session"
+
+    def test_quit_also_ends_the_session(self, isolated_config_dir):
+        client = _mock_chat_sequence([{"sessionId": "s1", "blocks": [{"text": "a"}]}])
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client), \
+             _prompts("one", "quit"):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "--interactive"])
+
+        assert result.exit_code == 0
+        assert len(_chat_bodies(client)) == 1
+
+    def test_interrupting_the_prompt_exits_cleanly(self, isolated_config_dir):
+        """questionary returns None for Ctrl-C / Ctrl-D."""
+        client = _mock_chat_sequence([])
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client), \
+             _prompts(None):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "--interactive"])
+
+        assert result.exit_code == 0
+        assert _chat_bodies(client) == []
+
+    def test_empty_input_ends_the_session(self, isolated_config_dir):
+        client = _mock_chat_sequence([])
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client), \
+             _prompts("   "):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "--interactive"])
+
+        assert result.exit_code == 0
+        assert _chat_bodies(client) == []
+
+    def test_positional_query_becomes_the_first_turn(self, isolated_config_dir):
+        client = _mock_chat_sequence([{"sessionId": "s1", "blocks": [{"text": "a"}]}])
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client), \
+             _prompts("exit"):
+            result = runner.invoke(
+                app, ["reports", "chat", "-p", "111", "--interactive", "opening question"]
+            )
+
+        assert result.exit_code == 0
+        assert _chat_bodies(client)[0]["userQuery"] == "opening question"
+
+    def test_json_output_emits_one_object_per_turn(self, isolated_config_dir):
+        client = _mock_chat_sequence([
+            {"sessionId": "s1", "blocks": [{"text": "a"}]},
+            {"sessionId": "s1", "blocks": [{"text": "b"}]},
+        ])
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client), \
+             _prompts("one", "two", "exit"):
+            result = runner.invoke(
+                app, ["reports", "chat", "-p", "111", "--interactive", "-o", "json"]
+            )
+
+        assert result.exit_code == 0
+        lines = [ln for ln in result.stdout.strip().splitlines() if ln.strip()]
+        assert len(lines) == 2
+        assert json.loads(lines[0])["blocks"][0]["text"] == "a"
+        assert json.loads(lines[1])["blocks"][0]["text"] == "b"
+
+    def test_caches_the_session_after_each_turn(self, isolated_config_dir):
+        from ga_cli.config.chat_session import load_session
+
+        client = _mock_chat_sequence([{"sessionId": "repl-session", "blocks": []}])
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client), \
+             _prompts("one", "exit"):
+            runner.invoke(app, ["reports", "chat", "-p", "111", "--interactive"])
+
+        assert load_session("111") == "repl-session"
+
+    def test_interactive_does_not_require_a_positional_query(self, isolated_config_dir):
+        client = _mock_chat_sequence([])
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client), \
+             _prompts("exit"):
+            result = runner.invoke(app, ["reports", "chat", "-p", "111", "--interactive"])
+
+        assert result.exit_code == 0

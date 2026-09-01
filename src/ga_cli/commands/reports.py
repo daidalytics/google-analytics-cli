@@ -1057,6 +1057,89 @@ def _render_chat_blocks(blocks: list[dict], effective_format: str) -> None:
             output(rows, effective_format, columns=headers, headers=headers)
 
 
+def _chat_execute(
+    data_alpha, property_id: str, query: str, session_id: str | None
+) -> dict:
+    """Send one chat turn, translating chat-specific API failures."""
+    body: dict = {"userQuery": query}
+    if session_id:
+        body["sessionId"] = session_id
+
+    try:
+        return (
+            data_alpha.properties()
+            .chat(property=f"properties/{property_id}", body=body)
+            .execute()
+        )
+    except Exception as exc:
+        from googleapiclient.errors import HttpError
+
+        if isinstance(exc, HttpError):
+            status = exc.resp.status
+            if status == 403:
+                _chat_forbidden_error(property_id, status)
+            # Only blame the session when we actually sent one.
+            if session_id and status in (400, 404):
+                _chat_expired_session_error(property_id, session_id, status)
+        raise
+
+
+def _print_chat_session(session_id: str, effective_format: str) -> None:
+    """Surface the session ID, keeping stdout clean for machine formats."""
+    if effective_format == "table":
+        console.print(f"\n[dim]Session: {session_id}[/dim]")
+    else:
+        info(f"Session: {session_id}")
+
+
+_REPL_EXIT_WORDS = ("exit", "quit")
+
+
+def _chat_repl(
+    data_alpha,
+    property_id: str,
+    first_query: str | None,
+    session_id: str | None,
+    effective_format: str,
+) -> None:
+    """Run a multi-turn conversation, threading the session between turns."""
+    current_session = session_id
+    pending = first_query
+
+    if effective_format == "table":
+        info("Chat session started. Type 'exit' or press Ctrl-C to end.")
+
+    while True:
+        if pending is not None:
+            turn, pending = pending, None
+        else:
+            # questionary returns None for Ctrl-C and Ctrl-D.
+            answer = questionary.text("You:").ask()
+            if answer is None:
+                break
+            turn = answer
+
+        turn = turn.strip()
+        if not turn or turn.lower() in _REPL_EXIT_WORDS:
+            break
+
+        result = _chat_execute(data_alpha, property_id, turn, current_session)
+
+        returned = result.get("sessionId")
+        if returned:
+            current_session = returned
+            save_session(property_id, returned)
+
+        if effective_format == "json":
+            # JSON Lines: one object per turn.
+            print(json.dumps(result, default=str))
+        else:
+            _render_chat_blocks(result.get("blocks", []), effective_format)
+
+    if current_session:
+        _print_chat_session(current_session, effective_format)
+
+
 @reports_app.command("chat")
 def chat_cmd(
     query: Optional[str] = typer.Argument(
@@ -1070,6 +1153,9 @@ def chat_cmd(
     ),
     continue_session: bool = typer.Option(
         False, "--continue", help="Continue this property's most recent session"
+    ),
+    interactive: bool = typer.Option(
+        False, "--interactive", "-i", help="Start a multi-turn conversation"
     ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
@@ -1085,7 +1171,9 @@ def chat_cmd(
         require_options({"property_id": effective_property}, ["property_id"])
         effective_format = resolve_output_format(output_format)
 
-        if query is None or not query.strip():
+        # The REPL prompts for its own input, so a positional query is
+        # optional there — it just becomes the opening turn.
+        if not interactive and (query is None or not query.strip()):
             raise typer.BadParameter(
                 'A question is required. Example: ga reports chat "how many users last week?"'
             )
@@ -1105,30 +1193,21 @@ def chat_cmd(
 
         _require_chat_scope()
 
-        body: dict = {"userQuery": query.strip()}
-        if session_id:
-            body["sessionId"] = session_id
-
         data_alpha = get_data_alpha_client()
-        try:
-            result = (
-                data_alpha.properties()
-                .chat(property=f"properties/{effective_property}", body=body)
-                .execute()
-            )
-        except Exception as exc:
-            from googleapiclient.errors import HttpError
 
-            if isinstance(exc, HttpError):
-                status = exc.resp.status
-                if status == 403:
-                    _chat_forbidden_error(effective_property, status)
-                # Only blame the session when we actually sent one.
-                if session_id and status in (400, 404):
-                    _chat_expired_session_error(
-                        effective_property, session_id, status
-                    )
-            raise
+        if interactive:
+            _chat_repl(
+                data_alpha,
+                effective_property,
+                query,
+                session_id,
+                effective_format,
+            )
+            return
+
+        result = _chat_execute(
+            data_alpha, effective_property, query.strip(), session_id
+        )
 
         returned_session = result.get("sessionId")
         if returned_session:
@@ -1143,11 +1222,7 @@ def chat_cmd(
         _render_chat_blocks(result.get("blocks", []), effective_format)
 
         if returned_session:
-            if effective_format == "compact":
-                # Keep stdout pipeable.
-                info(f"Session: {returned_session}")
-            else:
-                console.print(f"\n[dim]Session: {returned_session}[/dim]")
+            _print_chat_session(returned_session, effective_format)
 
     except typer.BadParameter:
         raise
