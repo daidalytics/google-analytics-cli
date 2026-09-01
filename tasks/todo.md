@@ -21,36 +21,31 @@ Task detail in [plan.md](plan.md) · design in [SPEC.md](../SPEC.md)
 
 ## Phase 3 — Sessions
 
-- [ ] **T5 · Per-property session cache** — S · *parallelizable with T2–T4*
-  - Verify: `pytest tests/test_chat_session.py` · file mode `0o600`
-  - Files: `config/chat_session.py`, `config/constants.py`, `tests/test_chat_session.py`
-- [ ] **T6 · Wire `--continue` + expiry recovery** — M
-  - Verify: `pytest -k "Continue"` · property switch does not cross-contaminate
+- [x] **T5 · Per-property session cache** — S · `79fb7b6`
+- [x] **T6 · Wire `--continue` + expiry recovery** — M · `1442f53`
 
-- [ ] **CHECKPOINT** — cache holds only session IDs + timestamps · deleting it degrades gracefully
+- [x] **CHECKPOINT** — 950 tests green · cache holds only session IDs + timestamps · `0o600`
 
 ## Phase 4 — Interactive + cost
 
-- [ ] **T7 · `--interactive` REPL** — M
-  - Verify: `pytest -k "Interactive"` · exits cleanly on `exit`, Ctrl-C, Ctrl-D
-- [ ] **T8 · Tri-state quota flag + `_display_chat_quota()`** — S
-  - Verify: `pytest -k "Quota"` · `pytest tests/test_reports.py` unchanged
+- [x] **T7 · `--interactive` REPL** — M · `7b47b3a`
+- [x] **T8 · Tri-state quota flag + `_display_chat_quota()`** — S · `328b37a`
 
-- [ ] **CHECKPOINT** — full suite green · SPEC success criteria met or explicitly gate-blocked
+- [x] **CHECKPOINT** — 967 tests green · `_display_quota()` untouched
 
 ## Phase 5 — Docs
 
-- [ ] **T9 · Agent guide, README, re-auth migration note, qualify `auth_cmd.py:47`** — M
-  - Verify: `pytest tests/test_agent_cmd.py tests/test_describe.py` · `ga agent guide --section reports | grep -i chat`
+- [x] **T9 · Agent guide, README, re-auth migration note, qualify `auth_cmd.py:47`** — M · `0045f64`
 
-- [ ] **FINAL** — all criteria met · version bump and release **not** done (ask first) · `.api-snapshots/` untouched
+- [x] **FINAL** — 967 tests green · ruff clean · version bump and release **not** done
+      (holding PyPI until GA officially supports the endpoint) · `.api-snapshots/` untouched
 
 ---
 
-## Decisions needed
+## Decisions made
 
-- [ ] Ship **visible with alpha caveats** (assumed) or hidden until Google ungates? — affects T9
-- [ ] Confirm version bump to 0.3.0 when ready to release
+- [x] Ship **visible with alpha caveats** — command appears in `--help`, `--describe` and docs
+- [ ] Version bump to 0.3.0 — deferred; not publishing to PyPI until GA supports the endpoint
 
 ## Blocked / cannot verify
 
@@ -69,3 +64,9 @@ Task detail in [plan.md](plan.md) · design in [SPEC.md](../SPEC.md)
   The pre-flight intercepts the first; the dual-cause handler explains the second.
 - `click` 8.3: `Result.output` combines stdout **and** stderr; use `Result.stdout` to assert
   a stream stays pipeable.
+
+- **`analytics.chatbot.read` is not a sensitive scope.** Verified through a real `ga auth login`:
+  it is granted without appearing as its own consent-screen checkbox and without being registered
+  in the GCP consent screen (Testing mode). Easier to adopt than the existing `analytics.*` scopes.
+- **Chat remains gated with a fully-scoped real credential** — re-confirmed after re-authentication
+  with all 7 scopes: still `403` on the default property.
