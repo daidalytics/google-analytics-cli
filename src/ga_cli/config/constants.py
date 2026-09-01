@@ -91,6 +91,11 @@ def get_client_secret_path() -> Path:
     return get_config_dir() / "client_secret.json"
 
 
+def get_chat_sessions_path() -> Path:
+    """Path to the per-property chat session cache used by --continue."""
+    return get_config_dir() / "chat-sessions.json"
+
+
 def get_update_check_path() -> Path:
     """Path to update-check timestamp file."""
     return get_config_dir() / "update-check.json"
