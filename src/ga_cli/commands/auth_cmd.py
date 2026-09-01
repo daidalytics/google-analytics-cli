@@ -44,7 +44,10 @@ Or via gcloud CLI:
 1. Go to APIs & Services > OAuth consent screen
 2. Choose "External" user type (or "Internal" if using Google Workspace)
 3. Fill in the required fields: app name, user support email, developer contact
-4. No scopes need to be added manually — GA CLI requests them at login time
+4. In "Testing" mode no scopes need to be added manually — GA CLI requests them
+   at login time and Google shows them on the consent screen. If you publish the
+   app to "In production", add the scopes GA CLI requests (see `ga auth status`)
+   to the consent screen, or Google may drop unregistered ones
 5. For personal use, leave the app in "Testing" mode — it works for the
    project owner and up to 100 added test users without Google verification
 

@@ -248,6 +248,7 @@ ga reports pivot [-p PROPERTY_ID] -m metrics -d dimensions --pivot-field FIELD [
 ga reports check-compatibility [-p PROPERTY_ID] [-m metrics] [-d dimensions] [-o json]
 ga reports metadata [-p PROPERTY_ID] [--type metrics|dimensions] [--search TEXT] [-o json]
 ga reports realtime [-p PROPERTY_ID] [-m metrics] [-d dimensions] [--interval SECONDS]
+ga reports chat "QUESTION" [-p PROPERTY_ID] [--session-id ID] [--continue] [-i] [-o json]  # alpha
 ```
 Dates: `today`, `yesterday`, `7daysAgo`, `30daysAgo`, `90daysAgo`, or `YYYY-MM-DD`
 
@@ -332,6 +333,8 @@ ga data-streams list -o json | jq -r '.[].name' | grep -o '[0-9]*$'
 - **Use `metadata` to discover available metrics/dimensions** — `ga reports metadata -p ID --search revenue -o json`
 - **Parallelize independent operations** — run creates/deletes concurrently with `&` and `wait`
 - **Avoid interactive commands** — skip `ga config setup` and `ga reports build`; use explicit flags instead
+- **`ga reports chat` is alpha and gated** — the endpoint returns 403 for accounts without
+  access; it is token-metered, so prefer `ga reports run` for deterministic, quota-cheap data
 
 ## Troubleshooting
 
@@ -415,6 +418,18 @@ ga reports funnel -p 987654321 -c funnel_config.json        # Table output
 - Must contain a `funnel` object with a non-empty `steps` array
 - Date ranges go in the config JSON (no `--start-date`/`--end-date` flags)
 - Table columns: Step Name, Active Users, Completion Rate, Abandonment Rate
+
+### Chat (alpha, limited availability)
+```bash
+ga reports chat -p 987654321 "which pages lost the most traffic last week?"
+ga reports chat -p 987654321 "now break that down by country" --continue
+ga reports chat -p 987654321 --interactive                  # multi-turn REPL
+ga reports chat -p 987654321 "top pages" -o json            # raw ChatResponse
+```
+Requires the `analytics.chatbot.read` scope — run `ga auth login` if you
+authenticated before this command existed. A 403 means either no property
+access or that chat is not enabled for the account; the two are
+indistinguishable from the API response.
 
 **Note**: `ga reports build` requires interactive input — avoid in automation. Use `ga reports run` instead.
 """
