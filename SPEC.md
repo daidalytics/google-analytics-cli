@@ -1,8 +1,8 @@
 # Spec: `ga reports chat` — GA4 Data API Chat Integration
 
-Status: **Draft — awaiting approval**
+Status: **Implemented — shipping in 0.3.0**
 Target version: 0.3.0
-API: `analyticsdata` v1alpha, revision `20260830`
+API: `analyticsdata` v1alpha, revision `20260830` (GA announced by Google 2026-09-17)
 
 ---
 
@@ -24,7 +24,8 @@ useful answer in one command, and a follow-up question retains context.
 ### Assumptions
 
 1. The `chat` method is available on properties the user already has access to — no separate
-   allowlist or product enablement beyond the OAuth scope. **Unverified; see Open Questions.**
+   allowlist or product enablement beyond the OAuth scope. **Confirmed 2026-09-18**, after
+   Google's 2026-09-17 GA announcement for the endpoint.
 2. Chat is a *read* operation. No `--dry-run` support (that helper is for mutative commands),
    no `--yes` confirmation.
 3. `sessionId` is an opaque server-side handle. We never construct or parse it, only store and

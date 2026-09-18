@@ -1239,10 +1239,10 @@ def chat_cmd(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
 ):
-    """Ask a question about a property in plain language (alpha).
+    """Ask a question about a property in plain language.
 
-    Chat is an alpha feature with limited availability; it may not be enabled
-    for your account. Uses AI and may return inaccurate information.
+    Built on the v1alpha Data API, so its shape may still change. Uses AI and
+    may return inaccurate information.
     """
     try:
         effective_property = get_effective_value(property_id, "default_property_id")
