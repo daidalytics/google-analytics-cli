@@ -4,16 +4,28 @@ Uses the Analytics Data API v1beta.
 """
 
 import json
+import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import NoReturn, Optional
 
 import questionary
 import typer
 
 from ..api.client import get_data_alpha_client, get_data_client
+from ..auth.credentials import has_scope
+from ..config.chat_session import clear_session, load_session, save_session
+from ..config.constants import CHAT_SCOPE
 from ..config.store import get_effective_value
-from ..utils import console, handle_error, info, output, require_options, resolve_output_format
+from ..utils import (
+    console,
+    error,
+    handle_error,
+    info,
+    output,
+    require_options,
+    resolve_output_format,
+)
 from ..utils.filters import (
     parse_date_ranges,
     parse_dim_filters,
@@ -906,6 +918,406 @@ def funnel_cmd(
             info("No funnel data returned.")
         else:
             output(rows, effective_format, columns=columns, headers=headers)
+
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        handle_error(e)
+
+
+def _chat_error(
+    message: str,
+    *,
+    exit_code: int = 2,
+    category: str = "auth_error",
+    status_code: int | None = None,
+) -> NoReturn:
+    """Exit with a chat-specific error, matching handle_error's contract.
+
+    Kept local to chat rather than added to utils.errors: only this command
+    needs to substitute its own message for an API error. Promote it if a
+    second caller ever appears.
+    """
+    from ..utils.output import get_current_output_format
+
+    if get_current_output_format() == "json":
+        payload: dict = {
+            "error": True,
+            "exit_code": exit_code,
+            "category": category,
+            "message": message,
+        }
+        if status_code is not None:
+            payload["status_code"] = status_code
+        print(json.dumps(payload), file=sys.stderr)
+    else:
+        error(message)
+
+    sys.exit(exit_code)
+
+
+def _require_chat_scope() -> None:
+    """Fail early when stored credentials predate the chat scope.
+
+    A refresh token cannot gain a scope it was never granted, so users who
+    authenticated before 0.3.0 must log in again. Catching it here turns an
+    opaque "Request had insufficient authentication scopes" 403 into an
+    instruction.
+    """
+    if has_scope(CHAT_SCOPE):
+        return
+
+    _chat_error(
+        "Your saved credentials do not include the GA chat scope.\n"
+        "Run 'ga auth login' to re-authenticate and grant it.\n"
+        f"(scope: {CHAT_SCOPE})"
+    )
+
+
+def _chat_forbidden_error(property_id: str, status_code: int) -> NoReturn:
+    """Explain a 403 without asserting a cause we cannot determine.
+
+    The API returns the generic Data API permission message whether the
+    caller lacks property access or chat simply is not enabled for their
+    account, so both are named and a command that distinguishes them is
+    suggested.
+    """
+    _chat_error(
+        f"The GA4 chat API refused this request ({status_code}).\n"
+        "This means either:\n"
+        f"  - your account lacks access to property {property_id}, or\n"
+        "  - the chat feature is not enabled for your account.\n"
+        "Chat is an alpha feature with limited availability.\n"
+        f"Verify your access with: ga properties get -p {property_id}",
+        status_code=status_code,
+    )
+
+
+def _chat_expired_session_error(
+    property_id: str, session_id: str, status_code: int, *, from_cache: bool
+) -> NoReturn:
+    """Report a rejected session.
+
+    Never fall back to starting a fresh session: that would answer a
+    follow-up question without the context it depends on, and look like it
+    worked.
+
+    Only clear the saved session cache — and only blame --continue in the
+    message — when the rejected ID actually came from the cache. A bad,
+    manually-typed --session-id is unrelated to whatever (possibly still
+    valid) session is cached for this property, and must not wipe it out.
+    """
+    if from_cache:
+        clear_session(property_id)
+        message = (
+            f"The chat session '{session_id}' is no longer valid — it may have expired.\n"
+            f"The saved session for property {property_id} has been cleared.\n"
+            "Re-run without --continue to start a new conversation."
+        )
+    else:
+        message = (
+            f"The chat session '{session_id}' is no longer valid — it may have expired.\n"
+            "Re-run without --session-id to start a new conversation."
+        )
+
+    _chat_error(
+        message,
+        exit_code=3,
+        category="api_error",
+        status_code=status_code,
+    )
+
+
+def _render_chat_blocks(blocks: list[dict], effective_format: str) -> None:
+    """Render ChatResponse blocks in document order.
+
+    Block order is meaningful — a text block typically introduces the table
+    that follows it — so blocks are emitted exactly as returned. Blocks whose
+    type we don't recognise are skipped rather than raising: this is an alpha
+    surface and new block types are expected.
+    """
+    for block in blocks:
+        text = block.get("text")
+        if text:
+            if effective_format == "compact":
+                print(text)
+            else:
+                # markup=False: response text is model-generated and may contain
+                # square brackets that Rich would otherwise parse as style tags.
+                console.print(text, markup=False)
+            continue
+
+        table = block.get("table")
+        if not table:
+            continue
+
+        headers = [h.get("header", "") for h in table.get("headers", [])]
+        rows = []
+        for row in table.get("rows", []):
+            cells = row.get("columns", [])
+            # Guard the index: alpha responses may return fewer cells than headers.
+            rows.append({
+                name: cells[i].get("value", "") if i < len(cells) else ""
+                for i, name in enumerate(headers)
+            })
+
+        if not rows:
+            continue
+
+        if effective_format == "compact":
+            print("\t".join(headers))
+            for entry in rows:
+                print("\t".join(entry[name] for name in headers))
+        else:
+            output(rows, effective_format, columns=headers, headers=headers)
+
+
+def _display_chat_quota(result: dict) -> None:
+    """Render PropertyChatQuota.
+
+    Deliberately separate from _display_quota: PropertyChatQuota exposes only
+    tokensPerDay and tokensPerHour, while _display_quota iterates five keys
+    that do not exist on this type.
+    """
+    quota = result.get("propertyQuota")
+    if not quota:
+        return
+
+    parts = []
+    for key in ("tokensPerDay", "tokensPerHour"):
+        q = quota.get(key)
+        if q:
+            parts.append(f"{key}: {q.get('consumed', '?')}/{q.get('remaining', '?')}")
+
+    if parts:
+        info(f"Quota: {', '.join(parts)}")
+
+
+def _chat_execute(
+    data_alpha,
+    property_id: str,
+    query: str,
+    session_id: str | None,
+    return_quota: bool = False,
+    *,
+    session_from_cache: bool = False,
+) -> dict:
+    """Send one chat turn, translating chat-specific API failures.
+
+    `session_from_cache` marks whether `session_id` was loaded from the
+    per-property session cache (--continue, or a REPL turn continuing its
+    own in-flight session) rather than typed explicitly via --session-id —
+    see `_chat_expired_session_error` for why that distinction matters.
+    """
+    body: dict = {"userQuery": query}
+    if session_id:
+        body["sessionId"] = session_id
+    if return_quota:
+        body["returnPropertyQuota"] = True
+
+    try:
+        return (
+            data_alpha.properties()
+            .chat(property=f"properties/{property_id}", body=body)
+            .execute()
+        )
+    except Exception as exc:
+        from googleapiclient.errors import HttpError
+
+        if isinstance(exc, HttpError):
+            status = exc.resp.status
+            if status == 403:
+                _chat_forbidden_error(property_id, status)
+            # Only blame the session when we actually sent one.
+            if session_id and status in (400, 404):
+                _chat_expired_session_error(
+                    property_id, session_id, status, from_cache=session_from_cache
+                )
+        raise
+
+
+def _print_chat_session(session_id: str, effective_format: str) -> None:
+    """Surface the session ID, keeping stdout clean for machine formats."""
+    if effective_format == "table":
+        console.print(f"\n[dim]Session: {session_id}[/dim]")
+    else:
+        info(f"Session: {session_id}")
+
+
+_REPL_EXIT_WORDS = ("exit", "quit")
+
+
+def _chat_repl(
+    data_alpha,
+    property_id: str,
+    first_query: str | None,
+    session_id: str | None,
+    effective_format: str,
+    return_quota: bool = True,
+    *,
+    session_from_cache: bool = False,
+) -> None:
+    """Run a multi-turn conversation, threading the session between turns.
+
+    `session_from_cache` marks whether the opening `session_id` came from
+    the per-property cache (--continue). From the first successful turn
+    onward, `current_session` is always the tool's own saved session, so it
+    is treated as cache-backed regardless of how the REPL was started.
+    """
+    current_session = session_id
+    pending = first_query
+
+    if effective_format == "table":
+        info("Chat session started. Type 'exit' or press Ctrl-C to end.")
+
+    while True:
+        if pending is not None:
+            turn, pending = pending, None
+        else:
+            # questionary returns None for Ctrl-C and Ctrl-D.
+            answer = questionary.text("You:").ask()
+            if answer is None:
+                break
+            turn = answer
+
+        turn = turn.strip()
+        if not turn or turn.lower() in _REPL_EXIT_WORDS:
+            break
+
+        result = _chat_execute(
+            data_alpha,
+            property_id,
+            turn,
+            current_session,
+            return_quota,
+            session_from_cache=session_from_cache,
+        )
+
+        returned = result.get("sessionId")
+        if returned:
+            current_session = returned
+            save_session(property_id, returned)
+            session_from_cache = True
+
+        if effective_format == "json":
+            # JSON Lines: one object per turn.
+            print(json.dumps(result, default=str))
+        else:
+            _render_chat_blocks(result.get("blocks", []), effective_format)
+
+        if return_quota:
+            # Show consumption as it accumulates, not after a limit is hit.
+            _display_chat_quota(result)
+
+    if current_session:
+        _print_chat_session(current_session, effective_format)
+
+
+@reports_app.command("chat")
+def chat_cmd(
+    query: Optional[str] = typer.Argument(
+        None, help="Your question, in plain language"
+    ),
+    property_id: Optional[str] = typer.Option(
+        None, "--property-id", "-p", help="Property ID (numeric)"
+    ),
+    session_id: Optional[str] = typer.Option(
+        None, "--session-id", help="Continue a specific chat session"
+    ),
+    continue_session: bool = typer.Option(
+        False, "--continue", help="Continue this property's most recent session"
+    ),
+    interactive: bool = typer.Option(
+        False, "--interactive", "-i", help="Start a multi-turn conversation"
+    ),
+    return_property_quota: Optional[bool] = typer.Option(
+        None,
+        "--return-property-quota/--no-return-property-quota",
+        help="Show chat token quota. Defaults on in --interactive, off otherwise.",
+    ),
+    output_format: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output format (json, table, compact)"
+    ),
+):
+    """Ask a question about a property in plain language.
+
+    Built on the v1alpha Data API, so its shape may still change. Uses AI and
+    may return inaccurate information.
+    """
+    try:
+        effective_property = get_effective_value(property_id, "default_property_id")
+        require_options({"property_id": effective_property}, ["property_id"])
+        effective_format = resolve_output_format(output_format)
+
+        # The REPL prompts for its own input, so a positional query is
+        # optional there — it just becomes the opening turn.
+        if not interactive and (query is None or not query.strip()):
+            raise typer.BadParameter(
+                'A question is required. Example: ga reports chat "how many users last week?"'
+            )
+
+        if session_id and continue_session:
+            raise typer.BadParameter(
+                "Use either --session-id or --continue, not both."
+            )
+
+        if continue_session:
+            session_id = load_session(effective_property)
+            if not session_id:
+                raise typer.BadParameter(
+                    f"No saved chat session for property {effective_property}. "
+                    "Ask a question without --continue first, or pass --session-id."
+                )
+
+        _require_chat_scope()
+
+        data_alpha = get_data_alpha_client()
+
+        # Tri-state: an explicit flag always wins. Left unset, quota is on in
+        # the REPL where consumption accumulates, off for one-shot calls so
+        # scripted output stays clean.
+        show_quota = (
+            interactive if return_property_quota is None else return_property_quota
+        )
+
+        if interactive:
+            _chat_repl(
+                data_alpha,
+                effective_property,
+                query,
+                session_id,
+                effective_format,
+                show_quota,
+                session_from_cache=continue_session,
+            )
+            return
+
+        result = _chat_execute(
+            data_alpha,
+            effective_property,
+            query.strip(),
+            session_id,
+            show_quota,
+            session_from_cache=continue_session,
+        )
+
+        returned_session = result.get("sessionId")
+        if returned_session:
+            save_session(effective_property, returned_session)
+
+        # Raw passthrough: agents get sessionId, blocks and propertyQuota
+        # exactly as the API returned them.
+        if effective_format == "json":
+            output(result, effective_format)
+            return
+
+        _render_chat_blocks(result.get("blocks", []), effective_format)
+
+        if returned_session:
+            _print_chat_session(returned_session, effective_format)
+
+        if show_quota:
+            _display_chat_quota(result)
 
     except typer.BadParameter:
         raise

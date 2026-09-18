@@ -16,6 +16,7 @@ Read an introductory blog post on the GA CLI on [gunnargriese.com](https://gunna
 ### [GA4 Data API](https://developers.google.com/analytics/devguides/reporting/data/v1)
 
 - **Reporting** — Run standard, pivot, batch, funnel, and real-time reports
+- **Chat** — Ask questions in plain language via `ga reports chat` (built on the `v1alpha` API)
 - **Report builder** — Interactive metric/dimension selection via `ga reports build`
 - **Compatibility checks** — Validate metric/dimension combinations before running reports
 - **Metadata** — Browse and search available metrics and dimensions
@@ -201,7 +202,7 @@ export GA_CLI_SERVICE_ACCOUNT="/path/to/key.json"
 | `ga google-ads-links` | `list`, `create`, `update`, `delete` | Manage Google Ads links |
 | `ga enhanced-measurement` | `get`, `update` | Manage enhanced measurement settings |
 | `ga property-settings` | `attribution`, `google-signals` | View and update property settings |
-| `ga reports` | `run`, `pivot`, `batch`, `funnel`, `check-compatibility`, `metadata`, `realtime`, `build` | Run and build reports |
+| `ga reports` | `run`, `pivot`, `batch`, `funnel`, `chat`, `check-compatibility`, `metadata`, `realtime`, `build` | Run and build reports |
 | `ga agent` | `guide` | AI agent quick reference |
 | `ga upgrade` | `--check`, `--force` | Check for and install updates |
 | `ga completions` | `bash`, `zsh`, `fish` | Generate shell completion scripts |
@@ -217,6 +218,38 @@ ga accounts list --output json      # JSON output
 ga accounts list --output table     # Table output (default)
 ga accounts list --output compact   # Minimal ID + name output
 ```
+
+## Chat
+
+Ask questions about a property in plain language:
+
+```bash
+ga reports chat "how many users did I have last week?"
+ga reports chat "now break that down by country" --continue
+ga reports chat --interactive          # multi-turn conversation
+ga reports chat "top pages" -o json    # raw ChatResponse for scripts
+```
+
+| Flag | Effect |
+|------|--------|
+| `--session-id ID` | Continue a specific conversation |
+| `--continue` | Continue this property's most recent conversation |
+| `--interactive` / `-i` | Multi-turn REPL; quota shown per turn |
+| `--return-property-quota` | Show token quota (on by default in `--interactive`) |
+
+> **Built on the `v1alpha` Data API.** Google announced GA for `properties.chat`
+> on 2026-09-17; it now works end-to-end on live GA4 properties. The method
+> still lives under the `v1alpha` API version, so its shape may still change.
+> If you do hit a `403`, it means either you lack access to the property or
+> chat isn't enabled for your account — the API returns the same generic
+> message for both, so the CLI names both possibilities.
+>
+> Chat requires the `analytics.chatbot.read` scope, added in 0.3.0. **If you
+> authenticated with an earlier version, run `ga auth login` again** — a
+> refresh token cannot gain a scope it was never granted. Other commands are
+> unaffected.
+>
+> Uses AI and may return inaccurate information.
 
 ## Global Options
 
