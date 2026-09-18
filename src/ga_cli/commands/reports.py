@@ -276,10 +276,21 @@ def _display_response_metadata(metadata: dict | None, effective_format: str) -> 
 
     for reason in metadata.get("dataTruncationReasons", []):
         kind = _humanize_truncation_type(reason.get("dataTruncationType", ""))
-        message = reason.get("dataTruncationMessage", "")
-        date = reason.get("dataTruncationDate")
-        suffix = f" (before {date})" if date else ""
-        lines.append(f"Truncated ({kind}): {message}{suffix}")
+        # Compose from whichever detail fields the API sent — a DATE_RANGE
+        # reason may carry only dataTruncationDateRanges, with no message.
+        parts = []
+        if reason.get("dataTruncationMessage"):
+            parts.append(reason["dataTruncationMessage"])
+        ranges = [
+            f"{dr.get('startDate', '?')}–{dr.get('endDate', '?')}"
+            for dr in reason.get("dataTruncationDateRanges", [])
+        ]
+        if ranges:
+            parts.append(f"affected: {', '.join(ranges)}")
+        if reason.get("dataTruncationDate"):
+            parts.append(f"(before {reason['dataTruncationDate']})")
+        detail = " ".join(parts)
+        lines.append(f"Truncated ({kind}): {detail}" if detail else f"Truncated ({kind})")
 
     if metadata.get("subjectToThresholding"):
         lines.append(

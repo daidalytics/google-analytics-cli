@@ -1163,6 +1163,36 @@ class TestResponseMetadataDisplay:
         assert "(before 2023-09-01)" in output
         assert output.count("(before") == 1
 
+    def test_truncation_date_ranges_render_without_message(self):
+        # Observed live 2026-09-18: DATE_RANGE truncations arrive with only
+        # dataTruncationDateRanges — no message, no dataTruncationDate.
+        result = _run_with_metadata({
+            "dataTruncationReasons": [
+                {
+                    "dataTruncationType": "DATA_TRUNCATION_TYPE_DATE_RANGE",
+                    "dataTruncationDateRanges": [
+                        {"startDate": "2015-08-14", "endDate": "2016-12-31"}
+                    ],
+                }
+            ]
+        })
+
+        output = _strip_ansi(result.output)
+        assert result.exit_code == 0
+        assert "Truncated (Date Range): affected: 2015-08-14–2016-12-31" in output
+
+    def test_truncation_with_no_detail_renders_type_without_colon(self):
+        result = _run_with_metadata({
+            "dataTruncationReasons": [
+                {"dataTruncationType": "DATA_TRUNCATION_TYPE_PROPERTY"}
+            ]
+        })
+
+        output = _strip_ansi(result.output)
+        assert result.exit_code == 0
+        assert "Truncated (Property)" in output
+        assert "Truncated (Property):" not in output
+
     def test_thresholding_true_renders_note(self):
         result = _run_with_metadata({"subjectToThresholding": True})
 
