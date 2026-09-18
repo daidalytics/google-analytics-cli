@@ -243,7 +243,7 @@ Requires both `--property-id` and `--stream-id`. `get` retrieves current setting
 
 ### Reports
 ```bash
-ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE [--limit N] [-o json]  # pipe: | jq '[.[] | {date, sessions, totalUsers}]'
+ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE [--limit N] [-o json]  # pipe: | jq '[.rows[] | {date, sessions, totalUsers}]'
 ga reports pivot [-p PROPERTY_ID] -m metrics -d dimensions --pivot-field FIELD [--start-date DATE] [-o json]
 ga reports check-compatibility [-p PROPERTY_ID] [-m metrics] [-d dimensions] [-o json]
 ga reports metadata [-p PROPERTY_ID] [--type metrics|dimensions] [--search TEXT] [-o json]
@@ -251,6 +251,12 @@ ga reports realtime [-p PROPERTY_ID] [-m metrics] [-d dimensions] [--interval SE
 ga reports chat "QUESTION" [-p PROPERTY_ID] [--session-id ID] [--continue] [-i] [-o json]  # alpha
 ```
 Dates: `today`, `yesterday`, `7daysAgo`, `30daysAgo`, `90daysAgo`, or `YYYY-MM-DD`
+
+`reports run` JSON output is a `{rows, metadata}` envelope. `metadata` is the API's
+`ResponseMetaData`: always `currencyCode`/`timeZone`, plus — when applicable —
+`samplingMetadatas`, `subjectToThresholding`, and `dataTruncationReasons`. Check it
+before treating report data as complete; `pivot`/`batch` return it in their raw
+responses under the same key.
 
 ### Upgrade
 ```bash

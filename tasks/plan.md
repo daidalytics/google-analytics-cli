@@ -1,352 +1,259 @@
-# Implementation Plan: `ga reports chat`
+# Implementation Plan: Surface `ResponseMetaData` in report commands
 
-Companion to [SPEC.md](../SPEC.md). Reflects the live probe findings of 2026-09-01.
+Companion to [SPEC.md](../SPEC.md). API revision `20260909`, snapshots already current (`5680e22`).
 
 ## Overview
 
-Add `ga reports chat` to the GA CLI, wrapping `analyticsdata.properties.chat` (v1alpha, rev
-`20260830`). Delivers one-shot natural-language queries, explicit and cached session threading, an
-interactive REPL, and block-based rendering of text and table responses.
+Wire the GA4 Data API's `ResponseMetaData` object — sampling, thresholding, schema restrictions,
+empty-report reasons, and the new `dataTruncationReasons` — into `reports run`, `build`, `batch`,
+and `pivot`. Today it is silently discarded by `run`/`build` in every output format, and shown
+nowhere in `batch`/`pivot` table mode. One shared rendering helper; automatic display (no new
+flags); one deliberate breaking change to `run`/`build` JSON output (`{rows, metadata}` envelope
+replacing the bare rows array).
 
-**Constraint that shapes everything below:** the endpoint is gated above the property level. Probing
-returned `403 PERMISSION_DENIED` on 6/6 properties while `runReport` succeeded on the same property,
-token and API version. We are therefore building against the **discovery contract, not observed
-responses**. Every task is verified by mock-based tests (the project's existing norm — `conftest.py`
-mocks all API calls) plus a live 403 check that exercises the real error path end to end.
+**Constraint that shapes verification:** sampling, truncation, and thresholding cannot be forced
+on demand against a live property, so behavior is verified by mock-based tests (the project norm —
+every API call mocked). The live checks we *can* run are the no-op path (a normal report's output
+must be unchanged in table mode) and the JSON envelope shape. Because `-o json` passes `metadata`
+through losslessly, any real-world response that does trigger these conditions can validate the
+renderer after the fact.
 
 ## Architecture Decisions
 
-1. **Scope pre-flight over bare 403.** `analytics.chatbot.read` is appended to `OAUTH_SCOPES`.
-   Stored credentials record granted scopes (`credentials.py:45`), so we compare *before* the call
-   and fail with a re-auth instruction. Confirmed necessary: the probe showed existing credentials
-   carry exactly the six pre-0.3.0 scopes.
+1. **One helper, prose not tables.** `_display_response_metadata()` in `reports.py`, shaped like
+   `_display_quota()`: a strict no-op when the API returned nothing noteworthy. Warnings render as
+   a "Data Notes" line list, not a Rich table — these are annotations about the report, not data.
 
-2. **403 handling is local, not shared.** SPEC's Boundaries mark shared helpers as "ask first", so
-   chat gets a local `_handle_chat_403()` rather than modifying `errors.py`. It mirrors
-   `handle_error`'s contract — structured JSON to stderr in json mode, Rich text otherwise, exit 2 —
-   because the API cannot distinguish "no property access" from "chat not enabled" and the generic
-   message must name both. If a second command ever needs this, promote it to `errors.py` then.
+2. **The JSON breaking change is isolated in its own task/commit.** `run`/`build` `-o json` moves
+   from a bare rows array to `{"rows": [...], "metadata": {...}}`. Keeping that diff separate from
+   the (additive) display work makes it individually revertable and reviewable, and gives the
+   release notes one commit to point at. `batch`/`pivot` JSON already passes the raw response
+   through — no change there.
 
-3. **`-o json` is a lossless passthrough.** Agents get the raw `ChatResponse`. This is also our
-   field-diagnostic channel: since we cannot observe real responses, users who *do* have access can
-   send us raw output to validate the renderer against.
+3. **API-sourced text must be markup-escaped.** `dataTruncationMessage` is server-provided prose
+   printed via `console.print` inside Rich markup (`[yellow]![/yellow] {line}`). A message
+   containing `[` would be parsed as a style tag — the exact failure `chat` guards against with
+   `markup=False` (`reports.py:1046`). Here the prefix *is* markup, so escape the API text with
+   `rich.markup.escape()` instead. This corrects the sketch in SPEC.md's Code Style section, which
+   has this bug.
 
-4. **Renderer skips unknown block types rather than erroring.** Live discovery already exposes
-   methods absent from our snapshot (`audienceLists`, `reportTasks`, `recurringAudienceLists`),
-   so this surface is visibly still moving. A future `chart` block must not crash the command.
+4. **`emptyReason` lives in the helper; `output()` is untouched.** SPEC's "replaces the current
+   unconditional 'No results found.'" is implemented as: the helper emits one `info()` line with
+   the API's reason; the shared `output()` fallback stays as-is (SPEC Boundaries: shared helpers
+   are ask-first).
 
-5. **No client-side session staleness check.** Whatever the TTL is, a client-side threshold could
-   only discard sessions the server would have accepted. We let the server reject and recover.
+5. **Funnel confirmed out of scope** — resolves SPEC Open Question 1. The v1alpha snapshot shows
+   `RunFunnelReportResponse` has no `metadata` field (`funnelVisualization`, `kind`,
+   `propertyQuota`, `funnelTable` only). Recorded in SPEC.md during T6.
+
+6. **Sampling percentage: one decimal place** (`3.5%`) — resolves SPEC Open Question 2. No
+   existing percent-formatting precedent in the CLI; one decimal balances precision against noise.
+   `int64` fields arrive as JSON strings — convert with `int()` and guard
+   `samplingSpaceSize == 0`.
 
 ## Dependency Graph
 
 ```
-constants.py  (CHAT_SCOPE, OAUTH_SCOPES, get_chat_sessions_path)
-   │
-   ├── credentials.has_scope() ──┐
-   │                             │
-   └── config/chat_session.py    │
-              │                  │
-              │            T2 one-shot chat command
-              │             (query → API → render)
-              │                  │
-              │                  ├── T3 DataTable rendering
-              │                  ├── T4 scope pre-flight + 403 handler
-              │                  ├── T7 REPL
-              │                  └── T8 quota
-              │                  │
-              └──────────────── T6 --continue + expiry recovery
-                                 │
-                                T9 docs
+T1  helper (_display_response_metadata) + `run` table/compact wiring
+ │        — first complete user-visible slice
+ ├── T2  `run` + `build` JSON envelope {rows, metadata}   ← the breaking change, isolated
+ ├── T3  `build` table/compact wiring
+ ├── T4  `batch` per-sub-report wiring (table mode)
+ └── T5  `pivot` wiring (table mode)
+          │
+          └── T6  docs: README breaking-change note, SPEC.md living-doc updates
 ```
 
-Built bottom-up, but sliced so each task delivers a **complete working path** rather than a layer.
+T2–T5 are independent of each other but **all edit `reports.py`** — run them sequentially in one
+session; there is no useful parallelization in this feature.
 
 ---
 
 ## Task List
 
-### Phase 1: Foundation and first working path
+### Phase 1: Core slice — `reports run`
 
 ---
 
-## Task 1: Add the chat scope and a scope-inspection helper
+## Task 1: Rendering helper + `run` table/compact display
 
-**Description:** Register `analytics.chatbot.read` in `OAUTH_SCOPES` so `ga auth login` requests it,
-and add `has_scope()` so commands can check what stored credentials actually carry. The probe
-confirmed the OAuth flow grants this scope without any GCP consent-screen change for testing-mode
-apps.
+**Description:** The first complete path: a user running `ga reports run` in table mode sees a
+"Data Notes" section whenever the API reports truncation, thresholding, sampling, restrictions,
+or an empty-reason — and sees nothing new otherwise. Adds `_humanize_truncation_type()` and
+`_display_response_metadata()` (per SPEC Code Style, corrected to escape API text per Decision 3),
+and calls it from `run_cmd` after the existing quota display. Compact mode sends the same lines to
+stderr via `warn()`/`info()` so stdout stays pipeable.
 
 **Acceptance criteria:**
-- [ ] `CHAT_SCOPE` constant defined and included in `OAUTH_SCOPES`
-- [ ] `has_scope(scope: str) -> bool` returns False when credentials are absent or lack the scope,
-      True when present; never raises
-- [ ] Existing auth tests still pass unchanged
+- [ ] Each `metadata` field renders per SPEC's rules: one line per truncation reason (type
+      humanized, message, `(before DATE)` when present), fixed thresholding line only when `true`,
+      sampling percentage with zero-guard, one line per restricted metric, `emptyReason` via
+      `info()`
+- [ ] Absent or empty `metadata` produces **no** "Data Notes" output at all; existing table-mode
+      tests using `SAMPLE_REPORT_RESPONSE` (no `metadata` key) pass unchanged
+- [ ] A `dataTruncationMessage` containing Rich markup (e.g. `[bold]`) renders literally, styled
+      prefix intact
+- [ ] Compact mode: notes go to stderr, stdout is row-only (assert via `Result.stdout` —
+      `Result.output` merges streams under click 8.3)
 
 **Verification:**
-- [ ] `pytest tests/test_credentials.py tests/test_auth_cmd.py tests/test_service_account.py`
-- [ ] Manual: `ga auth login` consent screen lists the chatbot scope; afterwards
-      `credentials.json` contains all seven scopes
+- [ ] `pytest tests/test_reports.py -k "MetadataDisplay or MetadataCompact" -v`
+- [ ] `pytest tests/test_reports.py` — full file green (no regressions)
+- [ ] `ruff check src/ tests/`
 
 **Dependencies:** None
-**Files:** `src/ga_cli/config/constants.py`, `src/ga_cli/auth/credentials.py`,
-`tests/test_credentials.py`
+**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports.py`
+**Scope:** M
+
+---
+
+## Task 2: `run` + `build` JSON envelope — the breaking change
+
+**Description:** `run_cmd` and `build_cmd` `-o json` currently print the transformed rows as a
+bare array, discarding metadata entirely. Both switch to
+`{"rows": [...], "metadata": {...}}` — `metadata` present even when empty (`{}`), so consumers
+get a stable shape. Table/compact paths are untouched by this task. Deliberately one commit so
+the breaking diff is isolated (Decision 2).
+
+**Acceptance criteria:**
+- [ ] `run -o json` and `build -o json` emit a top-level object with exactly `rows` and
+      `metadata` keys; `rows` content is unchanged from the previous array
+- [ ] `metadata` carries the API's object verbatim when present, `{}` when absent
+- [ ] Existing `test_run_json_output` updated for the envelope; no other JSON-consuming test
+      regresses
+
+**Verification:**
+- [ ] `pytest tests/test_reports.py -k "json or Json" -v`
+- [ ] `pytest` — full suite green
+- [ ] Manual: `ga reports run -p <id> -m sessions -o json | python3 -c "import json,sys; d=json.load(sys.stdin); print(sorted(d))"` prints `['metadata', 'rows']`
+
+**Dependencies:** Task 1 (shares fixtures)
+**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports.py`
 **Scope:** S
 
 ---
 
-## Task 2: One-shot `ga reports chat QUERY` with text rendering
+### Checkpoint: Core slice
+- [ ] Full `pytest` green, `ruff check src/ tests/` clean
+- [ ] Live smoke on property `250400352` (use `sessions`/`activeUsers` — no revenue tracking
+      there): table output of a normal report is byte-identical in spirit to pre-change (no
+      "Data Notes"), JSON returns the envelope
+- [ ] Review with human — the breaking change is now real; last cheap moment to reverse it
 
-**Description:** The first complete path — a user asks a question and sees an answer. Registers the
-command, resolves the property, validates input, calls `properties().chat()` via the existing
-`get_data_alpha_client()`, renders `text` blocks, prints the session ID, and accepts
-`--session-id` for explicit threading. Table blocks are deferred to Task 3.
+---
+
+### Phase 2: Remaining commands
+
+---
+
+## Task 3: `build` table/compact display
+
+**Description:** `build_cmd` runs the same `runReport` call as `run_cmd`; wire the same
+`_display_response_metadata()` call into its result path (after its `_display_quota` call), making
+the interactive builder's output consistent with `run`.
 
 **Acceptance criteria:**
-- [ ] `ga reports chat "question"` sends `{"userQuery": ...}` and renders returned text blocks
-- [ ] `--session-id` is passed through as `sessionId`; omitted when not supplied
-- [ ] Response `sessionId` is surfaced so the user can resume
-- [ ] `-o json` emits the raw `ChatResponse` with no keys added or removed
-- [ ] Rejects: missing query, whitespace-only query, missing property ID
-- [ ] Text renders with `markup=False` (a response containing `[bold]` must appear literally)
+- [ ] `build` table mode renders "Data Notes" from a mocked `metadata` response; nothing when
+      absent
+- [ ] Existing `build` tests pass unchanged
 
 **Verification:**
-- [ ] `pytest tests/test_reports_chat.py -k "OneShot or Validation or SessionFlags"`
-- [ ] `ga reports chat --help` renders
-- [ ] Manual: against a real property, confirm the request is well-formed (expect 403 until the
-      feature is ungated — Task 4 makes that failure legible)
+- [ ] `pytest tests/test_reports.py -k "build or Build" -v`
+- [ ] `ruff check src/ tests/`
 
 **Dependencies:** Task 1
-**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports_chat.py`
-**Scope:** M
-
----
-
-### Checkpoint: Foundation
-- [ ] `pytest` fully green
-- [ ] `ruff check src/ tests/` clean
-- [ ] `ga reports chat "test"` reaches the API and returns a real response or a real 403
-- [ ] No existing command's behaviour changed
-
----
-
-### Phase 2: Complete the response contract
-
----
-
-## Task 3: Render `DataTable` blocks
-
-**Description:** Handle the second block type. Blocks render in document order — a text block
-introducing the table that follows it must stay adjacent to it. Feeds rows through the existing
-`output()` renderer so chat tables look like every other table in the CLI.
-
-**Acceptance criteria:**
-- [ ] `DataTable` headers/rows render as a Rich table, columns in API order
-- [ ] Mixed text+table responses render in the order returned
-- [ ] Ragged rows (fewer cells than headers) render blank cells instead of raising —
-      mirrors `_transform_funnel_rows`' defensive indexing
-- [ ] Blocks with neither `text` nor `table` are skipped silently
-- [ ] `compact` emits tab-separated rows with a header line; session ID goes to stderr so stdout
-      stays pipeable
-
-**Verification:**
-- [ ] `pytest tests/test_reports_chat.py -k "Table or Rendering or Compact"`
-- [ ] Manual: `ga reports chat "..." -o compact | cut -f1` yields a clean column
-
-**Dependencies:** Task 2
-**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports_chat.py`
+**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports.py`
 **Scope:** S
 
 ---
 
-## Task 4: Scope pre-flight and the dual-cause 403 handler
+## Task 4: `batch` — per-sub-report metadata
 
-**Description:** Make both failure modes legible. Before calling, verify credentials carry the chat
-scope and tell the user to re-authenticate if not. When the API returns 403 — which every user hits
-today — explain that it means *either* missing property access *or* the feature not being enabled,
-since the API's generic message cannot distinguish them, and point at `ga properties get` as the
-diagnostic that can.
+**Description:** Each entry in `BatchRunReportsResponse.reports` is a full `RunReportResponse`
+with its own `metadata` (confirmed against the snapshot). In table mode, call the helper inside
+the existing per-report loop, right after the sub-report's row-count line (`reports.py:808`), so
+notes attach visibly to the sub-report they describe. JSON mode already passes the raw response
+through — add a regression assertion only.
 
 **Acceptance criteria:**
-- [ ] Credentials lacking `CHAT_SCOPE` → exit 2 with a "run `ga auth login`" message, no API call
-- [ ] A 403 from the API → exit 2, message naming both causes and suggesting
-      `ga properties get -p ID`
-- [ ] In `-o json`, both emit `{"error": true, "exit_code": 2, "category": "auth_error", ...}` to
-      stderr, matching `handle_error`'s shape
-- [ ] Non-403 errors still route through the standard `handle_error`
+- [ ] Two-sub-report config where only the second has `dataTruncationReasons`: "Data Notes"
+      appears under the second `--- Report N ---` block only
+- [ ] `batch -o json` raw passthrough still includes each sub-report's `metadata` (regression
+      guard, no behavior change)
 
 **Verification:**
-- [ ] `pytest tests/test_reports_chat.py -k "Scope or Forbidden"`
-- [ ] **Live check:** `ga reports chat "test"` against a real property produces the dual-cause
-      message rather than a raw traceback — the one real end-to-end assertion available to us
-- [ ] Live check with `-o json` emits parseable structured JSON on stderr
+- [ ] `pytest tests/test_reports.py -k "Batch" -v` (or the batch test file/class as organized)
+- [ ] `ruff check src/ tests/`
 
-**Dependencies:** Tasks 1, 2
-**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports_chat.py`
+**Dependencies:** Task 1
+**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports.py`
 **Scope:** S
 
 ---
 
-### Checkpoint: Response contract complete
-- [ ] `pytest` green, `ruff` clean
-- [ ] Live 403 renders the intended message in table **and** json formats
-- [ ] Review with human before building session machinery
+## Task 5: `pivot` — table-mode metadata
 
----
-
-### Phase 3: Session persistence
-
----
-
-## Task 5: Per-property session cache
-
-**Description:** Standalone persistence module backing `--continue`. Keyed by property ID so
-switching properties never resumes the wrong conversation. Corruption-tolerant: a malformed file
-returns `None` rather than breaking an unrelated command.
+**Description:** `RunPivotReportResponse.metadata` `$ref`s the same `ResponseMetaData`. Call the
+helper in `pivot_cmd`'s table-mode branch after the pivot rows render. JSON mode already raw-
+passes the response — regression assertion only.
 
 **Acceptance criteria:**
-- [ ] `save()` / `load()` / `clear()` round-trip a session ID per property ID
-- [ ] Missing file, empty file, and malformed JSON all return `None` without raising
-- [ ] File created `0o600`, matching credential-handling conventions
-- [ ] `clear()` removes only the target property, leaving others intact
-- [ ] Stores only session ID and timestamp — never query or response content
+- [ ] `pivot` table mode renders "Data Notes" from a mocked `metadata`; nothing when absent
+- [ ] `pivot -o json` passthrough still includes `metadata` (regression guard)
 
 **Verification:**
-- [ ] `pytest tests/test_chat_session.py`
-- [ ] Manual: `stat -f "%Sp" ~/.config/ga-cli/chat-sessions.json` shows `-rw-------`
+- [ ] `pytest tests/test_reports.py -k "Pivot" -v` (or wherever pivot tests live)
+- [ ] `ruff check src/ tests/`
 
-**Dependencies:** Task 1 (path constant only) — otherwise independent, parallelizable with 2–4
-**Files:** `src/ga_cli/config/chat_session.py`, `src/ga_cli/config/constants.py`,
-`tests/test_chat_session.py`
+**Dependencies:** Task 1
+**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports.py`
 **Scope:** S
 
 ---
 
-## Task 6: Wire `--continue` with expiry recovery
+### Checkpoint: All commands wired
+- [ ] Full `pytest` green, `ruff` clean
+- [ ] Every SPEC Success Criterion 1–6 demonstrably met by a named test
+- [ ] `reports realtime` and `reports funnel` behavior untouched (their tests unchanged)
 
-**Description:** Connect the cache to the command. Every successful call records its session ID;
-`--continue` replays the one for that property. A rejected session must fail loudly — silently
-starting fresh would answer a follow-up question without its context and *look* like it worked.
+---
+
+### Phase 3: Documentation
+
+---
+
+## Task 6: Docs + SPEC living-document updates
+
+**Description:** Record the breaking change where users will find it, and close the spec's open
+questions. Check whether `ga agent guide` (`agent_cmd.py`) documents `run`'s JSON output shape —
+if it claims a bare array, correct it; agents are the primary `-o json` consumers.
 
 **Acceptance criteria:**
-- [ ] `--continue` sends the cached session ID for that property
-- [ ] Cache is written after every successful call, one-shot and REPL alike
-- [ ] `--session-id` together with `--continue` → `BadParameter`
-- [ ] A rejected session clears that property's entry and errors with a clear message; it never
-      silently starts a new session
-- [ ] `--continue` with no cached session errors actionably
-- [ ] Switching `-p` does not cross-contaminate sessions
+- [ ] README documents the `{rows, metadata}` JSON shape for `run`/`build` and the "Data Notes"
+      behavior; breaking change called out for the next release's notes
+- [ ] `agent_cmd.py` guide checked for stale JSON-shape claims and corrected if any
+      (`ga agent guide` output greps clean)
+- [ ] SPEC.md updated: status → Implemented, Open Q1 resolved (funnel has no `metadata` field),
+      Open Q2 resolved (one decimal place), Open Q3 resolved per the human's call on where the
+      breaking-change note lives
+- [ ] tasks/todo.md checkpoints filled in with final test counts and commit hashes
 
 **Verification:**
-- [ ] `pytest tests/test_reports_chat.py -k "Continue"`
-- [ ] Manual: two successive invocations with `--continue` reuse one session ID; a `-p` switch
-      starts a distinct one
+- [ ] `pytest` full suite, `ruff check src/ tests/`
+- [ ] `ga agent guide | grep -A3 -i "reports run"` shows the new shape (if the guide covers it)
 
-**Dependencies:** Tasks 2, 5
-**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports_chat.py`
-**Scope:** M
-
----
-
-### Checkpoint: Sessions
-- [ ] `pytest` green, `ruff` clean
-- [ ] Cache file contains only session IDs and timestamps — verified by inspection
-- [ ] Deleting the cache mid-flow degrades gracefully
-
----
-
-### Phase 4: Interactive use and cost visibility
-
----
-
-## Task 7: `--interactive` REPL
-
-**Description:** Multi-turn conversation in one process, threading the session ID in memory across
-turns. Uses `questionary.text()`, consistent with `reports build`. Must exit cleanly on every
-documented path — a hung REPL is worse than no REPL.
-
-**Acceptance criteria:**
-- [ ] Loops until `exit`, `quit`, or empty input; `Ctrl-C` and `Ctrl-D` also exit cleanly
-- [ ] Session ID threads automatically between turns and is printed once on exit
-- [ ] A positional query, if given, becomes the first turn
-- [ ] `-o json` with `--interactive` emits one JSON object per turn (JSON Lines)
-- [ ] An error mid-conversation ends the REPL with the session ID preserved in the cache
-
-**Verification:**
-- [ ] `pytest tests/test_reports_chat.py -k "Interactive"`
-- [ ] Manual: `ga reports chat -i`, three turns, exit each documented way
-
-**Dependencies:** Tasks 2, 6
-**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports_chat.py`
-**Scope:** M
-
----
-
-## Task 8: Tri-state quota flag and chat quota rendering
-
-**Description:** Chat is token-metered, so consumption should be visible where it accumulates.
-Defaults on in the REPL, off for one-shot calls so scripted output stays clean. Needs its own
-renderer: `PropertyChatQuota` exposes only `tokensPerDay`/`tokensPerHour`, whereas
-`_display_quota()` (`reports.py:224`) iterates five keys that do not exist on this type.
-
-**Acceptance criteria:**
-- [ ] `--return-property-quota` / `--no-return-property-quota` with `None` default
-- [ ] Resolves to `True` in `--interactive`, `False` one-shot; an explicit flag wins either way
-- [ ] `_display_chat_quota()` renders `tokensPerDay` and `tokensPerHour` and tolerates either being
-      absent
-- [ ] REPL prints one dim quota line per turn
-- [ ] `_display_quota()` is left untouched
-
-**Verification:**
-- [ ] `pytest tests/test_reports_chat.py -k "Quota"`
-- [ ] `pytest tests/test_reports.py` — confirms the shared quota path is unchanged
-
-**Dependencies:** Tasks 2, 7
-**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports_chat.py`
+**Dependencies:** Tasks 1–5
+**Files:** `README.md`, `SPEC.md`, `src/ga_cli/commands/agent_cmd.py` (conditionally),
+`tasks/todo.md`
 **Scope:** S
-
----
-
-### Checkpoint: Feature complete
-- [ ] Full `pytest` green, `ruff check src/ tests/` clean
-- [ ] Every SPEC.md success criterion either met or explicitly blocked on the API gate
-- [ ] Review with human before documentation
-
----
-
-### Phase 5: Documentation
-
----
-
-## Task 9: Document the command and the re-auth migration
-
-**Description:** Close the loop on SPEC Q5. Every existing user must re-run `ga auth login`, and
-the current claim that no scopes need manual setup is conditionally wrong — true for testing-mode
-apps (as the probe confirmed), wrong once an app is in production.
-
-**Acceptance criteria:**
-- [ ] `ga agent guide` documents chat under its reports section, including alpha/limited-availability status
-- [ ] README documents the command alongside `funnel`/`pivot`
-- [ ] `auth_cmd.py:47`'s "no scopes need to be added manually" is qualified for production-mode apps
-- [ ] Help text states chat is alpha with limited availability
-- [ ] Release note tells existing users to re-authenticate
-
-**Verification:**
-- [ ] `pytest tests/test_agent_cmd.py tests/test_describe.py`
-- [ ] `ga agent guide --section reports | grep -i chat`
-- [ ] `ga --describe | jq '.. | select(.name? == "chat")'` shows the command
-
-**Dependencies:** Tasks 2–8
-**Files:** `src/ga_cli/commands/agent_cmd.py`, `src/ga_cli/commands/auth_cmd.py`, `README.md`
-**Scope:** M
 
 ---
 
 ### Checkpoint: Ready for review
-- [ ] All acceptance criteria met
-- [ ] `pytest` and `ruff` green
+- [ ] All acceptance criteria met, `pytest` and `ruff` green
 - [ ] Version bump and release **not** performed — ask first (SPEC Boundaries)
-- [ ] `.api-snapshots/` left untouched — that is the api-watch workflow's territory
+- [ ] `.api-snapshots/` untouched; `scripts/check_api_changes.py --update` **not** run
+      (snapshots already at rev `20260909`)
 
 ---
 
@@ -354,26 +261,23 @@ apps (as the probe confirmed), wrong once an app is in production.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Cannot verify against the live API — chat is gated | **High** | Build to the discovery contract; mocks derived from the schema; `-o json` stays lossless so an entitled user's raw output can validate the renderer later. Live-verify the 403 path, which we *can* exercise. |
-| Rendering assumptions unproven — Markdown in `text`, wide tables, long answers | **Med** | `markup=False` prevents the worst failure; tables reuse the existing renderer's width handling; unknown block types skipped, not fatal |
-| Scope change forces re-auth for **every** existing user | **Med** | Pre-flight check with an actionable message (Task 4); release note (Task 9). Confirmed by probe: current credentials carry only the six old scopes. |
-| Alpha surface still shifting | **Med** | Discovery already exposes three methods missing from our snapshot. Renderer tolerates unknown block types; do not hard-code block enums. |
-| 403 message is generic and indistinguishable from real permission errors | **Med** | Dual-cause message naming both possibilities plus a concrete diagnostic command — never assert a single cause |
-| Chat token quota exhausts quietly | **Low** | Quota on by default in the REPL (Task 8); `429` observed on demo properties during probing |
-| `--continue` resumes the wrong conversation after a property switch | **Low** | Cache keyed by property ID; explicit test |
+| JSON shape change breaks existing scripts parsing `run`/`build` output as a bare array | **High** | Isolated in T2's single commit; stable envelope (`metadata` always present); README + release-note callout (T6); human checkpoint immediately after T2 |
+| Rich markup injection from API-sourced `dataTruncationMessage` | **Med** | `rich.markup.escape()` on all API text inside styled lines (Decision 3); explicit test with `[bold]` in the fixture |
+| Cannot trigger sampling/truncation/thresholding live to validate rendering | **Med** | Mock-first per project norm; JSON passthrough is lossless, so a real triggering response can validate the renderer later — same strategy that worked for `chat` |
+| Always-on display leaks new lines into scripted table/compact pipelines | **Med** | Compact sends notes to **stderr** (suppressed by `--quiet` via `warn()`/`info()`); table mode is human-facing; explicit `Result.stdout` assertions |
+| `int64`-as-string arithmetic (`samplingSpaceSize`) → `TypeError`/`ZeroDivisionError` | **Low** | `int()` conversion + zero-guard in the helper; dedicated test with `"0"` |
+| `click` 8.3 `Result.output` merges stdout+stderr, masking stream regressions | **Low** | Known from the chat cycle — assert on `Result.stdout` wherever stream separation matters |
+| Helper drifts from `batch`/`pivot` response nuances | **Low** | Both `$ref` the identical `ResponseMetaData` schema — verified against the snapshot before planning |
 
 ## Parallelization
 
-- **Task 5 is independent** of Tasks 2–4 (only needs Task 1's path constant) and can run alongside them.
-- Tasks 2 → 3 → 4 are strictly sequential; 6 → 7 → 8 likewise.
-- Task 9 needs everything else finished.
+None worth taking: every task edits `reports.py`. T3/T4/T5 are logically independent after T1 but
+should land sequentially to avoid same-file conflicts. Single session, T1→T6 in order.
 
 ## Open Questions
 
-1. **Ship visible or hidden?** The plan assumes **visible with alpha caveats** — the command appears
-   in `--help` and returns the dual-cause 403 for users without access. The alternative is hiding it
-   until Google ungates. Flagging because it affects Task 9's scope, not the code.
-2. **Verify the renderer how, eventually?** If access opens, the fastest validation is
-   `-o json` output from one real call diffed against our mock fixtures. Worth keeping the probe
-   scripts around for that.
-3. **Version bump to 0.3.0** is out of scope here per SPEC Boundaries — confirm when ready to release.
+1. **Where does the breaking-change note live?** (SPEC Open Q3.) No `CHANGELOG.md` exists.
+   Recommendation: a short "Breaking changes" note in README's reports section now, plus the
+   GitHub release notes at tag time. Decide at T6 — does not block T1–T5.
+2. **Does `ga agent guide` document `run -o json`'s current bare-array shape?** Unchecked;
+   resolved by inspection during T6.
