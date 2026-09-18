@@ -1612,5 +1612,7 @@ def build_cmd(
         if return_quota:
             _display_quota(result)
 
+        _display_response_metadata(result.get("metadata"), effective_format)
+
     except Exception as e:
         handle_error(e)

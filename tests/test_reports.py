@@ -1269,6 +1269,46 @@ class TestResponseMetadataDisplay:
         assert "[bold]docs[/bold]" in _strip_ansi(result.output)
 
 
+class TestBuildMetadataDisplay:
+    def _invoke_build(self, report_response, fmt="table"):
+        mock_client = _mock_data_client(report_response=report_response)
+
+        with (
+            patch(
+                "ga_cli.commands.reports.get_data_client",
+                return_value=mock_client,
+            ),
+            patch("ga_cli.commands.reports.questionary") as mock_q,
+        ):
+            mock_q.checkbox.return_value.ask.side_effect = [
+                ["sessions", "totalUsers"],  # metrics
+                ["date"],  # dimensions
+                [],  # additional options
+            ]
+            mock_q.select.return_value.ask.return_value = "7daysAgo"
+            mock_q.confirm.return_value.ask.return_value = False  # skip filters/sorts
+
+            return runner.invoke(app, ["reports", "build", "-p", "111", "-o", fmt])
+
+    def test_build_table_renders_data_notes(self):
+        response = {
+            **SAMPLE_REPORT_RESPONSE,
+            "metadata": {"subjectToThresholding": True},
+        }
+        result = self._invoke_build(response)
+
+        output = _strip_ansi(result.output)
+        assert result.exit_code == 0
+        assert "Data Notes" in output
+        assert "data thresholds" in output
+
+    def test_build_table_no_metadata_no_data_notes(self):
+        result = self._invoke_build(SAMPLE_REPORT_RESPONSE)
+
+        assert result.exit_code == 0
+        assert "Data Notes" not in _strip_ansi(result.output)
+
+
 class TestReportsJsonEnvelope:
     def test_run_json_is_rows_metadata_envelope(self):
         mock_client = _mock_data_client()
