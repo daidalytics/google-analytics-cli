@@ -612,6 +612,8 @@ def pivot_cmd(
         else:
             output(rows, effective_format, columns=columns, headers=headers)
 
+        _display_response_metadata(result.get("metadata"), effective_format)
+
     except typer.BadParameter:
         raise
     except Exception as e:
