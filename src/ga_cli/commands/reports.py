@@ -11,6 +11,7 @@ from typing import NoReturn, Optional
 
 import questionary
 import typer
+from rich.markup import escape
 
 from ..api.client import get_data_alpha_client, get_data_client
 from ..auth.credentials import has_scope
@@ -25,6 +26,7 @@ from ..utils import (
     output,
     require_options,
     resolve_output_format,
+    warn,
 )
 from ..utils.filters import (
     parse_date_ranges,
@@ -248,6 +250,85 @@ def _display_quota(result: dict) -> None:
         info(f"Quota: {', '.join(parts)}")
 
 
+_TRUNCATION_TYPE_PREFIX = "DATA_TRUNCATION_TYPE_"
+
+
+def _humanize_truncation_type(raw: str) -> str:
+    """DATA_TRUNCATION_TYPE_GOOGLE_ADS -> Google Ads (words with digits, like
+    DV360, keep their casing)."""
+    words = raw.removeprefix(_TRUNCATION_TYPE_PREFIX).split("_")
+    return " ".join(
+        w if any(c.isdigit() for c in w) else w.capitalize() for w in words
+    )
+
+
+def _display_response_metadata(metadata: dict | None, effective_format: str) -> None:
+    """Render sampling/thresholding/restriction/truncation notes, if present.
+
+    A strict no-op when the API returned nothing noteworthy, so unaffected
+    reports see no new output. JSON output carries `metadata` verbatim in the
+    response envelope instead, so this renders only for humans.
+    """
+    if effective_format == "json" or not metadata:
+        return
+
+    lines: list[str] = []
+
+    for reason in metadata.get("dataTruncationReasons", []):
+        kind = _humanize_truncation_type(reason.get("dataTruncationType", ""))
+        # Compose from whichever detail fields the API sent — a DATE_RANGE
+        # reason may carry only dataTruncationDateRanges, with no message.
+        parts = []
+        if reason.get("dataTruncationMessage"):
+            parts.append(reason["dataTruncationMessage"])
+        ranges = [
+            f"{dr.get('startDate', '?')}–{dr.get('endDate', '?')}"
+            for dr in reason.get("dataTruncationDateRanges", [])
+        ]
+        if ranges:
+            parts.append(f"affected: {', '.join(ranges)}")
+        if reason.get("dataTruncationDate"):
+            parts.append(f"(before {reason['dataTruncationDate']})")
+        detail = " ".join(parts)
+        lines.append(f"Truncated ({kind}): {detail}" if detail else f"Truncated ({kind})")
+
+    if metadata.get("subjectToThresholding"):
+        lines.append(
+            "Subject to data thresholds — some low-volume data may be withheld."
+        )
+
+    for sm in metadata.get("samplingMetadatas", []):
+        space = int(sm.get("samplingSpaceSize", 0) or 0)
+        read = int(sm.get("samplesReadCount", 0) or 0)
+        pct = f"{read / space * 100:.1f}%" if space else "?"
+        lines.append(f"Sampled: {read:,} of {space:,} events analyzed ({pct}).")
+
+    for restriction in metadata.get("schemaRestrictionResponse", {}).get(
+        "activeMetricRestrictions", []
+    ):
+        types = ", ".join(restriction.get("restrictedMetricTypes", []))
+        lines.append(
+            f"Metric '{restriction.get('metricName')}' restricted ({types}) — "
+            "values withheld by your role."
+        )
+
+    if metadata.get("emptyReason"):
+        lines.append(f"Report is empty: {metadata['emptyReason']}")
+
+    if not lines:
+        return
+
+    if effective_format == "table":
+        console.print("\n[bold]Data Notes[/bold]")
+        for line in lines:
+            # escape(): message text is API-sourced and may contain square
+            # brackets Rich would otherwise parse as style tags.
+            console.print(f"  [yellow]![/yellow] {escape(line)}")
+    else:  # compact — stderr, keeping stdout pipeable
+        for line in lines:
+            warn(line)
+
+
 @reports_app.command("run")
 def run_cmd(
     property_id: Optional[str] = typer.Option(
@@ -331,7 +412,16 @@ def run_cmd(
         rows, columns, headers = _transform_report_rows(result)
         row_count = result.get("rowCount", len(rows))
 
-        output(rows, effective_format, columns=columns, headers=headers)
+        if effective_format == "json":
+            # Envelope rather than a bare rows array: metadata (sampling,
+            # thresholding, truncation) describes the whole report and must
+            # survive into machine-readable output.
+            output(
+                {"rows": rows, "metadata": result.get("metadata", {})},
+                effective_format,
+            )
+        else:
+            output(rows, effective_format, columns=columns, headers=headers)
 
         if effective_format == "table" and row_count > 0:
             console.print(f"\n[dim]{row_count} total rows[/dim]")
@@ -341,6 +431,8 @@ def run_cmd(
 
         if return_property_quota:
             _display_quota(result)
+
+        _display_response_metadata(result.get("metadata"), effective_format)
 
     except typer.BadParameter:
         raise
@@ -530,6 +622,8 @@ def pivot_cmd(
             info("No data returned.")
         else:
             output(rows, effective_format, columns=columns, headers=headers)
+
+        _display_response_metadata(result.get("metadata"), effective_format)
 
     except typer.BadParameter:
         raise
@@ -807,6 +901,9 @@ def batch_cmd(
             output(rows, effective_format, columns=columns, headers=headers)
             if row_count > 0:
                 console.print(f"[dim]{row_count} total rows[/dim]")
+            # Each sub-report carries its own metadata; render it here so
+            # notes attach to the report they describe.
+            _display_response_metadata(report.get("metadata"), effective_format)
 
     except typer.BadParameter:
         raise
@@ -1514,7 +1611,13 @@ def build_cmd(
         rows, columns, headers = _transform_report_rows(result)
         row_count = result.get("rowCount", len(rows))
 
-        output(rows, effective_format, columns=columns, headers=headers)
+        if effective_format == "json":
+            output(
+                {"rows": rows, "metadata": result.get("metadata", {})},
+                effective_format,
+            )
+        else:
+            output(rows, effective_format, columns=columns, headers=headers)
 
         if effective_format == "table" and row_count > 0:
             console.print(f"\n[dim]{row_count} total rows[/dim]")
@@ -1524,6 +1627,8 @@ def build_cmd(
 
         if return_quota:
             _display_quota(result)
+
+        _display_response_metadata(result.get("metadata"), effective_format)
 
     except Exception as e:
         handle_error(e)

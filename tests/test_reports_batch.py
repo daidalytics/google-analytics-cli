@@ -198,3 +198,63 @@ class TestBatchReport:
         mock_props.batchRunReports.assert_called_once()
         call_kwargs = mock_props.batchRunReports.call_args
         assert call_kwargs[1]["property"] == "properties/99999"
+
+
+class TestBatchResponseMetadata:
+    def _invoke(self, response, tmp_path, fmt="table"):
+        with (
+            patch("ga_cli.commands.reports.get_data_client") as mock_client,
+            patch("ga_cli.commands.reports.get_effective_value") as mock_gev,
+        ):
+            mock_gev.side_effect = lambda val, key: val if val else "12345"
+            mock_batch, _ = _mock_batch_execute(response)
+            mock_props = MagicMock()
+            mock_props.batchRunReports.return_value = mock_batch
+            mock_client.return_value.properties.return_value = mock_props
+
+            config_path = _write_config(tmp_path, BATCH_CONFIG)
+            return runner.invoke(
+                app,
+                ["reports", "batch", "-p", "12345", "-c", config_path, "-o", fmt],
+            )
+
+    def _response_with_metadata_on_second_report(self):
+        response = json.loads(json.dumps(SAMPLE_BATCH_RESPONSE))
+        response["reports"][1]["metadata"] = {
+            "dataTruncationReasons": [
+                {
+                    "dataTruncationType": "DATA_TRUNCATION_TYPE_GOOGLE_ADS",
+                    "dataTruncationMessage": "Ads retention limit.",
+                }
+            ]
+        }
+        return response
+
+    def test_data_notes_attach_to_the_subreport_they_describe(self, tmp_path):
+        response = self._response_with_metadata_on_second_report()
+        result = self._invoke(response, tmp_path)
+
+        assert result.exit_code == 0
+        assert result.output.count("Data Notes") == 1
+        # Notes render under Report 2 (the sub-report carrying metadata),
+        # not under Report 1.
+        assert result.output.index("Data Notes") > result.output.index("Report 2")
+
+    def test_no_metadata_no_data_notes(self, tmp_path):
+        result = self._invoke(SAMPLE_BATCH_RESPONSE, tmp_path)
+
+        assert result.exit_code == 0
+        assert "Data Notes" not in result.output
+
+    def test_json_passthrough_keeps_metadata(self, tmp_path):
+        response = self._response_with_metadata_on_second_report()
+        result = self._invoke(response, tmp_path, fmt="json")
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert (
+            parsed["reports"][1]["metadata"]["dataTruncationReasons"][0][
+                "dataTruncationType"
+            ]
+            == "DATA_TRUNCATION_TYPE_GOOGLE_ADS"
+        )

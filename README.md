@@ -219,6 +219,15 @@ ga accounts list --output table     # Table output (default)
 ga accounts list --output compact   # Minimal ID + name output
 ```
 
+> **Breaking change (post-0.3.0):** `ga reports run` and `ga reports build` with
+> `-o json` return a `{"rows": [...], "metadata": {...}}` envelope instead of a
+> bare rows array. `metadata` is the API's
+> [`ResponseMetaData`](https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/ResponseMetaData)
+> — sampling, thresholding, and data-truncation information that was previously
+> discarded. In table output the same information renders as a **Data Notes**
+> section under the results whenever present; unaffected reports look exactly as
+> before.
+
 ## Chat
 
 Ask questions about a property in plain language:

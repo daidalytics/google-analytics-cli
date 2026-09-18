@@ -224,3 +224,54 @@ class TestPivotReport:
         assert result.exit_code == 0
         call_args = mock_client.properties.return_value.runPivotReport.call_args
         assert call_args[1]["property"] == "properties/123"
+
+
+class TestPivotResponseMetadata:
+    def _invoke(self, response, fmt="table"):
+        mock_client = _mock_data_client(pivot_response=response)
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client",
+            return_value=mock_client,
+        ):
+            return runner.invoke(
+                app,
+                [
+                    "reports", "pivot",
+                    "-p", "123",
+                    "-m", "sessions",
+                    "-d", "country,deviceCategory",
+                    "--pivot-field", "deviceCategory",
+                    "-o", fmt,
+                ],
+            )
+
+    def test_table_renders_data_notes(self):
+        response = {
+            **SAMPLE_PIVOT_RESPONSE,
+            "metadata": {"subjectToThresholding": True},
+        }
+        result = self._invoke(response)
+
+        assert result.exit_code == 0
+        assert "Data Notes" in result.output
+        assert "data thresholds" in result.output
+
+    def test_table_no_metadata_no_data_notes(self):
+        result = self._invoke(SAMPLE_PIVOT_RESPONSE)
+
+        assert result.exit_code == 0
+        assert "Data Notes" not in result.output
+
+    def test_json_passthrough_keeps_metadata(self):
+        import json
+
+        response = {
+            **SAMPLE_PIVOT_RESPONSE,
+            "metadata": {"subjectToThresholding": True},
+        }
+        result = self._invoke(response, fmt="json")
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert parsed["metadata"] == {"subjectToThresholding": True}

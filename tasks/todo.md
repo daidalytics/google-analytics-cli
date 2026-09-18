@@ -1,83 +1,56 @@
-# TODO: `ga reports chat`
+# TODO: Surface `ResponseMetaData` in report commands
 
 Task detail in [plan.md](plan.md) · design in [SPEC.md](../SPEC.md)
 
-## Phase 1 — Foundation
+## Phase 1 — Core slice (`reports run`)
 
-- [x] **T1 · Add chat scope + `has_scope()` helper** — S · `4635915`
-- [x] **T2 · One-shot `ga reports chat QUERY` + text rendering + `--session-id`** — M · `02d97aa`
+- [x] **T1 · `_display_response_metadata()` helper + `run` table/compact display** — M · `71cf37d`
+- [x] **T2 · `run` + `build` JSON envelope `{rows, metadata}` (breaking change, isolated commit)** — S · `444490d`
 
-- [x] **CHECKPOINT** — 912 tests green · ruff clean · command reaches the live API
+- [x] **CHECKPOINT** — 987 tests green · ruff clean · live smoke on `250400352` passed:
+      table output unchanged, JSON returns the envelope · regression test added (`b2d2988`)
+      for a live finding: **the API returns `currencyCode`/`timeZone` in `metadata` on every
+      response** — real-world `metadata` is never empty; the helper's empty-`lines` guard
+      (not the empty-dict check) carries the no-op guarantee · human review: pending
 
-## Phase 2 — Response contract
+## Phase 2 — Remaining commands
 
-- [x] **T3 · Render `DataTable` blocks in order (+ compact format)** — S · `35291c0`
-- [x] **T4 · Scope pre-flight + dual-cause 403 handler** — S · `9522959`
+- [x] **T3 · `build` table/compact wiring** — S · `3fb35b5`
+- [x] **T4 · `batch` per-sub-report metadata (table mode) + JSON regression guard** — S · `38bc9c1`
+- [x] **T5 · `pivot` table-mode metadata + JSON regression guard** — S · `6093877`
 
-- [x] **CHECKPOINT** — 926 tests green · ruff clean · **both live 403 paths verified**
-  - Token *without* the scope → pre-flight message, exit 2, no API call
-  - Token *with* the scope → dual-cause message, exit 2 (feature still gated)
-  - Structured JSON error confirmed on stderr in both cases
+- [x] **CHECKPOINT** — 995 tests green · ruff clean · SPEC Success Criteria 1–6 each covered
+      by a named test · realtime/funnel untouched (their tests unchanged)
 
-## Phase 3 — Sessions
+## Phase 3 — Docs
 
-- [x] **T5 · Per-property session cache** — S · `79fb7b6`
-- [x] **T6 · Wire `--continue` + expiry recovery** — M · `1442f53`
+- [x] **T6 · README breaking-change note · agent-guide shape check · SPEC.md living updates
+      (status → Implemented, Open Q1–Q3 resolved)** — S
+      · found + fixed a stale jq recipe in the agent guide (`.[]` → `.rows[]`)
 
-- [x] **CHECKPOINT** — 950 tests green · cache holds only session IDs + timestamps · `0o600`
-
-## Phase 4 — Interactive + cost
-
-- [x] **T7 · `--interactive` REPL** — M · `7b47b3a`
-- [x] **T8 · Tri-state quota flag + `_display_chat_quota()`** — S · `328b37a`
-
-- [x] **CHECKPOINT** — 967 tests green · `_display_quota()` untouched
-
-## Phase 5 — Docs
-
-- [x] **T9 · Agent guide, README, re-auth migration note, qualify `auth_cmd.py:47`** — M · `0045f64`
-
-- [x] **FINAL** — 969 tests green · ruff clean · version bump and release proceeding
-      (Google announced GA for the chat endpoint via the v1alpha Data API, 2026-09-17)
+- [x] **FINAL** — 995 tests green · ruff clean · version bump/release NOT performed (ask
+      first) · `.api-snapshots/` untouched
 
 ---
 
-## Decisions made
+## Decisions to make
 
-- [x] Ship **visible with alpha caveats** — command appears in `--help`, `--describe` and docs
-- [x] Version bump to 0.3.0 — proceeding now that Google has confirmed GA (2026-09-17)
+- [x] **Open Q (plan §1):** breaking-change note → README "Output formats" section (done);
+      repeat it in the GitHub release notes at tag time (pending release).
 
-## Verified working (2026-09-18)
+## Decisions already made (from spec review + planning)
 
-- `properties.chat` now succeeds end-to-end on a live, real property (previously 403 for all
-  properties, probed 2026-09-01, 0/6). One-shot query, table rendering, `--return-property-quota`,
-  and `--continue` session threading all confirmed live against real GA4 data.
-- Found and fixed a real bug during live testing: a rejected, manually-typed `--session-id`
-  was unconditionally clearing the per-property session cache and blaming `--continue` in the
-  error message, even when `--continue` was never used — see `743c828`.
-- `tokensPerHour` quota is scoped **per-property** and exhausts within roughly 5-10 chat turns;
-  not a bug, just a tight budget to keep in mind when testing.
+- [x] Full `ResponseMetaData` scope, not just `dataTruncationReasons`
+- [x] JSON envelope `{rows, metadata}` for `run`/`build` — accepted breaking change
+- [x] Automatic display, no new flag
+- [x] Commands: `run`, `build`, `batch`, `pivot` · realtime excluded (no `metadata` field) ·
+      **funnel excluded** (snapshot-confirmed during planning: `RunFunnelReportResponse` has no
+      `metadata` field — resolves SPEC Open Q1)
+- [x] Sampling percentage: one decimal place (resolves SPEC Open Q2)
+- [x] API-sourced text markup-escaped inside styled lines (corrects the SPEC Code Style sketch)
 
-## Still unverified
+## Carry-over notes from the chat cycle
 
-- **Q2** service-account support — chat was only tested with OAuth; documented as unsupported
-- **Q3** session TTL — unmeasurable; non-blocking, design relies on server rejection
-
----
-
-## Empirical notes from implementation
-
-- **Two distinct 403 messages exist**, confirmed live:
-  - No chat scope → `"Request had insufficient authentication scopes."`
-  - Scope present, feature gated → `"User does not have sufficient permissions for this property."`
-  The pre-flight intercepts the first; the dual-cause handler explains the second.
-- `click` 8.3: `Result.output` combines stdout **and** stderr; use `Result.stdout` to assert
-  a stream stays pipeable.
-
-- **`analytics.chatbot.read` is not a sensitive scope.** Verified through a real `ga auth login`:
-  it is granted without appearing as its own consent-screen checkbox and without being registered
-  in the GCP consent screen (Testing mode). Easier to adopt than the existing `analytics.*` scopes.
-- **Chat was gated with a fully-scoped real credential as of 2026-09-01** — re-confirmed after
-  re-authentication with all 7 scopes: still `403` on the default property at that time. Google
-  announced GA for the endpoint on 2026-09-17, and it was live-verified working end-to-end the
-  next day.
+- `click` 8.3: `Result.output` merges stdout **and** stderr — assert on `Result.stdout` when
+  verifying a stream stays pipeable (matters for T1's compact-mode tests).
+- Live-test property `250400352` has no revenue tracking — use `sessions`/`activeUsers`.
