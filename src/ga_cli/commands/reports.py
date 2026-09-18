@@ -994,19 +994,34 @@ def _chat_forbidden_error(property_id: str, status_code: int) -> NoReturn:
 
 
 def _chat_expired_session_error(
-    property_id: str, session_id: str, status_code: int
+    property_id: str, session_id: str, status_code: int, *, from_cache: bool
 ) -> NoReturn:
-    """Report a rejected session after forgetting it.
+    """Report a rejected session.
 
     Never fall back to starting a fresh session: that would answer a
     follow-up question without the context it depends on, and look like it
     worked.
+
+    Only clear the saved session cache — and only blame --continue in the
+    message — when the rejected ID actually came from the cache. A bad,
+    manually-typed --session-id is unrelated to whatever (possibly still
+    valid) session is cached for this property, and must not wipe it out.
     """
-    clear_session(property_id)
+    if from_cache:
+        clear_session(property_id)
+        message = (
+            f"The chat session '{session_id}' is no longer valid — it may have expired.\n"
+            f"The saved session for property {property_id} has been cleared.\n"
+            "Re-run without --continue to start a new conversation."
+        )
+    else:
+        message = (
+            f"The chat session '{session_id}' is no longer valid — it may have expired.\n"
+            "Re-run without --session-id to start a new conversation."
+        )
+
     _chat_error(
-        f"The chat session '{session_id}' is no longer valid — it may have expired.\n"
-        f"The saved session for property {property_id} has been cleared.\n"
-        "Re-run without --continue to start a new conversation.",
+        message,
         exit_code=3,
         category="api_error",
         status_code=status_code,
@@ -1084,8 +1099,16 @@ def _chat_execute(
     query: str,
     session_id: str | None,
     return_quota: bool = False,
+    *,
+    session_from_cache: bool = False,
 ) -> dict:
-    """Send one chat turn, translating chat-specific API failures."""
+    """Send one chat turn, translating chat-specific API failures.
+
+    `session_from_cache` marks whether `session_id` was loaded from the
+    per-property session cache (--continue, or a REPL turn continuing its
+    own in-flight session) rather than typed explicitly via --session-id —
+    see `_chat_expired_session_error` for why that distinction matters.
+    """
     body: dict = {"userQuery": query}
     if session_id:
         body["sessionId"] = session_id
@@ -1107,7 +1130,9 @@ def _chat_execute(
                 _chat_forbidden_error(property_id, status)
             # Only blame the session when we actually sent one.
             if session_id and status in (400, 404):
-                _chat_expired_session_error(property_id, session_id, status)
+                _chat_expired_session_error(
+                    property_id, session_id, status, from_cache=session_from_cache
+                )
         raise
 
 
@@ -1129,8 +1154,16 @@ def _chat_repl(
     session_id: str | None,
     effective_format: str,
     return_quota: bool = True,
+    *,
+    session_from_cache: bool = False,
 ) -> None:
-    """Run a multi-turn conversation, threading the session between turns."""
+    """Run a multi-turn conversation, threading the session between turns.
+
+    `session_from_cache` marks whether the opening `session_id` came from
+    the per-property cache (--continue). From the first successful turn
+    onward, `current_session` is always the tool's own saved session, so it
+    is treated as cache-backed regardless of how the REPL was started.
+    """
     current_session = session_id
     pending = first_query
 
@@ -1152,13 +1185,19 @@ def _chat_repl(
             break
 
         result = _chat_execute(
-            data_alpha, property_id, turn, current_session, return_quota
+            data_alpha,
+            property_id,
+            turn,
+            current_session,
+            return_quota,
+            session_from_cache=session_from_cache,
         )
 
         returned = result.get("sessionId")
         if returned:
             current_session = returned
             save_session(property_id, returned)
+            session_from_cache = True
 
         if effective_format == "json":
             # JSON Lines: one object per turn.
@@ -1249,11 +1288,17 @@ def chat_cmd(
                 session_id,
                 effective_format,
                 show_quota,
+                session_from_cache=continue_session,
             )
             return
 
         result = _chat_execute(
-            data_alpha, effective_property, query.strip(), session_id, show_quota
+            data_alpha,
+            effective_property,
+            query.strip(),
+            session_id,
+            show_quota,
+            session_from_cache=continue_session,
         )
 
         returned_session = result.get("sessionId")

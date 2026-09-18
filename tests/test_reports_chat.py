@@ -561,6 +561,48 @@ class TestChatExpiredSession:
         assert result.exit_code != 0
         assert "no longer valid" not in combined
 
+    def test_bad_explicit_session_id_does_not_clear_an_unrelated_cached_session(
+        self, isolated_config_dir
+    ):
+        """A manually-typed --session-id is unrelated to whatever is cached.
+
+        Rejecting it must not destroy a separate, still-good --continue
+        session for the same property.
+        """
+        from ga_cli.config.chat_session import load_session, save_session
+
+        save_session("111", "good-cached-session")
+        client = _failing_chat_client(
+            _http_error(404, "Invalid session ID.", "NOT_FOUND")
+        )
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client):
+            result = runner.invoke(
+                app,
+                ["reports", "chat", "-p", "111", "q", "--session-id", "unrelated-typo"],
+            )
+
+        assert result.exit_code != 0
+        assert load_session("111") == "good-cached-session"
+
+    def test_bad_explicit_session_id_error_does_not_blame_continue(
+        self, isolated_config_dir
+    ):
+        client = _failing_chat_client(
+            _http_error(404, "Invalid session ID.", "NOT_FOUND")
+        )
+
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=client):
+            result = runner.invoke(
+                app,
+                ["reports", "chat", "-p", "111", "q", "--session-id", "unrelated-typo"],
+            )
+
+        combined = _strip_ansi(result.output).lower()
+        assert "no longer valid" in combined
+        assert "--continue" not in combined
+        assert "--session-id" in combined
+
 
 def _mock_chat_sequence(responses):
     """Mock client returning each response in turn."""
