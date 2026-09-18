@@ -888,6 +888,9 @@ def batch_cmd(
             output(rows, effective_format, columns=columns, headers=headers)
             if row_count > 0:
                 console.print(f"[dim]{row_count} total rows[/dim]")
+            # Each sub-report carries its own metadata; render it here so
+            # notes attach to the report they describe.
+            _display_response_metadata(report.get("metadata"), effective_format)
 
     except typer.BadParameter:
         raise
