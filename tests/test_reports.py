@@ -1098,3 +1098,181 @@ class TestRealtimeFilters:
         assert result.exit_code == 0
         body = mock_client.properties.return_value.runRealtimeReport.call_args[1]["body"]
         assert body["metricAggregations"] == ["TOTAL"]
+
+
+class TestHumanizeTruncationType:
+    def test_strips_prefix_and_title_cases(self):
+        from ga_cli.commands.reports import _humanize_truncation_type
+
+        assert _humanize_truncation_type("DATA_TRUNCATION_TYPE_GOOGLE_ADS") == "Google Ads"
+
+    def test_preserves_words_containing_digits(self):
+        from ga_cli.commands.reports import _humanize_truncation_type
+
+        assert _humanize_truncation_type("DATA_TRUNCATION_TYPE_DV360") == "DV360"
+
+
+def _run_with_metadata(metadata: dict, fmt: str = "table", base: dict | None = None):
+    """Invoke `reports run` with a mocked response carrying the given metadata."""
+    response = {**(base or SAMPLE_REPORT_RESPONSE), "metadata": metadata}
+    mock_client = _mock_data_client(report_response=response)
+
+    with patch("ga_cli.commands.reports.get_data_client", return_value=mock_client):
+        return runner.invoke(app, ["reports", "run", "-p", "111", "-o", fmt])
+
+
+class TestResponseMetadataDisplay:
+    def test_truncation_reasons_render_one_line_each(self):
+        result = _run_with_metadata({
+            "dataTruncationReasons": [
+                {
+                    "dataTruncationType": "DATA_TRUNCATION_TYPE_GOOGLE_ADS",
+                    "dataTruncationMessage": "Ads retention limit.",
+                    "dataTruncationDate": "2023-09-01",
+                },
+                {
+                    "dataTruncationType": "DATA_TRUNCATION_TYPE_DATE_RANGE",
+                    "dataTruncationMessage": "Range not fully served.",
+                },
+            ]
+        })
+
+        output = _strip_ansi(result.output)
+        assert result.exit_code == 0
+        assert "Data Notes" in output
+        assert "Truncated (Google Ads): Ads retention limit." in output
+        assert "Truncated (Date Range): Range not fully served." in output
+
+    def test_truncation_date_appended_only_when_present(self):
+        result = _run_with_metadata({
+            "dataTruncationReasons": [
+                {
+                    "dataTruncationType": "DATA_TRUNCATION_TYPE_GOOGLE_ADS",
+                    "dataTruncationMessage": "Ads retention limit.",
+                    "dataTruncationDate": "2023-09-01",
+                },
+                {
+                    "dataTruncationType": "DATA_TRUNCATION_TYPE_DATE_RANGE",
+                    "dataTruncationMessage": "Range not fully served.",
+                },
+            ]
+        })
+
+        output = _strip_ansi(result.output)
+        assert "(before 2023-09-01)" in output
+        assert output.count("(before") == 1
+
+    def test_thresholding_true_renders_note(self):
+        result = _run_with_metadata({"subjectToThresholding": True})
+
+        output = _strip_ansi(result.output)
+        assert "Data Notes" in output
+        assert "data thresholds" in output
+
+    def test_thresholding_false_renders_nothing(self):
+        result = _run_with_metadata({"subjectToThresholding": False})
+
+        assert result.exit_code == 0
+        assert "Data Notes" not in _strip_ansi(result.output)
+
+    def test_sampling_percentage_one_decimal(self):
+        result = _run_with_metadata({
+            "samplingMetadatas": [
+                {"samplingSpaceSize": "1204500", "samplesReadCount": "42103"}
+            ]
+        })
+
+        output = _strip_ansi(result.output)
+        assert "Sampled: 42,103 of 1,204,500 events" in output
+        assert "(3.5%)" in output
+
+    def test_sampling_zero_space_size_does_not_crash(self):
+        result = _run_with_metadata({
+            "samplingMetadatas": [
+                {"samplingSpaceSize": "0", "samplesReadCount": "0"}
+            ]
+        })
+
+        assert result.exit_code == 0
+        assert "(?)" in _strip_ansi(result.output)
+
+    def test_metric_restrictions_render(self):
+        result = _run_with_metadata({
+            "schemaRestrictionResponse": {
+                "activeMetricRestrictions": [
+                    {
+                        "metricName": "purchaseRevenue",
+                        "restrictedMetricTypes": ["REVENUE_DATA"],
+                    }
+                ]
+            }
+        })
+
+        output = _strip_ansi(result.output)
+        assert "purchaseRevenue" in output
+        assert "REVENUE_DATA" in output
+
+    def test_empty_reason_rendered(self):
+        empty_report = {
+            "dimensionHeaders": [{"name": "date"}],
+            "metricHeaders": [{"name": "sessions"}],
+            "rowCount": 0,
+        }
+        result = _run_with_metadata(
+            {"emptyReason": "DATA_RETENTION_EXPIRED"}, base=empty_report
+        )
+
+        output = _strip_ansi(result.output)
+        assert result.exit_code == 0
+        assert "DATA_RETENTION_EXPIRED" in output
+
+    def test_no_metadata_key_renders_no_data_notes(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "run", "-p", "111", "-o", "table"]
+            )
+
+        assert result.exit_code == 0
+        assert "Data Notes" not in _strip_ansi(result.output)
+
+    def test_empty_metadata_object_renders_no_data_notes(self):
+        result = _run_with_metadata({})
+
+        assert result.exit_code == 0
+        assert "Data Notes" not in _strip_ansi(result.output)
+
+    def test_api_text_with_rich_markup_renders_literally(self):
+        result = _run_with_metadata({
+            "dataTruncationReasons": [
+                {
+                    "dataTruncationType": "DATA_TRUNCATION_TYPE_DATE_RANGE",
+                    "dataTruncationMessage": "See [bold]docs[/bold] now.",
+                }
+            ]
+        })
+
+        assert "[bold]docs[/bold]" in _strip_ansi(result.output)
+
+
+class TestResponseMetadataCompact:
+    def test_notes_go_to_stderr_stdout_stays_row_only(self):
+        result = _run_with_metadata(
+            {
+                "dataTruncationReasons": [
+                    {
+                        "dataTruncationType": "DATA_TRUNCATION_TYPE_GOOGLE_ADS",
+                        "dataTruncationMessage": "Ads retention limit.",
+                    }
+                ]
+            },
+            fmt="compact",
+        )
+
+        assert result.exit_code == 0
+        # click 8.3: result.output merges stdout+stderr; result.stdout is stdout only.
+        assert "Truncated" not in _strip_ansi(result.stdout)
+        assert "Truncated (Google Ads)" in _strip_ansi(result.output)

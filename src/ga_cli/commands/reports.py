@@ -11,6 +11,7 @@ from typing import NoReturn, Optional
 
 import questionary
 import typer
+from rich.markup import escape
 
 from ..api.client import get_data_alpha_client, get_data_client
 from ..auth.credentials import has_scope
@@ -25,6 +26,7 @@ from ..utils import (
     output,
     require_options,
     resolve_output_format,
+    warn,
 )
 from ..utils.filters import (
     parse_date_ranges,
@@ -248,6 +250,74 @@ def _display_quota(result: dict) -> None:
         info(f"Quota: {', '.join(parts)}")
 
 
+_TRUNCATION_TYPE_PREFIX = "DATA_TRUNCATION_TYPE_"
+
+
+def _humanize_truncation_type(raw: str) -> str:
+    """DATA_TRUNCATION_TYPE_GOOGLE_ADS -> Google Ads (words with digits, like
+    DV360, keep their casing)."""
+    words = raw.removeprefix(_TRUNCATION_TYPE_PREFIX).split("_")
+    return " ".join(
+        w if any(c.isdigit() for c in w) else w.capitalize() for w in words
+    )
+
+
+def _display_response_metadata(metadata: dict | None, effective_format: str) -> None:
+    """Render sampling/thresholding/restriction/truncation notes, if present.
+
+    A strict no-op when the API returned nothing noteworthy, so unaffected
+    reports see no new output. JSON output carries `metadata` verbatim in the
+    response envelope instead, so this renders only for humans.
+    """
+    if effective_format == "json" or not metadata:
+        return
+
+    lines: list[str] = []
+
+    for reason in metadata.get("dataTruncationReasons", []):
+        kind = _humanize_truncation_type(reason.get("dataTruncationType", ""))
+        message = reason.get("dataTruncationMessage", "")
+        date = reason.get("dataTruncationDate")
+        suffix = f" (before {date})" if date else ""
+        lines.append(f"Truncated ({kind}): {message}{suffix}")
+
+    if metadata.get("subjectToThresholding"):
+        lines.append(
+            "Subject to data thresholds — some low-volume data may be withheld."
+        )
+
+    for sm in metadata.get("samplingMetadatas", []):
+        space = int(sm.get("samplingSpaceSize", 0) or 0)
+        read = int(sm.get("samplesReadCount", 0) or 0)
+        pct = f"{read / space * 100:.1f}%" if space else "?"
+        lines.append(f"Sampled: {read:,} of {space:,} events analyzed ({pct}).")
+
+    for restriction in metadata.get("schemaRestrictionResponse", {}).get(
+        "activeMetricRestrictions", []
+    ):
+        types = ", ".join(restriction.get("restrictedMetricTypes", []))
+        lines.append(
+            f"Metric '{restriction.get('metricName')}' restricted ({types}) — "
+            "values withheld by your role."
+        )
+
+    if metadata.get("emptyReason"):
+        lines.append(f"Report is empty: {metadata['emptyReason']}")
+
+    if not lines:
+        return
+
+    if effective_format == "table":
+        console.print("\n[bold]Data Notes[/bold]")
+        for line in lines:
+            # escape(): message text is API-sourced and may contain square
+            # brackets Rich would otherwise parse as style tags.
+            console.print(f"  [yellow]![/yellow] {escape(line)}")
+    else:  # compact — stderr, keeping stdout pipeable
+        for line in lines:
+            warn(line)
+
+
 @reports_app.command("run")
 def run_cmd(
     property_id: Optional[str] = typer.Option(
@@ -341,6 +411,8 @@ def run_cmd(
 
         if return_property_quota:
             _display_quota(result)
+
+        _display_response_metadata(result.get("metadata"), effective_format)
 
     except typer.BadParameter:
         raise
