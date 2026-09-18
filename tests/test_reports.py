@@ -1246,6 +1246,16 @@ class TestResponseMetadataDisplay:
         assert result.exit_code == 0
         assert "Data Notes" not in _strip_ansi(result.output)
 
+    def test_currency_and_timezone_only_render_no_data_notes(self):
+        # The live API populates these two fields on every response
+        # (verified 2026-09-18); they must not trigger the notes section.
+        result = _run_with_metadata(
+            {"currencyCode": "USD", "timeZone": "Europe/Copenhagen"}
+        )
+
+        assert result.exit_code == 0
+        assert "Data Notes" not in _strip_ansi(result.output)
+
     def test_api_text_with_rich_markup_renders_literally(self):
         result = _run_with_metadata({
             "dataTruncationReasons": [
