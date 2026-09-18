@@ -1,5 +1,6 @@
 """Tests for reports commands (run, realtime, build)."""
 
+import json
 import re
 from unittest.mock import MagicMock, patch
 
@@ -1256,6 +1257,70 @@ class TestResponseMetadataDisplay:
         })
 
         assert "[bold]docs[/bold]" in _strip_ansi(result.output)
+
+
+class TestReportsJsonEnvelope:
+    def test_run_json_is_rows_metadata_envelope(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "run", "-p", "111", "-o", "json"]
+            )
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.stdout)
+        assert sorted(parsed) == ["metadata", "rows"]
+        assert parsed["metadata"] == {}
+        assert parsed["rows"] == [
+            {"date": "20240101", "sessions": "150", "totalUsers": "100"},
+            {"date": "20240102", "sessions": "200", "totalUsers": "120"},
+        ]
+
+    def test_run_json_metadata_passthrough_verbatim(self):
+        metadata = {
+            "subjectToThresholding": True,
+            "dataTruncationReasons": [
+                {
+                    "dataTruncationType": "DATA_TRUNCATION_TYPE_DATE_RANGE",
+                    "dataTruncationMessage": "Range not fully served.",
+                }
+            ],
+        }
+        result = _run_with_metadata(metadata, fmt="json")
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.stdout)
+        assert parsed["metadata"] == metadata
+
+    def test_build_json_is_rows_metadata_envelope(self):
+        mock_client = _mock_data_client()
+
+        with (
+            patch(
+                "ga_cli.commands.reports.get_data_client",
+                return_value=mock_client,
+            ),
+            patch("ga_cli.commands.reports.questionary") as mock_q,
+        ):
+            mock_q.checkbox.return_value.ask.side_effect = [
+                ["sessions", "totalUsers"],  # metrics
+                ["date"],  # dimensions
+                [],  # additional options
+            ]
+            mock_q.select.return_value.ask.return_value = "7daysAgo"
+            mock_q.confirm.return_value.ask.return_value = False  # skip filters/sorts
+
+            result = runner.invoke(
+                app, ["reports", "build", "-p", "111", "-o", "json"]
+            )
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.stdout)
+        assert sorted(parsed) == ["metadata", "rows"]
+        assert parsed["rows"][0]["sessions"] == "150"
 
 
 class TestResponseMetadataCompact:

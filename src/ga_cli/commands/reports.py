@@ -401,7 +401,16 @@ def run_cmd(
         rows, columns, headers = _transform_report_rows(result)
         row_count = result.get("rowCount", len(rows))
 
-        output(rows, effective_format, columns=columns, headers=headers)
+        if effective_format == "json":
+            # Envelope rather than a bare rows array: metadata (sampling,
+            # thresholding, truncation) describes the whole report and must
+            # survive into machine-readable output.
+            output(
+                {"rows": rows, "metadata": result.get("metadata", {})},
+                effective_format,
+            )
+        else:
+            output(rows, effective_format, columns=columns, headers=headers)
 
         if effective_format == "table" and row_count > 0:
             console.print(f"\n[dim]{row_count} total rows[/dim]")
@@ -1586,7 +1595,13 @@ def build_cmd(
         rows, columns, headers = _transform_report_rows(result)
         row_count = result.get("rowCount", len(rows))
 
-        output(rows, effective_format, columns=columns, headers=headers)
+        if effective_format == "json":
+            output(
+                {"rows": rows, "metadata": result.get("metadata", {})},
+                effective_format,
+            )
+        else:
+            output(rows, effective_format, columns=columns, headers=headers)
 
         if effective_format == "table" and row_count > 0:
             console.print(f"\n[dim]{row_count} total rows[/dim]")
