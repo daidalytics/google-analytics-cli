@@ -191,6 +191,17 @@ class TestDescribeParameterDetails:
         props = cmd["parameters"]["properties"]
         assert props["limit"]["type"] == "integer"
 
+    def test_nested_subcommand_params(self):
+        """Regression: Typer >= 0.26 vendors Click, which broke isinstance-based
+        group/option detection and left only top-level groups without params."""
+        data = _get_describe_output()
+        cmd = data["commands"]["ga reports run"]
+        props = cmd["parameters"]["properties"]
+        assert props["metrics"]["flag"] == "--metrics"
+        assert props["metrics"]["aliases"] == ["-m"]
+        assert props["limit"]["type"] == "integer"
+        assert "ga reports" not in data["commands"]
+
     def test_boolean_type_for_flag_options(self):
         data = _get_describe_output()
         cmd = data["commands"]["ga properties delete"]

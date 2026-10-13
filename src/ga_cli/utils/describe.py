@@ -4,24 +4,37 @@ Auto-extracts command schemas from Typer/Click internals.
 No manual registration needed — parameters, types, flags, and
 metadata (mutative, dry-run, json-input) are all derived from
 the live command definitions.
+
+Commands, parameters and types are matched by duck typing rather than
+isinstance() against the `click` package: Typer >= 0.26 vendors its own copy
+of Click, whose classes are unrelated to the standalone package's.
 """
 
 import json
 import sys
+from typing import Any
 
-import click
 import typer
 
+# Keyed by class name: stable across standalone and vendored Click, whereas
+# ParamType.name is not ("integer" vs "int").
+_JSON_TYPES = {
+    "IntParamType": "integer",
+    "IntRange": "integer",
+    "FloatParamType": "number",
+    "FloatRange": "number",
+    "BoolParamType": "boolean",
+}
 
-def _click_type_to_json(param_type: click.ParamType) -> str:
+
+def _click_type_to_json(param_type: Any) -> str:
     """Map a Click parameter type to a JSON Schema type string."""
-    if isinstance(param_type, click.types.IntParamType):
-        return "integer"
-    if isinstance(param_type, click.types.FloatParamType):
-        return "number"
-    if isinstance(param_type, click.types.BoolParamType):
-        return "boolean"
-    return "string"
+    return _JSON_TYPES.get(type(param_type).__name__, "string")
+
+
+def _is_group(cmd: Any) -> bool:
+    """True for Click groups (commands that contain sub-commands)."""
+    return hasattr(cmd, "list_commands") and hasattr(cmd, "get_command")
 
 
 # Parameters to exclude from schema output (meta/infrastructure flags).
@@ -31,12 +44,12 @@ _EXCLUDED_PARAMS = frozenset({
 })
 
 
-def _param_to_schema(param: click.Parameter) -> tuple[str, dict] | None:
+def _param_to_schema(param: Any) -> tuple[str, dict] | None:
     """Convert a Click parameter to a (name, JSON Schema property) pair.
 
     Returns None for parameters that should be excluded from output.
     """
-    if not isinstance(param, click.Option):
+    if getattr(param, "param_type_name", None) != "option":
         return None
     if param.name in _EXCLUDED_PARAMS:
         return None
@@ -53,8 +66,9 @@ def _param_to_schema(param: click.Parameter) -> tuple[str, dict] | None:
     if short_flags:
         prop["aliases"] = short_flags
 
-    if isinstance(param.type, click.Choice):
-        prop["enum"] = list(param.type.choices)
+    choices = getattr(param.type, "choices", None)
+    if choices:
+        prop["enum"] = list(choices)
 
     if param.default is not None and not param.required:
         prop["default"] = param.default
@@ -62,7 +76,7 @@ def _param_to_schema(param: click.Parameter) -> tuple[str, dict] | None:
     return param.name, prop
 
 
-def _introspect_command(cmd: click.Command, prefix: str) -> dict:
+def _introspect_command(cmd: Any, prefix: str) -> dict:
     """Build a JSON-Schema-like descriptor for a single Click command."""
     full_name = f"{prefix} {cmd.name}" if prefix else cmd.name
 
@@ -102,7 +116,7 @@ def _introspect_command(cmd: click.Command, prefix: str) -> dict:
     return schema
 
 
-def _introspect_group(group: click.Group, prefix: str) -> list[dict]:
+def _introspect_group(group: Any, prefix: str) -> list[dict]:
     """Recursively introspect a Click group and all its sub-commands."""
     commands: list[dict] = []
     for name in sorted(group.list_commands(None)):  # type: ignore[arg-type]
@@ -110,7 +124,7 @@ def _introspect_group(group: click.Group, prefix: str) -> list[dict]:
         if cmd is None:
             continue
         full_prefix = f"{prefix} {name}" if prefix else name
-        if isinstance(cmd, click.Group):
+        if _is_group(cmd):
             commands.extend(_introspect_group(cmd, full_prefix))
         else:
             commands.append(_introspect_command(cmd, prefix))
