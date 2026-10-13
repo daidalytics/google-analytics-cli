@@ -900,7 +900,7 @@ class TestReportsRunOrderBy:
                 [
                     "reports", "run", "-p", "111",
                     "--order-by", "sessions:desc",
-                    "--order-by", "users:asc",
+                    "--order-by", "totalUsers:asc",
                 ],
             )
 
@@ -1078,12 +1078,12 @@ class TestRealtimeFilters:
         ):
             result = runner.invoke(
                 app,
-                ["reports", "realtime", "-p", "111", "--minute-range", "0,4"],
+                ["reports", "realtime", "-p", "111", "--minute-range", "4,0"],
             )
 
         assert result.exit_code == 0
         body = mock_client.properties.return_value.runRealtimeReport.call_args[1]["body"]
-        assert body["minuteRanges"] == [{"startMinutesAgo": 0, "endMinutesAgo": 4}]
+        assert body["minuteRanges"] == [{"startMinutesAgo": 4, "endMinutesAgo": 0}]
 
     def test_realtime_with_metric_aggregation(self):
         mock_client = _mock_data_client()
