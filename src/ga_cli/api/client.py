@@ -17,9 +17,11 @@ from typing import Optional
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import Resource, build
+from googleapiclient.http import build_http
 
 from ..auth.credentials import get_valid_credentials
 from ..auth.service_account import get_service_account_credentials
+from .allowlist_guard import AllowlistCache, AllowlistHttp, cache_for
 
 # Cached client instances (same pattern as GTM CLI)
 _cached_admin_client: Optional[Resource] = None
@@ -52,6 +54,16 @@ def _get_credentials() -> Credentials:
     )
 
 
+def _build(service: str, version: str, **kwargs) -> Resource:
+    """Build a client whose every request goes through the allowlist guard.
+
+    Raises AllowlistError if the configured allowlist is malformed.
+    """
+    creds = _get_credentials()
+    http = AllowlistHttp(creds, http=build_http())
+    return build(service, version, http=http, **kwargs)
+
+
 def get_admin_client() -> Resource:
     """Get an authenticated Analytics Admin API client.
 
@@ -64,12 +76,7 @@ def get_admin_client() -> Resource:
     """
     global _cached_admin_client
     if _cached_admin_client is None:
-        creds = _get_credentials()
-        _cached_admin_client = build(
-            "analyticsadmin",
-            "v1beta",
-            credentials=creds,
-        )
+        _cached_admin_client = _build("analyticsadmin", "v1beta")
     return _cached_admin_client
 
 
@@ -82,12 +89,7 @@ def get_admin_alpha_client() -> Resource:
     """
     global _cached_admin_alpha_client
     if _cached_admin_alpha_client is None:
-        creds = _get_credentials()
-        _cached_admin_alpha_client = build(
-            "analyticsadmin",
-            "v1alpha",
-            credentials=creds,
-        )
+        _cached_admin_alpha_client = _build("analyticsadmin", "v1alpha")
     return _cached_admin_alpha_client
 
 
@@ -105,12 +107,7 @@ def get_data_client() -> Resource:
     """
     global _cached_data_client
     if _cached_data_client is None:
-        creds = _get_credentials()
-        _cached_data_client = build(
-            "analyticsdata",
-            "v1beta",
-            credentials=creds,
-        )
+        _cached_data_client = _build("analyticsdata", "v1beta")
     return _cached_data_client
 
 
@@ -122,14 +119,13 @@ def get_data_alpha_client() -> Resource:
     """
     global _cached_data_alpha_client
     if _cached_data_alpha_client is None:
-        creds = _get_credentials()
-        _cached_data_alpha_client = build(
-            "analyticsdata",
-            "v1alpha",
-            credentials=creds,
-            static_discovery=False,
-        )
+        _cached_data_alpha_client = _build("analyticsdata", "v1alpha", static_discovery=False)
     return _cached_data_alpha_client
+
+
+def get_allowlist_cache() -> AllowlistCache:
+    """The allowlist's property → account cache for the current credentials."""
+    return cache_for(_get_credentials(), build_http())
 
 
 def clear_client_cache() -> None:

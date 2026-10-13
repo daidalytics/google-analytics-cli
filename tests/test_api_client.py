@@ -4,12 +4,26 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ga_cli.api.allowlist_guard import AllowlistHttp
 from ga_cli.api.client import (
     _get_credentials,
     clear_client_cache,
+    get_admin_alpha_client,
     get_admin_client,
+    get_data_alpha_client,
     get_data_client,
 )
+from ga_cli.utils.errors import AllowlistError
+
+
+def _assert_guarded_build(mock_build, mock_creds, service, version, **kwargs):
+    mock_build.assert_called_once()
+    args, call_kwargs = mock_build.call_args
+    assert args == (service, version)
+    http = call_kwargs.pop("http")
+    assert isinstance(http, AllowlistHttp)
+    assert http.credentials is mock_creds.return_value
+    assert call_kwargs == kwargs
 
 
 @pytest.fixture(autouse=True)
@@ -73,11 +87,7 @@ class TestGetAdminClient:
         mock_build.return_value = MagicMock()
 
         result = get_admin_client()
-        mock_build.assert_called_once_with(
-            "analyticsadmin",
-            "v1beta",
-            credentials=mock_creds.return_value,
-        )
+        _assert_guarded_build(mock_build, mock_creds, "analyticsadmin", "v1beta")
         assert result is mock_build.return_value
 
     @patch("ga_cli.api.client._get_credentials")
@@ -100,11 +110,7 @@ class TestGetDataClient:
         mock_build.return_value = MagicMock()
 
         result = get_data_client()
-        mock_build.assert_called_once_with(
-            "analyticsdata",
-            "v1beta",
-            credentials=mock_creds.return_value,
-        )
+        _assert_guarded_build(mock_build, mock_creds, "analyticsdata", "v1beta")
         assert result is mock_build.return_value
 
     @patch("ga_cli.api.client._get_credentials")
@@ -135,3 +141,29 @@ class TestClearClientCache:
         get_admin_client()
         get_data_client()
         assert mock_build.call_count == 4  # Rebuilt after cache clear
+
+
+class TestAlphaClients:
+    @patch("ga_cli.api.client._get_credentials")
+    @patch("ga_cli.api.client.build")
+    def test_admin_alpha_guarded(self, mock_build, mock_creds):
+        get_admin_alpha_client()
+        _assert_guarded_build(mock_build, mock_creds, "analyticsadmin", "v1alpha")
+
+    @patch("ga_cli.api.client._get_credentials")
+    @patch("ga_cli.api.client.build")
+    def test_data_alpha_keeps_dynamic_discovery(self, mock_build, mock_creds):
+        get_data_alpha_client()
+        _assert_guarded_build(
+            mock_build, mock_creds, "analyticsdata", "v1alpha", static_discovery=False
+        )
+
+
+class TestMalformedAllowlist:
+    @patch("ga_cli.api.client._get_credentials")
+    @patch("ga_cli.api.client.build")
+    def test_invalid_env_fails_when_client_is_built(self, mock_build, mock_creds, monkeypatch):
+        monkeypatch.setenv("GA_CLI_ALLOWED_ACCOUNTS", "not-a-number")
+        with pytest.raises(AllowlistError):
+            get_admin_client()
+        mock_build.assert_not_called()
