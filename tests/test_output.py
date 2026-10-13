@@ -273,6 +273,32 @@ class TestOutputTable:
         output(data, fmt="table")
 
 
+class TestTableMarkupEscaping:
+    """Report values are attacker-controllable text, never Rich markup."""
+
+    def test_brackets_in_values_render_literally(self, capsys):
+        output([{"pagePath": "/search?q=[foo]bar"}], fmt="table")
+        assert "/search?q=[foo]bar" in capsys.readouterr().out
+
+    def test_closing_tag_in_value_does_not_raise(self, capsys):
+        output([{"pageTitle": "Docs [/admin] x"}], fmt="table")
+        assert "Docs [/admin] x" in capsys.readouterr().out
+
+    def test_brackets_in_headers_render_literally(self, capsys):
+        """Pivot headers carry data values: '{pivot value} / {metric}'."""
+        output(
+            [{"a": "1"}], fmt="table", columns=["a"], headers=["[/x] / sessions"]
+        )
+        assert "[/x] / sessions" in capsys.readouterr().out
+
+    def test_brackets_in_dict_values_render_literally(self, capsys):
+        output({"displayName": "Shop [bold]EU[/bold]"}, fmt="table")
+        assert "Shop [bold]EU[/bold]" in capsys.readouterr().out
+
+    def test_bool_markup_still_styled(self):
+        assert _format_value(True) == "[green]Yes[/green]"
+
+
 class TestOutputFormatTracking:
     def test_default_format_is_table(self):
         assert get_current_output_format() == "table"
