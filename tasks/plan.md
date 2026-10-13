@@ -1,283 +1,173 @@
-# Implementation Plan: Surface `ResponseMetaData` in report commands
+# Implementation Plan: Output escaping and input validation fixes
 
-Companion to [SPEC.md](../SPEC.md). API revision `20260909`, snapshots already current (`5680e22`).
+Companion to [SPEC.md](../SPEC.md). Branch `fix/escape-and-validation`, one PR, one commit per
+task. Ships in 0.5.0. Previous plan (ResponseMetaData): `git show 72e3a4f:tasks/plan.md`.
 
 ## Overview
 
-Wire the GA4 Data API's `ResponseMetaData` object — sampling, thresholding, schema restrictions,
-empty-report reasons, and the new `dataTruncationReasons` — into `reports run`, `build`, `batch`,
-and `pivot`. Today it is silently discarded by `run`/`build` in every output format, and shown
-nowhere in `batch`/`pivot` table mode. One shared rendering helper; automatic display (no new
-flags); one deliberate breaking change to `run`/`build` JSON output (`{rows, metadata}` envelope
-replacing the bare rows array).
+Fix six bugs plus an API snapshot refresh. Two bugs change or break output for real-world
+data: Rich markup in table values (1) and filter operator precedence (2). One root cause,
+untrusted API text reaching Rich unescaped, covers issues 1 and 4. The rest are small and
+independent.
 
-**Constraint that shapes verification:** sampling, truncation, and thresholding cannot be forced
-on demand against a live property, so behavior is verified by mock-based tests (the project norm —
-every API call mocked). The live checks we *can* run are the no-op path (a normal report's output
-must be unchanged in table mode) and the JSON envelope shape. Because `-o json` passes `metadata`
-through losslessly, any real-world response that does trigger these conditions can validate the
-renderer after the fact.
+## Architecture decisions
 
-## Architecture Decisions
+- **Escape at the Rich boundary, in `utils/output.py`.** Cells, headers and object keys are
+  escaped in the renderer. The message helpers (`success`/`error`/`warn`/`info`) escape
+  `message` themselves, which also protects `handle_error()`. None of the 101 helper call
+  sites passes intentional markup. The CLI's own markup (boolean Yes/No) is added after
+  escaping.
+- **`rich.markup.escape`, not `Text` objects.** `reports.py` already uses it, it leaves
+  non-tag brackets like `[3 items]` untouched, and it keeps `_format_value` returning `str`.
+- **Filters: match the field name first, then the operator right after it.** The field must
+  match `[A-Za-z][A-Za-z0-9_]*(:[A-Za-z0-9_]+)*`, which the user confirmed covers every field
+  in use. Output dicts and #29's metric rules are unchanged.
+- **Validation via Typer (`min`/`max`)** where possible, so errors are usage errors (exit 2)
+  raised before any API call, matching pivot.
 
-1. **One helper, prose not tables.** `_display_response_metadata()` in `reports.py`, shaped like
-   `_display_quota()`: a strict no-op when the API returned nothing noteworthy. Warnings render as
-   a "Data Notes" line list, not a Rich table — these are annotations about the report, not data.
-
-2. **The JSON breaking change is isolated in its own task/commit.** `run`/`build` `-o json` moves
-   from a bare rows array to `{"rows": [...], "metadata": {...}}`. Keeping that diff separate from
-   the (additive) display work makes it individually revertable and reviewable, and gives the
-   release notes one commit to point at. `batch`/`pivot` JSON already passes the raw response
-   through — no change there.
-
-3. **API-sourced text must be markup-escaped.** `dataTruncationMessage` is server-provided prose
-   printed via `console.print` inside Rich markup (`[yellow]![/yellow] {line}`). A message
-   containing `[` would be parsed as a style tag — the exact failure `chat` guards against with
-   `markup=False` (`reports.py:1046`). Here the prefix *is* markup, so escape the API text with
-   `rich.markup.escape()` instead. This corrects the sketch in SPEC.md's Code Style section, which
-   has this bug.
-
-4. **`emptyReason` lives in the helper; `output()` is untouched.** SPEC's "replaces the current
-   unconditional 'No results found.'" is implemented as: the helper emits one `info()` line with
-   the API's reason; the shared `output()` fallback stays as-is (SPEC Boundaries: shared helpers
-   are ask-first).
-
-5. **Funnel confirmed out of scope** — resolves SPEC Open Question 1. The v1alpha snapshot shows
-   `RunFunnelReportResponse` has no `metadata` field (`funnelVisualization`, `kind`,
-   `propertyQuota`, `funnelTable` only). Recorded in SPEC.md during T6.
-
-6. **Sampling percentage: one decimal place** (`3.5%`) — resolves SPEC Open Question 2. No
-   existing percent-formatting precedent in the CLI; one decimal balances precision against noise.
-   `int64` fields arrive as JSON strings — convert with `int()` and guard
-   `samplingSpaceSize == 0`.
-
-## Dependency Graph
+## Dependency graph
 
 ```
-T1  helper (_display_response_metadata) + `run` table/compact wiring
- │        — first complete user-visible slice
- ├── T2  `run` + `build` JSON envelope {rows, metadata}   ← the breaking change, isolated
- ├── T3  `build` table/compact wiring
- ├── T4  `batch` per-sub-report wiring (table mode)
- └── T5  `pivot` wiring (table mode)
-          │
-          └── T6  docs: README breaking-change note, SPEC.md living-doc updates
+utils/output.py ── T1 table escaping ──► T2 message-helper escaping  (same file: sequential)
+utils/filters.py ─ T3 filter parser ───► T5 order-by segments        (same file: sequential)
+commands/auth_cmd.py ─ T4                                            (independent)
+commands/reports.py ── T6                                            (independent)
+.api-snapshots/ ────── T7                                            (independent)
+                           all ──► T8 docs/spec ──► T9 PR
 ```
 
-T2–T5 are independent of each other but **all edit `reports.py`** — run them sequentially in one
-session; there is no useful parallelization in this feature.
+The two high-risk, high-value fixes come first (T1–T3) so problems show up early.
 
----
+## Task list
 
-## Task List
+### Phase 1: High-impact fixes
 
-### Phase 1: Core slice — `reports run`
-
----
-
-## Task 1: Rendering helper + `run` table/compact display
-
-**Description:** The first complete path: a user running `ga reports run` in table mode sees a
-"Data Notes" section whenever the API reports truncation, thresholding, sampling, restrictions,
-or an empty-reason — and sees nothing new otherwise. Adds `_humanize_truncation_type()` and
-`_display_response_metadata()` (per SPEC Code Style, corrected to escape API text per Decision 3),
-and calls it from `run_cmd` after the existing quota display. Compact mode sends the same lines to
-stderr via `warn()`/`info()` so stdout stays pipeable.
+#### Task 1: Table output renders report values literally (issue 1)
+**Status:** in progress. 8 tests written and failing. `escape` is imported and headers are
+escaped; `_format_value` and object keys are still to do.
 
 **Acceptance criteria:**
-- [ ] Each `metadata` field renders per SPEC's rules: one line per truncation reason (type
-      humanized, message, `(before DATE)` when present), fixed thresholding line only when `true`,
-      sampling percentage with zero-guard, one line per restricted metric, `emptyReason` via
-      `info()`
-- [ ] Absent or empty `metadata` produces **no** "Data Notes" output at all; existing table-mode
-      tests using `SAMPLE_REPORT_RESPONSE` (no `metadata` key) pass unchanged
-- [ ] A `dataTruncationMessage` containing Rich markup (e.g. `[bold]`) renders literally, styled
-      prefix intact
-- [ ] Compact mode: notes go to stderr, stdout is row-only (assert via `Result.stdout` —
-      `Result.output` merges streams under click 8.3)
+- [ ] `/search?q=[foo]bar` renders as is; `Docs [/admin] x` renders without `MarkupError`
+- [ ] Bracketed pivot headers and dict values render literally; booleans keep their green/red
+- [ ] `_format_value` output is unchanged for values without brackets (`[3 items]`, `[]`, JSON)
 
-**Verification:**
-- [ ] `pytest tests/test_reports.py -k "MetadataDisplay or MetadataCompact" -v`
-- [ ] `pytest tests/test_reports.py` — full file green (no regressions)
-- [ ] `ruff check src/ tests/`
+**Verification:** `uv run pytest tests/test_output.py -q -k TableMarkupEscaping`, then the
+full `tests/test_output.py`
 
-**Dependencies:** None
-**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports.py`
-**Scope:** M
+**Files:** `src/ga_cli/utils/output.py`, `tests/test_output.py` · **Scope:** S · **Deps:** none
 
----
-
-## Task 2: `run` + `build` JSON envelope — the breaking change
-
-**Description:** `run_cmd` and `build_cmd` `-o json` currently print the transformed rows as a
-bare array, discarding metadata entirely. Both switch to
-`{"rows": [...], "metadata": {...}}` — `metadata` present even when empty (`{}`), so consumers
-get a stable shape. Table/compact paths are untouched by this task. Deliberately one commit so
-the breaking diff is isolated (Decision 2).
-
+#### Task 2: Messages print API text literally (issue 4, plus `handle_error`)
 **Acceptance criteria:**
-- [ ] `run -o json` and `build -o json` emit a top-level object with exactly `rows` and
-      `metadata` keys; `rows` content is unchanged from the previous array
-- [ ] `metadata` carries the API's object verbatim when present, `{}` when absent
-- [ ] Existing `test_run_json_output` updated for the envelope; no other JSON-consuming test
-      regresses
+- [ ] `warn`/`error`/`info`/`success` print `[/x]` and `[foo]` literally, without raising
+- [ ] `reports run -o compact` with a data note containing `[/docs]` exits 0, and the note
+      is on stderr verbatim
+- [ ] In terminal mode, an API error whose message contains `[/x]` prints a clean
+      `Error:` line with exit code 3, not a traceback
 
-**Verification:**
-- [ ] `pytest tests/test_reports.py -k "json or Json" -v`
-- [ ] `pytest` — full suite green
-- [ ] Manual: `ga reports run -p <id> -m sessions -o json | python3 -c "import json,sys; d=json.load(sys.stdin); print(sorted(d))"` prints `['metadata', 'rows']`
+**Verification:** `uv run pytest tests/test_output.py tests/test_reports.py tests/test_errors*.py -q`
 
-**Dependencies:** Task 1 (shares fixtures)
-**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports.py`
-**Scope:** S
+**Files:** `src/ga_cli/utils/output.py`, `src/ga_cli/commands/reports.py` (comment only),
+`tests/test_output.py`, `tests/test_reports.py` · **Scope:** S · **Deps:** T1 (same file)
 
----
-
-### Checkpoint: Core slice
-- [ ] Full `pytest` green, `ruff check src/ tests/` clean
-- [ ] Live smoke on property `250400352` (use `sessions`/`activeUsers` — no revenue tracking
-      there): table output of a normal report is byte-identical in spirit to pre-change (no
-      "Data Notes"), JSON returns the envelope
-- [ ] Review with human — the breaking change is now real; last cheap moment to reverse it
-
----
-
-### Phase 2: Remaining commands
-
----
-
-## Task 3: `build` table/compact display
-
-**Description:** `build_cmd` runs the same `runReport` call as `run_cmd`; wire the same
-`_display_response_metadata()` call into its result path (after its `_display_quota` call), making
-the interactive builder's output consistent with `run`.
-
+#### Task 3: Filter values may contain operator symbols (issue 2)
 **Acceptance criteria:**
-- [ ] `build` table mode renders "Data Notes" from a mocked `metadata` response; nothing when
-      absent
-- [ ] Existing `build` tests pass unchanged
+- [ ] Every row of SPEC's issue 2 table parses as specified: `contains Home > Blog`,
+      `contains a != b`, `begins_with /a==b`, `in A<B,C`, `==A > B`, `customEvent:plan==pro`
+- [ ] `page title==x` and `nosuchop` raise `BadParameter` listing the operators
+- [ ] All existing `TestParseSingleFilter`/`TestParseMetricFilters` tests pass unchanged,
+      including `"  country == US  "` and case-insensitive `CONTAINS`
 
-**Verification:**
-- [ ] `pytest tests/test_reports.py -k "build or Build" -v`
-- [ ] `ruff check src/ tests/`
+**Verification:** `uv run pytest tests/test_filters.py -q`; `ga reports build` still works,
+since its expressions are `field + op + value`
 
-**Dependencies:** Task 1
-**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports.py`
-**Scope:** S
+**Files:** `src/ga_cli/utils/filters.py`, `tests/test_filters.py` · **Scope:** S · **Deps:** none
 
----
+### Checkpoint A: high-impact fixes
+- [ ] `uv run pytest` and `uv run ruff check src/ tests/` pass
+- [ ] Live on 250400352: `--dim-filter 'pageTitle contains >'` (or a real title with `>`)
+      runs without a parse error; `-o table` reports render normally
+- [ ] Live data notes: `--start-date 2015-08-14 --end-date 2016-12-31 -o compact` on 250400352
+      gives a real DATE_RANGE truncation note on stderr, printed verbatim
+- [ ] Three commits on the branch (T1, T2, T3)
+- [ ] **Review with the human before Phase 2**
 
-## Task 4: `batch` — per-sub-report metadata
+### Phase 2: Consistency and validation
 
-**Description:** Each entry in `BatchRunReportsResponse.reports` is a full `RunReportResponse`
-with its own `metadata` (confirmed against the snapshot). In table mode, call the helper inside
-the existing per-report loop, right after the sub-report's row-count line (`reports.py:808`), so
-notes attach visibly to the sub-report they describe. JSON mode already passes the raw response
-through — add a regression assertion only.
-
+#### Task 4: `ga auth status` follows the pipe default (issue 3)
 **Acceptance criteria:**
-- [ ] Two-sub-report config where only the second has `dataTruncationReasons`: "Data Notes"
-      appears under the second `--- Report N ---` block only
-- [ ] `batch -o json` raw passthrough still includes each sub-report's `metadata` (regression
-      guard, no behavior change)
+- [ ] `-o` defaults to `None` and goes through `resolve_output_format()`
+- [ ] Piped (CliRunner, not a TTY) with no `-o`: stdout is valid JSON with `authenticated`
+- [ ] `-o table` still gives a table; terminal default unchanged
 
-**Verification:**
-- [ ] `pytest tests/test_reports.py -k "Batch" -v` (or the batch test file/class as organized)
-- [ ] `ruff check src/ tests/`
+**Verification:** `uv run pytest tests/test_auth_cmd.py -q`; live `ga auth status | jq .authenticated`
 
-**Dependencies:** Task 1
-**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports.py`
-**Scope:** S
+**Files:** `src/ga_cli/commands/auth_cmd.py`, `tests/test_auth_cmd.py` · **Scope:** XS · **Deps:** none
 
----
-
-## Task 5: `pivot` — table-mode metadata
-
-**Description:** `RunPivotReportResponse.metadata` `$ref`s the same `ResponseMetaData`. Call the
-helper in `pivot_cmd`'s table-mode branch after the pivot rows render. JSON mode already raw-
-passes the response — regression assertion only.
-
+#### Task 5: Reject extra `--order-by` segments (issue 5)
 **Acceptance criteria:**
-- [ ] `pivot` table mode renders "Data Notes" from a mocked `metadata`; nothing when absent
-- [ ] `pivot -o json` passthrough still includes `metadata` (regression guard)
+- [ ] `country:asc:alpha:bogus` raises `BadParameter` naming the expression and the format
+- [ ] Colon field names still work: `customEvent:plan_type:asc:ialpha` is accepted
+      (4 parts, the field takes 2)
 
-**Verification:**
-- [ ] `pytest tests/test_reports.py -k "Pivot" -v` (or wherever pivot tests live)
-- [ ] `ruff check src/ tests/`
+**Verification:** `uv run pytest tests/test_filters.py -q -k OrderBy`
 
-**Dependencies:** Task 1
-**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports.py`
-**Scope:** S
+**Files:** `src/ga_cli/utils/filters.py`, `tests/test_filters.py` · **Scope:** XS · **Deps:** T3 (same file)
 
----
-
-### Checkpoint: All commands wired
-- [ ] Full `pytest` green, `ruff` clean
-- [ ] Every SPEC Success Criterion 1–6 demonstrably met by a named test
-- [ ] `reports realtime` and `reports funnel` behavior untouched (their tests unchanged)
-
----
-
-### Phase 3: Documentation
-
----
-
-## Task 6: Docs + SPEC living-document updates
-
-**Description:** Record the breaking change where users will find it, and close the spec's open
-questions. Check whether `ga agent guide` (`agent_cmd.py`) documents `run`'s JSON output shape —
-if it claims a bare array, correct it; agents are the primary `-o json` consumers.
-
+#### Task 6: Bound `reports run --limit` (issue 6)
 **Acceptance criteria:**
-- [ ] README documents the `{rows, metadata}` JSON shape for `run`/`build` and the "Data Notes"
-      behavior; breaking change called out for the next release's notes
-- [ ] `agent_cmd.py` guide checked for stale JSON-shape claims and corrected if any
-      (`ga agent guide` output greps clean)
-- [ ] SPEC.md updated: status → Implemented, Open Q1 resolved (funnel has no `metadata` field),
-      Open Q2 resolved (one decimal place), Open Q3 resolved per the human's call on where the
-      breaking-change note lives
-- [ ] tasks/todo.md checkpoints filled in with final test counts and commit hashes
+- [ ] `--limit 0` and `--limit -5` exit 2 with a usage error and make no API call
+- [ ] `--limit 250000` is accepted; `250001` exits 2
+- [ ] `--describe` still shows `limit` as `integer` (`IntRange`, covered since #28)
 
-**Verification:**
-- [ ] `pytest` full suite, `ruff check src/ tests/`
-- [ ] `ga agent guide | grep -A3 -i "reports run"` shows the new shape (if the guide covers it)
+**Verification:** `uv run pytest tests/test_reports.py tests/test_describe.py -q`
 
-**Dependencies:** Tasks 1–5
-**Files:** `README.md`, `SPEC.md`, `src/ga_cli/commands/agent_cmd.py` (conditionally),
-`tasks/todo.md`
-**Scope:** S
+**Files:** `src/ga_cli/commands/reports.py`, `tests/test_reports.py` · **Scope:** XS · **Deps:** none
 
----
+### Checkpoint B: all six issues
+- [ ] Full suite and ruff pass
+- [ ] Six fix commits on the branch
 
-### Checkpoint: Ready for review
-- [ ] All acceptance criteria met, `pytest` and `ruff` green
-- [ ] Version bump and release **not** performed — ask first (SPEC Boundaries)
-- [ ] `.api-snapshots/` untouched; `scripts/check_api_changes.py --update` **not** run
-      (snapshots already at rev `20260909`)
+### Phase 3: Release prep
 
----
+#### Task 7: Refresh API snapshots
+**Acceptance criteria:**
+- [ ] Re-run `python3 scripts/check_api_changes.py` first. If it shows only revision bumps,
+      run it with `--update`; if it shows semantic changes, stop and report them
+- [ ] A re-check afterwards reports no changes
+- [ ] Separate `chore:` commit containing only `.api-snapshots/`
 
-## Risks and Mitigations
+**Files:** `.api-snapshots/*.json` · **Scope:** XS · **Deps:** none
+
+#### Task 8: Docs and spec status
+**Acceptance criteria:**
+- [ ] Agent guide's Filters section says values may contain operator symbols (one line);
+      no other doc claims change
+- [ ] SPEC.md status set to "Implemented: pending release"; `tasks/todo.md` all checked
+
+**Files:** `src/ga_cli/commands/agent_cmd.py`, `SPEC.md`, `tasks/todo.md` · **Scope:** XS · **Deps:** T1–T7
+
+#### Task 9: Open the PR
+**Acceptance criteria:**
+- [ ] Branch pushed and PR opened against master, with each commit mapped to a spec issue
+- [ ] CI is green on 3.10, 3.12 and 3.13
+- [ ] **Merge only after the human says so**
+
+**Deps:** T8
+
+### Checkpoint: complete
+- [ ] All SPEC success criteria (1–6) met
+- [ ] PR green and ready for review
+
+## Risks and mitigations
 
 | Risk | Impact | Mitigation |
-|---|---|---|
-| JSON shape change breaks existing scripts parsing `run`/`build` output as a bare array | **High** | Isolated in T2's single commit; stable envelope (`metadata` always present); README + release-note callout (T6); human checkpoint immediately after T2 |
-| Rich markup injection from API-sourced `dataTruncationMessage` | **Med** | `rich.markup.escape()` on all API text inside styled lines (Decision 3); explicit test with `[bold]` in the fixture |
-| Cannot trigger sampling/truncation/thresholding live to validate rendering | **Med** | Mock-first per project norm; JSON passthrough is lossless, so a real triggering response can validate the renderer later — same strategy that worked for `chat` |
-| Always-on display leaks new lines into scripted table/compact pipelines | **Med** | Compact sends notes to **stderr** (suppressed by `--quiet` via `warn()`/`info()`); table mode is human-facing; explicit `Result.stdout` assertions |
-| `int64`-as-string arithmetic (`samplingSpaceSize`) → `TypeError`/`ZeroDivisionError` | **Low** | `int()` conversion + zero-guard in the helper; dedicated test with `"0"` |
-| `click` 8.3 `Result.output` merges stdout+stderr, masking stream regressions | **Low** | Known from the chat cycle — assert on `Result.stdout` wherever stream separation matters |
-| Helper drifts from `batch`/`pivot` response nuances | **Low** | Both `$ref` the identical `ResponseMetaData` schema — verified against the snapshot before planning |
+|------|--------|------------|
+| A caller relies on markup passing through a message helper | Med | Checked all 101 call sites: none do. T2 tests cover each helper |
+| Double escaping (`\[` visible) where text is already escaped | Low | Only `_display_response_metadata`'s table branch escapes, and it calls `console.print`, not a helper |
+| Field-name regex rejects a valid field | Med | User confirmed the grammar; error message lists operators so it's diagnosable |
+| `escape()` changes `_format_value` strings compared in existing tests | Low | Rich only escapes tag-like brackets; existing `TestFormatValue` must pass unchanged |
+| Snapshot gains semantic changes before T7 | Low | T7 re-checks first and stops on semantic changes |
 
-## Parallelization
+## Open questions
 
-None worth taking: every task edits `reports.py`. T3/T4/T5 are logically independent after T1 but
-should land sequentially to avoid same-file conflicts. Single session, T1→T6 in order.
-
-## Open Questions
-
-1. **Where does the breaking-change note live?** (SPEC Open Q3.) No `CHANGELOG.md` exists.
-   Recommendation: a short "Breaking changes" note in README's reports section now, plus the
-   GitHub release notes at tag time. Decide at T6 — does not block T1–T5.
-2. **Does `ga agent guide` document `run -o json`'s current bare-array shape?** Unchecked;
-   resolved by inspection during T6.
+None. Spec decisions are recorded in SPEC.md.

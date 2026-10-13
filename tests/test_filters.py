@@ -115,6 +115,52 @@ class TestParseSingleFilter:
         with pytest.raises(typer.BadParameter, match="Cannot parse"):
             _parse_single_filter("nosuchop")
 
+    @pytest.mark.parametrize(
+        "expr, expected",
+        [
+            (
+                "pageTitle contains Home > Blog",
+                {"fieldName": "pageTitle",
+                 "stringFilter": {"matchType": "CONTAINS", "value": "Home > Blog"}},
+            ),
+            (
+                "pagePath begins_with /a==b",
+                {"fieldName": "pagePath",
+                 "stringFilter": {"matchType": "BEGINS_WITH", "value": "/a==b"}},
+            ),
+            (
+                "country in A<B,C",
+                {"fieldName": "country", "inListFilter": {"values": ["A<B", "C"]}},
+            ),
+            (
+                "pageTitle==A > B",
+                {"fieldName": "pageTitle",
+                 "stringFilter": {"matchType": "EXACT", "value": "A > B"}},
+            ),
+            (
+                "customEvent:plan==pro",
+                {"fieldName": "customEvent:plan",
+                 "stringFilter": {"matchType": "EXACT", "value": "pro"}},
+            ),
+        ],
+    )
+    def test_operator_symbols_in_value_stay_in_value(self, expr, expected):
+        """The operator is the first one after the field name, not anywhere."""
+        assert _parse_single_filter(expr) == {"filter": expected}
+
+    def test_not_equal_in_value_is_not_negation(self):
+        result = _parse_single_filter("pageTitle contains a != b")
+        assert result == {
+            "filter": {
+                "fieldName": "pageTitle",
+                "stringFilter": {"matchType": "CONTAINS", "value": "a != b"},
+            }
+        }
+
+    def test_field_name_with_space_rejected(self):
+        with pytest.raises(typer.BadParameter, match="Cannot parse"):
+            _parse_single_filter("page title==x")
+
     def test_invalid_numeric(self):
         with pytest.raises(typer.BadParameter, match="Invalid numeric"):
             _parse_single_filter("sessions>abc")
@@ -321,6 +367,19 @@ class TestParseOrderBys:
     def test_requested_field_with_bad_direction(self):
         with pytest.raises(typer.BadParameter, match="Invalid sort direction 'sideways'"):
             parse_order_bys(["sessions:sideways"], metrics=["sessions"])
+
+    @pytest.mark.parametrize(
+        "expr, kwargs",
+        [
+            ("country:asc:alpha:bogus", {"dimensions": ["country"]}),
+            ("country:asc:alpha:bogus", {}),
+            ("customEvent:plan:asc:alpha:x", {"dimensions": ["customEvent:plan"]}),
+        ],
+    )
+    def test_extra_segments_rejected(self, expr, kwargs):
+        """Silently dropping the extra segment hid typos."""
+        with pytest.raises(typer.BadParameter, match="Too many ':' segments"):
+            parse_order_bys([expr], **kwargs)
 
     def test_invalid_order_type(self):
         with pytest.raises(typer.BadParameter, match="Invalid order type"):

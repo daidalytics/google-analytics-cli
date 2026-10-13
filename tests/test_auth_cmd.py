@@ -1,5 +1,7 @@
 """Tests for auth commands (login, logout, status)."""
 
+import importlib
+import json
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
@@ -156,3 +158,38 @@ class TestStatusCommand:
             assert result.exit_code == 0
             assert "sa@test.iam" in result.output
             assert "service-account" in result.output
+
+    def _status(self, monkeypatch, *args, tty):
+        monkeypatch.setattr(
+            importlib.import_module("ga_cli.utils.output"), "is_tty", lambda: tty
+        )
+        monkeypatch.delenv("GA_CLI_SERVICE_ACCOUNT", raising=False)
+        monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+        with (
+            patch("ga_cli.commands.auth_cmd.load_auth_method", return_value=None),
+            patch(
+                "ga_cli.commands.auth_cmd.get_auth_status",
+                return_value={"authenticated": True, "email": "user@example.com"},
+            ),
+        ):
+            return runner.invoke(app, ["auth", "status", *args])
+
+    def test_status_piped_defaults_to_json(self, monkeypatch):
+        """`ga auth status | jq .authenticated` must get JSON."""
+        result = self._status(monkeypatch, tty=False)
+
+        assert result.exit_code == 0
+        assert json.loads(result.stdout)["authenticated"] is True
+
+    def test_status_terminal_defaults_to_table(self, monkeypatch):
+        result = self._status(monkeypatch, tty=True)
+
+        assert result.exit_code == 0
+        assert "user@example.com" in result.stdout
+        assert not result.stdout.lstrip().startswith("{")
+
+    def test_status_piped_explicit_table_wins(self, monkeypatch):
+        result = self._status(monkeypatch, "-o", "table", tty=False)
+
+        assert result.exit_code == 0
+        assert not result.stdout.lstrip().startswith("{")

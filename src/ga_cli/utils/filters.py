@@ -7,20 +7,25 @@ from pathlib import Path
 
 import typer
 
+# A GA4 API field name, optionally with ':'-separated parts (customEvent:plan,
+# keyEvents:sign_up). Anchoring on it makes the operator the first one after
+# the field, so operator-like text in the value ("Home > Blog") stays there.
+_FIELD = r"([A-Za-z][A-Za-z0-9_]*(?::[A-Za-z0-9_]+)*)"
+
 # Ordered operator patterns: try longest/most specific first
 _OPERATORS = [
-    (re.compile(r"^(.+?)\s*==\s*(.+)$"), "EXACT"),
-    (re.compile(r"^(.+?)\s*!=\s*(.+)$"), "NOT_EXACT"),
-    (re.compile(r"^(.+?)\s*=~\s*(.+)$"), "FULL_REGEXP"),
-    (re.compile(r"^(.+?)\s*>=\s*(.+)$"), "GREATER_THAN_OR_EQUAL"),
-    (re.compile(r"^(.+?)\s*<=\s*(.+)$"), "LESS_THAN_OR_EQUAL"),
-    (re.compile(r"^(.+?)\s*>\s*(.+)$"), "GREATER_THAN"),
-    (re.compile(r"^(.+?)\s*<\s*(.+)$"), "LESS_THAN"),
-    (re.compile(r"^(.+?)\s+contains\s+(.+)$", re.IGNORECASE), "CONTAINS"),
-    (re.compile(r"^(.+?)\s+begins_with\s+(.+)$", re.IGNORECASE), "BEGINS_WITH"),
-    (re.compile(r"^(.+?)\s+ends_with\s+(.+)$", re.IGNORECASE), "ENDS_WITH"),
-    (re.compile(r"^(.+?)\s+in\s+(.+)$", re.IGNORECASE), "IN_LIST"),
-    (re.compile(r"^(.+?)\s+between\s+(.+)$", re.IGNORECASE), "BETWEEN"),
+    (re.compile(rf"^{_FIELD}\s*==\s*(.+)$"), "EXACT"),
+    (re.compile(rf"^{_FIELD}\s*!=\s*(.+)$"), "NOT_EXACT"),
+    (re.compile(rf"^{_FIELD}\s*=~\s*(.+)$"), "FULL_REGEXP"),
+    (re.compile(rf"^{_FIELD}\s*>=\s*(.+)$"), "GREATER_THAN_OR_EQUAL"),
+    (re.compile(rf"^{_FIELD}\s*<=\s*(.+)$"), "LESS_THAN_OR_EQUAL"),
+    (re.compile(rf"^{_FIELD}\s*>\s*(.+)$"), "GREATER_THAN"),
+    (re.compile(rf"^{_FIELD}\s*<\s*(.+)$"), "LESS_THAN"),
+    (re.compile(rf"^{_FIELD}\s+contains\s+(.+)$", re.IGNORECASE), "CONTAINS"),
+    (re.compile(rf"^{_FIELD}\s+begins_with\s+(.+)$", re.IGNORECASE), "BEGINS_WITH"),
+    (re.compile(rf"^{_FIELD}\s+ends_with\s+(.+)$", re.IGNORECASE), "ENDS_WITH"),
+    (re.compile(rf"^{_FIELD}\s+in\s+(.+)$", re.IGNORECASE), "IN_LIST"),
+    (re.compile(rf"^{_FIELD}\s+between\s+(.+)$", re.IGNORECASE), "BETWEEN"),
 ]
 
 _STRING_OPS = {"EXACT", "NOT_EXACT", "FULL_REGEXP", "CONTAINS", "BEGINS_WITH", "ENDS_WITH"}
@@ -256,6 +261,12 @@ def parse_order_bys(
                     f"Order type '{rest[1]}' applies only to dimensions; "
                     f"'{field}' is a metric."
                 )
+
+        if len(rest) > 2:
+            raise typer.BadParameter(
+                f"Too many ':' segments in --order-by '{expr}'. "
+                f"Format: field[:asc|desc[:alpha|ialpha|numeric]]"
+            )
 
         desc = direction == "desc"
 

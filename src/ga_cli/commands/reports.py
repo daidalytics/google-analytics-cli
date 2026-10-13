@@ -418,7 +418,7 @@ def _display_response_metadata(metadata: dict | None, effective_format: str) -> 
             # escape(): message text is API-sourced and may contain square
             # brackets Rich would otherwise parse as style tags.
             console.print(f"  [yellow]![/yellow] {escape(line)}")
-    else:  # compact — stderr, keeping stdout pipeable
+    else:  # compact — stderr, keeping stdout pipeable; warn() escapes markup
         for line in lines:
             warn(line)
 
@@ -475,9 +475,10 @@ def run_cmd(
         "today when --start-date is today)",
     ),
     limit: int = typer.Option(
-        100, "--limit",
-        help="Max rows to return (JSON rowCount gives the untruncated total). With several "
-        "--date-range values, limits and counts dimension combinations, "
+        # The API reads 0 as unset (up to 10,000 rows) and rejects negatives
+        100, "--limit", min=1, max=250_000,
+        help="Max rows to return, 1-250,000 (JSON rowCount gives the untruncated total). "
+        "With several --date-range values, limits and counts dimension combinations, "
         "each returned once per range",
     ),
     dim_filter: Optional[list[str]] = typer.Option(

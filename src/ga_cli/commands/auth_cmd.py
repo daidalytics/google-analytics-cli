@@ -14,7 +14,7 @@ from ..auth.service_account import (
     load_auth_method,
     login_with_service_account,
 )
-from ..utils import error, info, output, success
+from ..utils import error, info, output, resolve_output_format, success
 
 auth_app = typer.Typer(name="auth", help="Manage authentication", no_args_is_help=True)
 
@@ -163,9 +163,12 @@ def logout_cmd():
 
 @auth_app.command("status")
 def status_cmd(
-    output_format: str = typer.Option("table", "--output", "-o", help="Output format"),
+    output_format: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output format (json, table, compact)"
+    ),
 ):
     """Show current authentication status."""
+    output_format = resolve_output_format(output_format)
     try:
         import os
 

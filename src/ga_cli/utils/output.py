@@ -15,6 +15,7 @@ import sys
 from typing import Any, Optional, TextIO
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 console = Console()
@@ -151,7 +152,8 @@ def _output_table(
 
     table = Table(show_lines=True)
     for h in hdrs:
-        table.add_column(h, style="bold")
+        # Pivot headers carry data values ("{pivot value} / {metric}")
+        table.add_column(escape(h), style="bold")
 
     for item in data:
         row = [_format_value(item.get(c)) for c in cols]
@@ -197,7 +199,7 @@ def _output_object(data: dict) -> None:
 
     for key, value in data.items():
         if value is not None:
-            table.add_row(_format_header(key), _format_value(value))
+            table.add_row(escape(_format_header(key)), _format_value(value))
 
     console.print(table)
 
@@ -219,7 +221,11 @@ def _format_header(key: str) -> str:
 
 
 def _format_value(value: Any) -> str:
-    """Format a value for table display."""
+    """Format a value for table display.
+
+    Values are escaped: report data is arbitrary text, and square brackets in
+    it would otherwise be parsed as Rich markup (or raise MarkupError).
+    """
     if value is None:
         return ""
     if isinstance(value, bool):
@@ -227,26 +233,28 @@ def _format_value(value: Any) -> str:
     if isinstance(value, list):
         return f"[{len(value)} items]" if value else "[]"
     if isinstance(value, dict):
-        return json.dumps(value, default=str)
-    return str(value)
+        return escape(json.dumps(value, default=str))
+    return escape(str(value))
 
 
-# Convenience functions for styled messages (equivalent to GTM CLI)
+# Convenience functions for styled messages (equivalent to GTM CLI).
+# `message` is plain text, escaped like table values: it often carries API
+# text (error messages, data notes) that may contain square brackets.
 def success(message: str) -> None:
     if not _quiet:
-        err_console.print(f"[green]OK[/green] {message}")
+        err_console.print(f"[green]OK[/green] {escape(message)}")
 
 
 def error(message: str) -> None:
     # Errors are NEVER suppressed, even in quiet mode
-    err_console.print(f"[red]Error:[/red] {message}")
+    err_console.print(f"[red]Error:[/red] {escape(message)}")
 
 
 def warn(message: str) -> None:
     if not _quiet:
-        err_console.print(f"[yellow]Warning:[/yellow] {message}")
+        err_console.print(f"[yellow]Warning:[/yellow] {escape(message)}")
 
 
 def info(message: str) -> None:
     if not _quiet:
-        err_console.print(f"[blue]Info:[/blue] {message}")
+        err_console.print(f"[blue]Info:[/blue] {escape(message)}")
