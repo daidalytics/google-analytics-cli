@@ -188,6 +188,35 @@ class TestReportsRun:
         body = call_args[1]["body"]
         assert body["limit"] == 50
 
+    @pytest.mark.parametrize("limit", ["0", "-5", "250001"])
+    def test_run_limit_out_of_range_is_usage_error(self, limit):
+        """0 means 'unset' to the API (up to 10,000 rows); negatives get a 400."""
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "run", "-p", "111", "--limit", limit]
+            )
+
+        assert result.exit_code == 2
+        mock_client.properties.return_value.runReport.assert_not_called()
+
+    def test_run_limit_api_maximum_accepted(self):
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "run", "-p", "111", "--limit", "250000"]
+            )
+
+        assert result.exit_code == 0
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert body["limit"] == 250000
+
     def test_run_uses_config_default(self):
         save_config(UserConfig(default_property_id="111"))
         mock_client = _mock_data_client()
@@ -1528,7 +1557,9 @@ class TestRunDefaultEndDate:
 
     def test_help_shows_end_date_default(self):
         result = runner.invoke(app, ["reports", "run", "--help"])
-        assert "default: yesterday" in " ".join(_strip_ansi(result.stdout).split())
+        # Ignore the help box's borders: the phrase may wrap across rows
+        text = _strip_ansi(result.stdout).replace("│", " ")
+        assert "default: yesterday" in " ".join(text.split())
 
     def test_explicit_end_date_kept(self):
         assert self._date_range("--start-date", "30daysAgo", "--end-date", "today") == {
