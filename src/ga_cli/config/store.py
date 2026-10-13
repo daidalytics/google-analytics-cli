@@ -9,8 +9,11 @@ Implements the same pattern as GTM CLI:
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass
-from typing import Literal, Optional
+from pathlib import Path
+from typing import Any, Literal, Optional
 
 from .constants import get_config_dir, get_config_path
 
@@ -25,45 +28,90 @@ class UserConfig:
     default_account_id: Optional[str] = None
     # None = not configured: table in a terminal, JSON when piped
     output_format: Optional[OutputFormat] = None
+    # Allowlist (config/allowlist.py). None = not set; [] = set but empty (denies all)
+    allowed_account_ids: Optional[list[str]] = None
+    allowed_property_ids: Optional[list[str]] = None
+
+
+class ConfigFileError(Exception):
+    """config.json exists but couldn't be read, so it won't be overwritten."""
 
 
 # In-memory cache (same pattern as GTM CLI)
 _cached_config: Optional[UserConfig] = None
+# Why config.json couldn't be read; None when it was read or doesn't exist
+_config_error: Optional[str] = None
 
 
 def load_config() -> UserConfig:
-    """Load config from disk, merge with defaults, cache in memory."""
-    global _cached_config
+    """Load config from disk, merge with defaults, cache in memory.
+
+    An unreadable file also loads as the defaults, so commands that only use defaults
+    keep working, but config_error() reports it: the allowlist fails closed on it and
+    save_config won't overwrite it.
+    """
+    global _cached_config, _config_error
     if _cached_config is not None:
         return _cached_config
 
     config_path = get_config_path()
+    _config_error = None
     try:
         data = json.loads(config_path.read_text())
+        if not isinstance(data, dict):
+            raise ValueError("expected a JSON object")
         _cached_config = UserConfig(
             default_property_id=data.get("default_property_id"),
             default_account_id=data.get("default_account_id"),
             output_format=data.get("output_format"),
+            allowed_account_ids=data.get("allowed_account_ids"),
+            allowed_property_ids=data.get("allowed_property_ids"),
         )
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
+        _cached_config = UserConfig()
+    except (OSError, ValueError) as e:  # includes JSONDecodeError and UnicodeDecodeError
+        _config_error = f"Can't read {config_path} ({e})"
         _cached_config = UserConfig()
 
     return _cached_config
 
 
+def config_error() -> Optional[str]:
+    """Why config.json couldn't be read, or None if it was read or doesn't exist."""
+    load_config()
+    return _config_error
+
+
 def save_config(config: UserConfig) -> None:
-    """Write config to disk and update cache."""
+    """Write config to disk atomically and update cache.
+
+    Raises ConfigFileError instead of overwriting a config.json that couldn't be read,
+    which would silently drop any allowlist in it.
+    """
     global _cached_config
+    reason = config_error()
+    if reason:
+        raise ConfigFileError(reason)
     config_dir = get_config_dir()
     config_dir.mkdir(parents=True, exist_ok=True)
 
     # Only write non-None values
     data = {k: v for k, v in asdict(config).items() if v is not None}
-    get_config_path().write_text(json.dumps(data, indent=2))
+    # Temp file + rename, so a crash can't leave a truncated file. resolve() writes
+    # through a symlinked config.json instead of replacing the link.
+    path = get_config_path().resolve()
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".config.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(data, indent=2))
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
     _cached_config = config
 
 
-def update_config(**updates: str) -> UserConfig:
+def update_config(**updates: object) -> UserConfig:
     """Merge updates into current config and save."""
     config = load_config()
     for key, value in updates.items():
@@ -73,13 +121,13 @@ def update_config(**updates: str) -> UserConfig:
     return config
 
 
-def get_config_value(key: str) -> Optional[str]:
-    """Get a single config value by key name."""
+def get_config_value(key: str) -> Any:
+    """Get a single config value by key name (a list for the allowlist keys)."""
     config = load_config()
     return getattr(config, key, None)
 
 
-def set_config_value(key: str, value: str) -> None:
+def set_config_value(key: str, value: object) -> None:
     """Set a single config value."""
     update_config(**{key: value})
 
@@ -113,4 +161,9 @@ VALID_CONFIG_KEYS = {
     "default_property_id": "Default GA4 Property ID",
     "default_account_id": "Default Account ID",
     "output_format": "Output format (json, table, compact); table applies only in a terminal",
+    "allowed_account_ids": "Allowlisted account IDs, comma-separated (interactive only)",
+    "allowed_property_ids": "Allowlisted property IDs, comma-separated (interactive only)",
 }
+
+# Keys that can only be changed from an interactive terminal
+ALLOWLIST_CONFIG_KEYS = ("allowed_account_ids", "allowed_property_ids")
