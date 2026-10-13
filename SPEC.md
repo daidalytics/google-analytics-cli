@@ -1,440 +1,195 @@
-# Spec: Surface `ResponseMetaData` in report commands
+# Spec: Output escaping and input validation fixes
 
-Status: **Implemented — pending release** (branch `feat/response-metadata`)
-Target version: 0.4.0 (tentative)
-API: `analyticsdata` v1beta / v1alpha, revision `20260909`
+Status: **Approved: in progress** (branch `fix/escape-and-validation`)
+Target version: 0.5.0 (ships alongside the #30 breaking changes)
+Previous spec (ResponseMetaData, shipped in 0.4.0): `git show 72e3a4f:SPEC.md`
 
 ---
 
 ## Objective
 
-`reports run`, `reports build`, `reports batch`, and `reports pivot` all call GA4 Data API
-methods whose response carries a `ResponseMetaData` (aka `metadata`) object — sampling info,
-thresholding flags, schema restrictions, empty-report reasons, and (newly, as of the 2026-09-09
-API revision) `dataTruncationReasons`. Today this object is **silently discarded**:
+Six bugs found while reviewing #28–#31. Two of them change or break output for real-world
+data and must be fixed. The other four are consistency and validation gaps.
 
-- `run` and `build` output only the transformed `rows` array in every format, including
-  `--output json` (`reports.py:334`, `:1517`) — there is currently no way to see this metadata
-  at all through those two commands.
-- `batch` and `pivot` already pass the raw API response through for `--output json`, but their
-  table-mode rendering shows nothing for it.
+Users: people running `ga` in a terminal (table output is the default there) and agents
+piping `ga` into `jq`. Report values such as page titles, page paths and event parameters
+are **untrusted**: anyone can send hits with arbitrary text.
 
-**Users:**
-1. **Humans at a terminal** running `ga reports run` — should see a plain-language warning when
-   their numbers are sampled, thresholded, restricted, or truncated, without having to guess.
-2. **AI agents / scripts** consuming `-o json` — should be able to detect these conditions
-   programmatically instead of silently treating partial/sampled data as complete.
+| # | Issue | Severity | Root cause |
+|---|-------|----------|------------|
+| 1 | Table cells are parsed as Rich markup: `/search?q=[foo]bar` shows as `/search?q=bar`; `Docs [/admin] x` raises `MarkupError` and aborts the report | **High** | API text reaches Rich unescaped |
+| 2 | Filter values containing `>`, `<`, `==`, `!=` split at the wrong operator | **High** | Symbol operators are tried before word operators, on the whole expression |
+| 3 | `ga auth status` defaults to table on a pipe | Medium | `-o` hard-coded to `"table"` |
+| 4 | Compact-mode Data Notes aren't escaped; `[/…]` raises `MarkupError` | Medium | Same as 1 |
+| 5 | `--order-by country:asc:alpha:bogus` is accepted | Low | Extra segments ignored |
+| 6 | `reports run --limit 0` returns up to 10,000 rows; `--limit -5` gets an API 400 | Low | No bounds on the option |
 
-**Trigger:** the 2026-09-09 GA4 Discovery revision added `DataTruncationDateRange` and
-`DataTruncationReason` schemas and a `dataTruncationReasons` array on `ResponseMetaData`
-(`analyticsdata` v1beta/v1alpha only — `analyticsadmin` had a revision bump with no schema
-diff). `.api-snapshots/analyticsdata_v1beta.json` and `_v1alpha.json` were already refreshed to
-this revision in commit `5680e22`; **no `--update` run is needed for this work.**
+### Reproduced on master (`f04b593`)
 
-**Success looks like:** running a report against a sampled or thresholded property shows a
-metadata section under the results (table mode) or a `metadata` key in the JSON response,
-without requiring any new flag.
+```
+_output_table([{"pagePath": "/search?q=[foo]bar"}])      → shows "/search?q=bar"
+_output_table([{"pageTitle": "Docs [/admin] x"}])        → MarkupError
+pageTitle contains Home > Blog                           → "Invalid numeric value: 'Blog'"
+pageTitle contains a != b                                → NOT EXACT on field "pageTitle contains a"
+pagePath begins_with /a==b                               → EXACT on field "pagePath begins_with /a"
+country in A<B,C                                         → "Invalid numeric value: 'B,C'"
+warn("Truncated: see [/docs] here")                      → MarkupError
+error("API said [/x]")                                   → MarkupError (handle_error's terminal path)
+parse_order_bys(["country:asc:alpha:bogus"], ...)        → accepted, "bogus" dropped
+```
 
-### Assumptions
-
-1. `reports realtime`'s response (`RunRealtimeReportResponse`) has **no `metadata` field** —
-   confirmed against the v1beta snapshot. Real-time is out of scope for this feature entirely.
-2. `reports funnel` (v1alpha `runFunnelReport`) is **not investigated** here — its response shape
-   (`funnelTable`) was not checked for a `metadata` field. Treated as out of scope unless a
-   follow-up confirms it needs the same treatment.
-3. `reports check-compatibility` and `reports metadata` (the `getMetadata` endpoint, unrelated to
-   `ResponseMetaData` despite the name collision) are out of scope — neither returns a report.
-4. `reports chat` is unrelated (separate `ChatResponse` shape, already raw-passthrough for JSON)
-   and untouched by this change.
-5. Changing `run`/`build`'s JSON shape from a bare array to `{rows, metadata}` is an accepted
-   **breaking change** for any existing script parsing `ga reports run -o json` as a flat array.
-   This is a pre-1.0 CLI (`0.3.0`), so the project's version-bump convention (not semver-strict
-   back-compat) applies; the change ships with a version bump and a release-notes callout.
-6. Metadata display in table/compact mode is **automatic** whenever the API returns a non-empty
-   `metadata` object — no new flag, consistent with how `_display_aggregations` already works
-   whenever `--metric-aggregation` is passed. (Unlike `propertyQuota`, metadata isn't gated by a
-   request-side opt-in flag on the GA4 API — the API returns it unconditionally when applicable.)
-7. `batch`'s per-sub-report metadata (each item in `RunReportResponse.metadata`) is displayed
-   per sub-report, directly under that sub-report's `--- Report N ---` block — consistent with
-   how `batch` already repeats `_display_aggregations`-style output per sub-report today (it
-   doesn't currently, but `row_count` is shown per sub-report at `reports.py:808`).
-→ Correct any of these now or I'll proceed with them.
+The last two `warn`/`error` rows widen issue 4: `handle_error()` prints API error messages
+through `error()` in terminal mode, so an API error containing `[/…]` crashes with a
+traceback instead of a clean error.
 
 ---
 
-## API Surface (from `.api-snapshots/analyticsdata_v1beta.json`)
+## Design
 
-```jsonc
-// ResponseMetaData (RunReportResponse.metadata / RunPivotReportResponse.metadata)
-{
-  "samplingMetadatas": [ SamplingMetadata ],       // one per date range, only if sampled
-  "schemaRestrictionResponse": SchemaRestrictionResponse,
-  "subjectToThresholding": boolean,
-  "dataTruncationReasons": [ DataTruncationReason ], // NEW in 2026-09-09 revision
-  "emptyReason": string                             // enum-like; only set when report is empty
-}
+### Issues 1 + 4: escape API text at the Rich boundary
 
-// SamplingMetadata (per date range)
-{ "samplingSpaceSize": string /* int64 */, "samplesReadCount": string /* int64 */ }
+Treat every value that reaches Rich as plain text unless the CLI itself wrote the markup.
 
-// SchemaRestrictionResponse
-{ "activeMetricRestrictions": [
-    { "metricName": string, "restrictedMetricTypes": ["COST_DATA" | "REVENUE_DATA" | ...] }
-] }
+- `utils/output.py::_format_value`: return `escape(str(value))` for strings, numbers and the
+  JSON of dicts. The CLI's own markup (`[green]Yes[/green]` / `[red]No[/red]` for booleans)
+  stays as is.
+- `_output_table`: escape the headers too. Pivot headers contain data values
+  (`"{pivot value} / {metric}"`).
+- `_output_object`: escape keys via `_format_header` output.
+- `success`/`error`/`warn`/`info`: escape `message`. This fixes issue 4 for every caller,
+  including `handle_error()`. Verified: none of the 101 current call sites passes intentional
+  markup in `message`.
+- `reports.py::_display_response_metadata`: the table branch keeps its explicit `escape()`.
+  The compact branch needs no change once `warn()` escapes.
 
-// DataTruncationReason  (the field driving this spec)
-{
-  "dataTruncationType": "DATA_TRUNCATION_TYPE_RULES_BASED_MODELS" | "...DATA_DRIVEN_ATTRIBUTION"
-    | "...DV360" | "...CM360" | "...ITEM_SCOPED_ECOMMERCE_METRICS"
-    | "...EVENT_SCOPED_ECOMMERCE_METRICS" | "...DATE_RANGE" | "...PROPERTY"
-    | "...CONVERSIONS" | "...GOOGLE_ADS" | "...UNSPECIFIED",
-  "dataTruncationMessage": string,
-  "dataTruncationDate": string,          // YYYY-MM-DD — data before this date is truncated
-  "dataTruncationDateRanges": [ { "startDate": string, "endDate": string } ]
-}
-```
+Not in scope: JSON output (already safe), compact TSV (already escapes control characters).
 
-Notes that drive the design:
-- `RunReportResponse.metadata` and `RunPivotReportResponse.metadata` both `$ref` the same
-  `ResponseMetaData` schema — one rendering helper covers `run`, `build`, `batch`, and `pivot`.
-- Every field on `ResponseMetaData` is optional/absent when not applicable. The common case
-  (a small, unsampled, unrestricted, untruncated report) has an empty or near-empty `metadata`
-  object — the display helper must render **nothing** in that case, not an empty section.
-- `dataTruncationReasons` can contain multiple entries (e.g. both a `DATE_RANGE` truncation and a
-  `GOOGLE_ADS` retention truncation on the same report) — render as a list, not a single line.
-- `samplingMetadatas` is parallel to `dateRanges` by index, not named — if there are 2 date
-  ranges, expect at most 2 entries in the same order.
+### Issue 2: anchor the field name, then match the first operator after it
 
----
-
-## Design Decisions
-
-### 1. One shared helper: `_display_response_metadata()`
-
-New module-level function in `reports.py`, same shape as the existing `_display_quota()` /
-`_display_aggregations()`:
+GA4 API field names follow `[A-Za-z][A-Za-z0-9_]*`, optionally followed by
+`:` and a name with the same characters (`customEvent:plan_type`, `keyEvents:sign_up`). Parse the
+field first, then the operator that immediately follows it, so operator-like text in the
+**value** is never considered:
 
 ```python
-def _display_response_metadata(metadata: dict | None, effective_format: str) -> None:
-    """Render sampling/thresholding/restriction/truncation warnings, if present.
-
-    Mirrors _display_quota(): a no-op when the API didn't return anything
-    interesting, so unaffected reports see no new output.
-    """
+_FIELD = r"(?P<field>[A-Za-z][A-Za-z0-9_]*(?::[A-Za-z0-9_]+)*)"
+_SYMBOL_FILTER = re.compile(rf"^{_FIELD}\s*(?P<op>==|!=|=~|>=|<=|>|<)\s*(?P<value>.+)$")
+_WORD_FILTER = re.compile(
+    rf"^{_FIELD}\s+(?P<op>contains|begins_with|ends_with|in|between)\s+(?P<value>.+)$",
+    re.IGNORECASE,
+)
 ```
 
-Called from `run_cmd`, `build_cmd` (after the existing `_display_quota` call), from `batch_cmd`
-once per sub-report, and from `pivot_cmd`'s table-mode branch. Table/compact and JSON share the
-same gating logic (render only if `metadata` is non-empty) but different output paths (see below).
+| Expression | Result |
+|---|---|
+| `pageTitle contains Home > Blog` | CONTAINS `Home > Blog` |
+| `pageTitle contains a != b` | CONTAINS `a != b` |
+| `pagePath begins_with /a==b` | BEGINS_WITH `/a==b` |
+| `country in A<B,C` | IN_LIST `["A<B", "C"]` |
+| `pageTitle==A > B` | EXACT `A > B` (unchanged) |
+| `customEvent:plan==pro` | EXACT on `customEvent:plan` |
+| `page title==x` | Error: can't parse the expression, list operators |
 
-### 2. Table/compact rendering
+The function's output dicts and metric handling (#29) stay unchanged. Only the matching changes.
 
-Printed as a `[bold]Data Notes[/bold]` section (mirroring the existing `\n[bold]Aggregations[/bold]`
-header at `reports.py:232`), after aggregations/quota, using `warn()`/`info()`-style lines rather
-than a table — these are prose warnings, not tabular data:
+### Issue 3: `ga auth status` uses the shared resolution
 
-```
-[dim]150 total rows[/dim]
+`output_format: Optional[str] = typer.Option(None, "--output", "-o", …)` and
+`fmt = resolve_output_format(output_format)`, like every other read command. Terminal output
+is still a table, a pipe gets JSON, and an explicit `-o` wins.
 
-Data Notes
-  ⚠ Truncated (DATE_RANGE): Query date range may not be fully served.
-  ⚠ Truncated (GOOGLE_ADS): Google Ads data is truncated due to a 36-month retention policy
-    (before 2023-09-01).
-  ⚠ Subject to data thresholds — some low-volume data may be withheld.
-  ℹ Sampled: 42,103 of 1,204,500 events analyzed (3.5%).
-```
+### Issue 5: reject extra `--order-by` segments
 
-Rendering rules:
-- `dataTruncationReasons`: one line per entry, `dataTruncationType` humanized (strip the
-  `DATA_TRUNCATION_TYPE_` prefix, title-case) + `dataTruncationMessage`; append
-  `(before {dataTruncationDate})` when the date is present.
-- `subjectToThresholding`: one fixed line when `true`. Omit entirely when `false`/absent — a
-  `false` is not noteworthy.
-- `samplingMetadatas`: one line per entry with the computed percentage
-  (`samplesReadCount / samplingSpaceSize`), guarding divide-by-zero.
-- `schemaRestrictionResponse.activeMetricRestrictions`: one line per restricted metric, e.g.
-  `⚠ Metric 'purchaseRevenue' restricted (REVENUE_DATA) — values withheld by your role.`
-- `emptyReason`: shown as a single `info()` line when the report has zero rows and this is set —
-  replaces the current unconditional "No results found." with the API's actual reason where
-  available (table renderer's existing fallback stays for when it's absent).
-- **compact format:** same content, one tab-free line per item to stderr via `warn()`/`info()`
-  (keeping stdout pipeable, matching how `chat`'s session ID and quota already go to stderr in
-  compact mode).
+After the field is resolved, `rest` may hold at most 2 segments (direction, sort type). With
+more: `BadParameter("Too many ':' segments in --order-by 'country:asc:alpha:bogus'. Format:
+field[:asc|desc[:alpha|ialpha|numeric]]")`.
 
-### 3. JSON rendering — breaking shape change for `run`/`build`
+### Issue 6: bound `reports run --limit`
 
-`run_cmd` and `build_cmd` currently do:
-```python
-output(rows, effective_format, columns=columns, headers=headers)
-```
-which for JSON prints `rows` as a bare array. This becomes:
-```python
-if effective_format == "json":
-    output({"rows": rows, "metadata": result.get("metadata", {})}, effective_format)
-else:
-    output(rows, effective_format, columns=columns, headers=headers)
-    _display_response_metadata(result.get("metadata"), effective_format)
-```
-Table/compact keep the existing flat-rows path (metadata rendered separately, as prose, not
-merged into row data). Only the JSON shape changes: `{"rows": [...], "metadata": {...}}` instead
-of a bare array.
+`min=1, max=250_000` (the API's `RunReportRequest.limit` maximum), matching pivot's `min=1`.
+Typer then reports the usage error with exit code 2 before any API call. `realtime` takes no
+`--limit`.
 
-`batch_cmd` and `pivot_cmd` already return the *entire* raw API response for `-o json`
-(`output(result, effective_format); return` at `reports.py:525`, `:800`), which already includes
-`metadata` — **no JSON-side change needed for those two**, only their table-mode branches gain
-the new `_display_response_metadata()` call.
+### API snapshot refresh
 
-### 4. `batch` — per-sub-report metadata
-
-Each item in `BatchRunReportsResponse.reports` is itself a `RunReportResponse` with its own
-`metadata`. In table mode, call `_display_response_metadata(report.get("metadata"), ...)` right
-after that sub-report's row count line (`reports.py:808-809`), inside the existing per-report
-loop — so metadata attaches visibly to the sub-report it describes, not lumped at the end.
-
-### 5. Why automatic, not flag-gated
-
-`--return-property-quota` needs a flag because `propertyQuota` is only populated when the
-*request* sets `returnPropertyQuota: true` — it's an opt-in on the wire. `ResponseMetaData`
-fields have no such request-side toggle; the API includes them whenever applicable regardless of
-what the CLI asks for. Gating display behind a new flag would mean users silently miss sampling/
-truncation warnings unless they already knew to ask — the opposite of what this feature is for.
-Precedent: `_display_aggregations()` already renders unconditionally whenever its trigger
-condition (`metric_aggregations` truthy) is met, no separate display flag.
+`.api-snapshots/` was last refreshed on 2026-09-12 (revision `20260909`). A check on
+2026-10-13 shows revision bumps only: admin `20261011`, data `20261012`, with no semantic
+changes. Refresh with `python scripts/check_api_changes.py --update` as a separate
+`chore:` commit, so the weekly API Watch starts from the revision 0.5.0 ships against. If
+the diff shows semantic changes by then, stop and review them before updating.
 
 ---
 
 ## Commands
 
-No new flags or command signatures. Behavior changes only:
-
 ```bash
-ga reports run -p 123 -m sessions,totalRevenue -d date          # table: may show "Data Notes"
-ga reports run -p 123 -m sessions -o json                       # {"rows": [...], "metadata": {...}}
-ga reports build -p 123                                          # same table-mode addition
-ga reports batch -p 123 -c batch.json                            # per-sub-report "Data Notes"
-ga reports pivot -p 123 -m sessions -d date --pivot-field date   # table-mode addition
+uv run pytest                          # full suite (currently 1071 passed)
+uv run pytest tests/test_output.py tests/test_filters.py tests/test_reports.py tests/test_auth_cmd.py -q
+uv run ruff check src/ tests/
+uv run ga reports run -p 250400352 …   # live checks (read-only)
 ```
 
-### Dev commands (unchanged)
-
-```bash
-pytest
-pytest tests/test_reports.py -v
-ruff check src/ tests/
-uv sync
-uv build
-```
-
----
-
-## Project Structure
+## Project structure (files touched)
 
 ```
-src/ga_cli/
-└── commands/reports.py   # MODIFY — add _display_response_metadata(); wire into
-                           #          run_cmd, build_cmd, batch_cmd, pivot_cmd
-
-tests/
-└── test_reports.py       # MODIFY — new metadata fixtures + assertions (see Testing Strategy)
+src/ga_cli/utils/output.py      → issues 1, 4 (escaping in _format_value, headers, message helpers)
+src/ga_cli/utils/filters.py     → issues 2, 5
+src/ga_cli/commands/auth_cmd.py → issue 3
+src/ga_cli/commands/reports.py  → issue 6 (and the comment on the compact Data Notes branch)
+tests/test_output.py, tests/test_filters.py, tests/test_auth_cmd.py, tests/test_reports.py
+.api-snapshots/*.json           → snapshot refresh (generated by the script)
 ```
 
-No new files, no new dependencies, no config/auth changes — this is a pure `reports.py` rendering
-change plus a JSON-shape change on two existing commands.
+## Code style
 
----
-
-## Code Style
-
-Follows existing `reports.py` conventions: `_`-prefixed module-level helpers, `.get()` with
-defaults throughout (API fields are optional), `console.print` with a leading `\n[bold]...[/bold]`
-header for table sections, `warn()`/`info()` for compact/non-table prose.
+Match the surrounding code: short docstrings, comments only where the *why* isn't obvious,
+`typer.BadParameter` for user input errors, class-grouped pytest tests. Example of the
+expected test shape:
 
 ```python
-_TRUNCATION_TYPE_PREFIX = "DATA_TRUNCATION_TYPE_"
+class TestTableEscaping:
+    def test_brackets_in_values_render_literally(self, capsys):
+        _output_table([{"pagePath": "/search?q=[foo]bar"}])
+        assert "/search?q=[foo]bar" in capsys.readouterr().out
 
-
-def _humanize_truncation_type(raw: str) -> str:
-    """DATA_TRUNCATION_TYPE_GOOGLE_ADS -> Google Ads."""
-    stripped = raw.removeprefix(_TRUNCATION_TYPE_PREFIX)
-    return stripped.replace("_", " ").title()
-
-
-def _display_response_metadata(metadata: dict | None, effective_format: str) -> None:
-    """Render sampling/thresholding/restriction/truncation notes, if present.
-
-    A no-op when metadata is empty or absent, matching _display_quota()'s
-    behavior for reports that don't trigger any of these conditions.
-    """
-    if not metadata:
-        return
-
-    lines: list[str] = []
-
-    for reason in metadata.get("dataTruncationReasons", []):
-        kind = _humanize_truncation_type(reason.get("dataTruncationType", ""))
-        message = reason.get("dataTruncationMessage", "")
-        date = reason.get("dataTruncationDate")
-        suffix = f" (before {date})" if date else ""
-        lines.append(f"Truncated ({kind}): {message}{suffix}")
-
-    if metadata.get("subjectToThresholding"):
-        lines.append("Subject to data thresholds — some low-volume data may be withheld.")
-
-    for sm in metadata.get("samplingMetadatas", []):
-        space = int(sm.get("samplingSpaceSize", 0) or 0)
-        read = int(sm.get("samplesReadCount", 0) or 0)
-        pct = f"{(read / space * 100):.1f}%" if space else "?"
-        lines.append(f"Sampled: {read:,} of {space:,} events analyzed ({pct}).")
-
-    for restriction in metadata.get("schemaRestrictionResponse", {}).get(
-        "activeMetricRestrictions", []
-    ):
-        types = ", ".join(restriction.get("restrictedMetricTypes", []))
-        lines.append(
-            f"Metric '{restriction.get('metricName')}' restricted ({types}) — "
-            "values withheld by your role."
-        )
-
-    if not lines:
-        return
-
-    if effective_format == "table":
-        console.print("\n[bold]Data Notes[/bold]")
-        for line in lines:
-            console.print(f"  [yellow]![/yellow] {line}")
-    elif effective_format == "compact":
-        for line in lines:
-            warn(line)
+    def test_closing_tag_in_value_does_not_raise(self, capsys):
+        _output_table([{"pageTitle": "Docs [/admin] x"}])
+        assert "Docs [/admin] x" in capsys.readouterr().out
 ```
 
-**Conventions this encodes:**
-- `.get(..., [])` / `.get(..., {})` chains throughout — every `ResponseMetaData` field is
-  optional, matching the defensive style already used for `dimensionHeaders`/`metricHeaders` in
-  `_transform_report_rows`.
-- Divide-by-zero guarded (`if space else "?"`) rather than assumed present, per `int64` fields
-  arriving as strings from the JSON API (`NumericValue`-style string-encoded integers elsewhere
-  in this schema family).
-- No new Rich `Table` — a warnings list is prose, not tabular, unlike `_display_aggregations`.
+## Testing strategy
 
----
-
-## Testing Strategy
-
-`pytest` + `typer.testing.CliRunner`, class-based grouping, all API calls mocked via
-`unittest.mock.patch`, per existing `tests/test_reports.py` conventions. **No real API calls.**
-
-New fixtures needed in `tests/test_reports.py`: a `SAMPLE_REPORT_RESPONSE_WITH_METADATA` (or
-per-field variants) alongside the existing `SAMPLE_REPORT_RESPONSE`.
-
-| Class | Cases |
-|---|---|
-| `TestResponseMetadataDisplay` | table mode: `dataTruncationReasons` renders one line per entry with type+message+date; `subjectToThresholding: true` renders its fixed line, `false`/absent renders nothing; `samplingMetadatas` renders a correct percentage, and handles `samplingSpaceSize: "0"` without a ZeroDivisionError; `activeMetricRestrictions` renders per-metric; empty/absent `metadata` renders **no** "Data Notes" section at all (regression guard against the always-on trigger from Design Decision 5) |
-| `TestResponseMetadataJson` | `run -o json` returns `{"rows": [...], "metadata": {...}}` (not a bare array) — update the existing `test_run_json_output` assertion for the new envelope; `metadata` key present-but-empty (`{}`) when the API returns none; `build -o json`, `batch -o json`, `pivot -o json` already raw-passthrough — assert `metadata` key survives unchanged (regression guard, not new behavior) |
-| `TestBatchPerReportMetadata` | two sub-reports, only the second has `dataTruncationReasons` — table output shows "Data Notes" attached to the second block only, not the first |
-| `TestResponseMetadataCompact` | `-o compact` sends truncation/thresholding/sampling lines to stderr via `warn()`, stdout stays exactly the row-only output |
-
-Also verify (no new test needed, but confirm during implementation): `test_run_default_metrics`
-and other existing table-mode tests that use `SAMPLE_REPORT_RESPONSE` (no `metadata` key) still
-pass unchanged — the no-op path must not alter output for responses that predate this field.
-
----
+- **TDD, one issue at a time:** write the failing regression test from the "Reproduced" table
+  first, then fix it.
+- Unit tests for parsers (`test_filters.py`) and renderers (`test_output.py`). CLI tests via
+  `CliRunner` for issues 3 and 6 (piped `auth status` → valid JSON; `--limit 0` → exit 2,
+  no API call).
+- Existing tests must keep passing unchanged, except where they assert the old buggy behaviour.
+- Live smoke test on property 250400352 after all six land: a table report with bracketed
+  values (if the property has any) and a filter whose value contains `>`.
 
 ## Boundaries
 
-**Always:**
-- Run `pytest` and `ruff check src/ tests/` before committing.
-- Mock every API call in tests; add fixtures rather than hitting a real property.
-- Treat every `ResponseMetaData` sub-field as optional (`.get()` with a default), since GA4 only
-  populates fields that apply to that specific report.
-- Keep the "no metadata → no output" no-op guarantee — this must be silent for the overwhelming
-  majority of reports that trigger none of these conditions.
+- **Always:** a regression test per issue; run `pytest` and `ruff` before each commit; keep
+  JSON and compact-TSV output byte-identical to today.
+- **Ask first:** changing any user-visible output beyond the bugs above, adding dependencies,
+  releasing or tagging 0.5.0.
+- **Never:** interpret report data as markup; push to master directly (go through a PR, CI
+  must pass).
 
-**Ask first:**
-- Adding `reports realtime` or `reports funnel` to this feature (both were scoped out above;
-  realtime's response has no `metadata` field at all, funnel wasn't investigated).
-- Any dependency addition (none should be needed — this is stdlib dict traversal + existing Rich
-  console).
-- Reformatting `_transform_report_rows`/`_transform_pivot_rows` beyond what's needed to thread
-  `metadata` through — this spec's diff should stay additive.
-- Bumping the version or tagging a release.
+## Success criteria
 
-**Never:**
-- Merge `metadata` fields into individual row dicts — it describes the whole report, not any one
-  row, and must stay a sibling key (`{"rows": ..., "metadata": ...}`), not inlined per-row.
-- Silently swallow the JSON shape change — the release notes/CHANGELOG must call out that
-  `ga reports run -o json` and `ga reports build -o json` now return an object, not a bare array.
-- Run `scripts/check_api_changes.py --update` as part of this work — the snapshots are already
-  current (commit `5680e22`); re-running it is out of scope and risks picking up unrelated drift.
+1. Every row in the "Reproduced" table gives the result in the Design tables, and each has a
+   regression test.
+2. `ga auth status | jq .authenticated` prints `true`/`false`.
+3. `ga reports run --limit 0` and `--limit -5` exit 2 with a usage error and make no API call.
+4. Full suite and ruff pass on Python 3.10, 3.12 and 3.13 in CI.
+5. No change to JSON or compact output for data without brackets.
+6. `python scripts/check_api_changes.py` reports no changes after the snapshot refresh.
 
----
+## Decisions
 
-## Success Criteria
-
-1. `ga reports run` against a sampled property (or a mocked response with `samplingMetadatas`)
-   shows a "Data Notes" section with a correct percentage in table mode.
-2. `ga reports run -o json` against the same mocked response returns
-   `{"rows": [...], "metadata": {"samplingMetadatas": [...]}}`.
-3. `ga reports run` against an unsampled, unrestricted, untruncated property shows **no** "Data
-   Notes" section and JSON output has `"metadata": {}` — output for existing users is otherwise
-   unchanged.
-4. A mocked `dataTruncationReasons` response renders each reason as a separate, human-readable
-   line including the truncation date when present.
-5. `ga reports batch` with a two-report config where only one sub-report has metadata attaches
-   the "Data Notes" section to the correct sub-report block.
-6. `ga reports pivot -o json` and `ga reports batch -o json` continue to raw-passthrough
-   `metadata` unchanged (no regression from this change, since they already did).
-7. `pytest` and `ruff check src/ tests/` pass, including the new/updated cases in the table above.
-8. `ga reports run --help` / `ga reports build --help` require no changes (no new flags) but the
-   CHANGELOG documents the JSON shape change as breaking.
-
----
-
-## Implementation Order
-
-1. **Shared helper** — `_display_response_metadata()` + `_humanize_truncation_type()` in
-   `reports.py`, unit-tested in isolation against hand-built `metadata` dicts covering each field
-   and the empty case. *Verify:* `TestResponseMetadataDisplay`.
-2. **Wire into `run_cmd`** — JSON envelope change + table-mode call. *Verify:*
-   `TestResponseMetadataJson` (run cases), update `test_run_json_output`.
-3. **Wire into `build_cmd`** — same pattern, reusing the helper. *Verify:* existing `build` tests
-   still pass; add a JSON+table case.
-4. **Wire into `batch_cmd`** — per-sub-report call inside the existing loop. *Verify:*
-   `TestBatchPerReportMetadata`.
-5. **Wire into `pivot_cmd`** — table-mode call only (JSON already passes through). *Verify:*
-   pivot table-mode test with a mocked `metadata` key.
-6. **Compact-mode pass + CHANGELOG entry** — `TestResponseMetadataCompact`; document the JSON
-   breaking change. *Verify:* full `pytest` + `ruff check src/ tests/`.
-
-Steps 2–5 are independent once step 1 lands (each touches a different command) and could be done
-in any order or in parallel; step 6 depends on all of them.
-
----
-
-## Open Questions — all resolved
-
-1. ~~**`reports funnel` scope.**~~ **Resolved during planning:** the v1alpha snapshot shows
-   `RunFunnelReportResponse` has no `metadata` field at all (`funnelVisualization`, `kind`,
-   `propertyQuota`, `funnelTable`). Funnel is definitively out of scope.
-2. ~~**Percentage formatting.**~~ **Resolved:** one decimal place (`3.5%`), no existing
-   precedent to match.
-3. ~~**CHANGELOG mechanics.**~~ **Resolved:** breaking-change note lives in README's
-   "Output formats" section; the GitHub release notes carry it again at tag time. No
-   `CHANGELOG.md` introduced.
-
-## Implementation Notes (2026-09-18)
-
-Deviations and findings recorded while implementing (`tasks/plan.md`, `tasks/todo.md`):
-
-- **The live API populates `metadata` on every response** with `currencyCode` and `timeZone`
-  (verified against a real property) — real-world `metadata` is never an empty dict. The
-  no-op guarantee therefore rests on the helper's *rendered-lines* guard, not the empty-dict
-  check; pinned by `test_currency_and_timezone_only_render_no_data_notes`.
-- **`emptyReason` renders as a regular Data Notes line**, not the separate `info()` line this
-  spec proposed — uniform with the other notes, and it composes naturally under the table
-  renderer's existing "No results found." fallback, which stays untouched.
-- **The Code Style sketch above under-escapes:** interpolating API text directly into a
-  markup-styled `console.print` line would let a message containing `[bold]` be parsed as a
-  style tag. The implementation wraps API-sourced text in `rich.markup.escape()`; pinned by
-  `test_api_text_with_rich_markup_renders_literally`.
-- Truncation-type humanization keeps words containing digits uppercase (`DV360`, `CM360`)
-  rather than title-casing them into `Dv360`.
+1. **Delivery:** one PR, one commit per issue.
+2. **Field-name grammar (issue 2):** `[A-Za-z][A-Za-z0-9_]*(:[A-Za-z0-9_]+)*` covers every
+   field name in use.
+3. **Release:** part of 0.5.0, together with #30's changes.
