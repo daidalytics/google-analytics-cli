@@ -368,6 +368,19 @@ class TestParseOrderBys:
         with pytest.raises(typer.BadParameter, match="Invalid sort direction 'sideways'"):
             parse_order_bys(["sessions:sideways"], metrics=["sessions"])
 
+    @pytest.mark.parametrize(
+        "expr, kwargs",
+        [
+            ("country:asc:alpha:bogus", {"dimensions": ["country"]}),
+            ("country:asc:alpha:bogus", {}),
+            ("customEvent:plan:asc:alpha:x", {"dimensions": ["customEvent:plan"]}),
+        ],
+    )
+    def test_extra_segments_rejected(self, expr, kwargs):
+        """Silently dropping the extra segment hid typos."""
+        with pytest.raises(typer.BadParameter, match="Too many ':' segments"):
+            parse_order_bys([expr], **kwargs)
+
     def test_invalid_order_type(self):
         with pytest.raises(typer.BadParameter, match="Invalid order type"):
             parse_order_bys(["country:asc:badtype"])

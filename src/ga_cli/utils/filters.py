@@ -262,6 +262,12 @@ def parse_order_bys(
                     f"'{field}' is a metric."
                 )
 
+        if len(rest) > 2:
+            raise typer.BadParameter(
+                f"Too many ':' segments in --order-by '{expr}'. "
+                f"Format: field[:asc|desc[:alpha|ialpha|numeric]]"
+            )
+
         desc = direction == "desc"
 
         # Determine metric vs dimension order-by
