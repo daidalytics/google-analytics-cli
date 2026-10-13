@@ -467,7 +467,9 @@ def realtime_cmd(
         None, "--order-by", help="Sort expression (repeatable). E.g. 'activeUsers:desc'"
     ),
     minute_ranges: Optional[list[str]] = typer.Option(
-        None, "--minute-range", help="Minute range as start,end (repeatable). E.g. '0,4'"
+        None, "--minute-range",
+        help="Minute range as START,END in minutes ago, START >= END (repeatable). "
+        "E.g. '29,0' for the last 30 minutes, '4,0' for the last 5",
     ),
     metric_aggregations: Optional[list[str]] = typer.Option(
         None, "--metric-aggregation", help="Request aggregation rows: TOTAL, MINIMUM, MAXIMUM"

@@ -1,6 +1,7 @@
 """Parsing utilities for GA4 report filters, order-bys, date ranges, and aggregations."""
 
 import json
+import math
 import re
 from pathlib import Path
 
@@ -40,13 +41,21 @@ def _parse_numeric(s: str) -> dict:
     except ValueError:
         pass
     try:
-        return {"doubleValue": float(s)}
+        value = float(s)
     except ValueError:
         raise typer.BadParameter(f"Invalid numeric value: '{s}'")
+    # float() also accepts nan/inf, which JSON can't carry to the API
+    if not math.isfinite(value):
+        raise typer.BadParameter(f"Invalid numeric value: '{s}'")
+    return {"doubleValue": value}
 
 
-def _parse_single_filter(expr: str) -> dict:
-    """Parse a single DSL filter expression into a FilterExpression dict."""
+def _parse_single_filter(expr: str, metric: bool = False) -> dict:
+    """Parse a single DSL filter expression into a FilterExpression dict.
+
+    With ``metric=True``, ``==``/``!=`` build a numeric EQUAL filter (the API
+    rejects stringFilter in a metricFilter) and string-only operators are refused.
+    """
     expr = expr.strip()
     for pattern, op in _OPERATORS:
         m = pattern.match(expr)
@@ -55,6 +64,26 @@ def _parse_single_filter(expr: str) -> dict:
 
         field = m.group(1).strip()
         value = m.group(2).strip()
+
+        if metric:
+            if op in ("EXACT", "NOT_EXACT"):
+                filter_expr = {
+                    "filter": {
+                        "fieldName": field,
+                        "numericFilter": {
+                            "operation": "EQUAL",
+                            "value": _parse_numeric(value),
+                        },
+                    }
+                }
+                if op == "NOT_EXACT":
+                    return {"notExpression": filter_expr}
+                return filter_expr
+            if op not in _NUMERIC_OPS and op != "BETWEEN":
+                raise typer.BadParameter(
+                    f"Operator in '{expr}' is not supported for metric filters. "
+                    f"Supported: ==, !=, >, >=, <, <=, between"
+                )
 
         if op in _STRING_OPS:
             match_type = op if op != "NOT_EXACT" else "EXACT"
@@ -127,7 +156,7 @@ def parse_dim_filters(expressions: list[str]) -> dict:
 
 def parse_metric_filters(expressions: list[str]) -> dict:
     """Parse DSL strings into a metricFilter FilterExpression dict."""
-    return _wrap_and([_parse_single_filter(e) for e in expressions])
+    return _wrap_and([_parse_single_filter(e, metric=True) for e in expressions])
 
 
 def parse_filter_json(raw: str) -> dict:
@@ -143,6 +172,14 @@ def parse_filter_json(raw: str) -> dict:
         raise typer.BadParameter(f"Invalid filter JSON: {e}")
 
 
+def _first_direction(parts: list[str], start: int) -> int:
+    """Index of the first ``asc``/``desc`` in ``parts[start:]``, else ``len(parts)``."""
+    return next(
+        (i for i in range(start, len(parts)) if parts[i].lower() in ("asc", "desc")),
+        len(parts),
+    )
+
+
 def parse_order_bys(
     expressions: list[str],
     metrics: list[str] | None = None,
@@ -154,33 +191,64 @@ def parse_order_bys(
 
     - direction: ``asc`` or ``desc`` (default ``desc``)
     - orderType (dimensions only): ``alpha``, ``ialpha``, ``numeric``
+
+    Field names may themselves contain ``:`` (``keyEvents:sign_up``,
+    ``customEvent:plan``); they are resolved against the requested
+    metrics/dimensions, which the API requires order-by fields to be in.
     """
     metrics = metrics or []
     dimensions = dimensions or []
+    known_fields = set(metrics) | set(dimensions)
     result = []
 
     for expr in expressions:
         parts = [p.strip() for p in expr.split(":")]
-        field = parts[0]
+        # Longest colon-joined prefix that names a requested field. Failing
+        # that, everything before the first asc/desc, so the error below names
+        # the whole field; with no fields to check against, the first part.
+        split = next(
+            (i for i in range(len(parts), 0, -1) if ":".join(parts[:i]) in known_fields),
+            None,
+        )
+        if split is None and known_fields:
+            split = _first_direction(parts, 1)
+        elif split is None:
+            split = 1
+        field = ":".join(parts[:split])
+        rest = parts[split:]
+        if known_fields and field not in known_fields:
+            raise typer.BadParameter(
+                f"--order-by field '{field}' is not one of the requested metrics/dimensions "
+                f"({', '.join([*metrics, *dimensions])}). Add it to -m or -d."
+            )
         direction = "desc"
         order_type = None
 
-        if len(parts) >= 2:
-            d = parts[1].lower()
+        if len(rest) >= 1:
+            d = rest[0].lower()
             if d not in ("asc", "desc"):
-                raise typer.BadParameter(
-                    f"Invalid sort direction '{parts[1]}'. Must be 'asc' or 'desc'."
-                )
+                message = f"Invalid sort direction '{rest[0]}'. Must be 'asc' or 'desc'."
+                if known_fields:
+                    # Possibly the rest of a field name that wasn't requested
+                    # (keyEvents:purchase with only -m keyEvents)
+                    end = _first_direction(parts, split)
+                    message += f" If '{':'.join(parts[:end])}' is a field name, add it to -m or -d."
+                raise typer.BadParameter(message)
             direction = d
 
-        if len(parts) >= 3:
-            ot = parts[2].lower()
+        if len(rest) >= 2:
+            ot = rest[1].lower()
             if ot not in _ORDER_TYPE_MAP:
                 raise typer.BadParameter(
-                    f"Invalid order type '{parts[2]}'. "
+                    f"Invalid order type '{rest[1]}'. "
                     f"Must be one of: alpha, ialpha, numeric."
                 )
             order_type = _ORDER_TYPE_MAP[ot]
+            if field in metrics:
+                raise typer.BadParameter(
+                    f"Order type '{rest[1]}' applies only to dimensions; "
+                    f"'{field}' is a metric."
+                )
 
         desc = direction == "desc"
 
@@ -220,7 +288,11 @@ def parse_date_ranges(ranges: list[str]) -> list[dict]:
 
 
 def parse_minute_ranges(ranges: list[str]) -> list[dict]:
-    """Parse ``start,end`` strings into minuteRanges dicts for realtime reports."""
+    """Parse ``start,end`` strings into minuteRanges dicts for realtime reports.
+
+    Both are minutes ago, so ``29,0`` is the last 30 minutes; the API rejects
+    a start later (fewer minutes ago) than the end.
+    """
     result = []
     for r in ranges:
         parts = [p.strip() for p in r.split(",")]
@@ -234,6 +306,11 @@ def parse_minute_ranges(ranges: list[str]) -> list[dict]:
         except ValueError:
             raise typer.BadParameter(
                 f"Minute range values must be integers (got '{r}')"
+            )
+        if start < end:
+            raise typer.BadParameter(
+                f"Minute range is START,END in minutes ago, so START must be >= END "
+                f"(got '{r}'; did you mean '{end},{start}'?)"
             )
         result.append({"startMinutesAgo": start, "endMinutesAgo": end})
     return result

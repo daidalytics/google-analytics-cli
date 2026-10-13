@@ -119,6 +119,12 @@ class TestParseSingleFilter:
         with pytest.raises(typer.BadParameter, match="Invalid numeric"):
             _parse_single_filter("sessions>abc")
 
+    @pytest.mark.parametrize("value", ["nan", "inf", "-Infinity"])
+    def test_non_finite_numeric_rejected(self, value):
+        """float() accepts these, but JSON can't carry them to the API."""
+        with pytest.raises(typer.BadParameter, match="Invalid numeric"):
+            parse_metric_filters([f"sessions=={value}"])
+
     def test_keyword_case_insensitive(self):
         result = _parse_single_filter("pagePath CONTAINS /blog")
         assert result["filter"]["stringFilter"]["matchType"] == "CONTAINS"
@@ -142,6 +148,38 @@ class TestParseDimFilters:
         result = parse_metric_filters(["sessions>100", "users>50"])
         assert "andGroup" in result
         assert len(result["andGroup"]["expressions"]) == 2
+
+
+class TestParseMetricFilters:
+    def test_equal_is_numeric(self):
+        """The API rejects stringFilter in a metricFilter."""
+        result = parse_metric_filters(["sessions==100"])
+        assert result == {
+            "filter": {
+                "fieldName": "sessions",
+                "numericFilter": {"operation": "EQUAL", "value": {"int64Value": "100"}},
+            }
+        }
+
+    def test_not_equal_is_negated_numeric(self):
+        result = parse_metric_filters(["sessions!=0"])
+        inner = result["notExpression"]["filter"]
+        assert inner["numericFilter"]["operation"] == "EQUAL"
+        assert "stringFilter" not in inner
+
+    def test_comparison_and_between_still_work(self):
+        assert parse_metric_filters(["sessions>=10"])["filter"]["numericFilter"][
+            "operation"
+        ] == "GREATER_THAN_OR_EQUAL"
+        assert "betweenFilter" in parse_metric_filters(["sessions between 1,5"])["filter"]
+
+    def test_string_operator_rejected(self):
+        with pytest.raises(typer.BadParameter, match="not supported for metric filters"):
+            parse_metric_filters(["sessions contains 1"])
+
+    def test_dimension_equal_stays_string(self):
+        result = parse_dim_filters(["countryId==US"])
+        assert result["filter"]["stringFilter"]["matchType"] == "EXACT"
 
 
 # ---------------------------------------------------------------------------
@@ -227,9 +265,56 @@ class TestParseOrderBys:
         assert "metric" in result[0]
         assert "dimension" in result[1]
 
+    def test_colon_metric_default_desc(self):
+        result = parse_order_bys(["keyEvents:sign_up"], metrics=["keyEvents:sign_up"])
+        assert result == [{"metric": {"metricName": "keyEvents:sign_up"}, "desc": True}]
+
+    def test_colon_metric_with_direction(self):
+        result = parse_order_bys(["keyEvents:sign_up:asc"], metrics=["keyEvents:sign_up"])
+        assert result == [{"metric": {"metricName": "keyEvents:sign_up"}, "desc": False}]
+
+    def test_colon_dimension_with_order_type(self):
+        result = parse_order_bys(
+            ["customEvent:plan_type:asc:ialpha"], dimensions=["customEvent:plan_type"]
+        )
+        assert result == [{
+            "dimension": {
+                "dimensionName": "customEvent:plan_type",
+                "orderType": "CASE_INSENSITIVE_ALPHANUMERIC",
+            },
+            "desc": False,
+        }]
+
+    def test_colon_dimension_detected_from_list(self):
+        result = parse_order_bys(
+            ["customEvent:plan_type:desc"], dimensions=["customEvent:plan_type"]
+        )
+        assert result[0]["dimension"]["dimensionName"] == "customEvent:plan_type"
+
     def test_invalid_direction(self):
         with pytest.raises(typer.BadParameter, match="Invalid sort direction"):
             parse_order_bys(["sessions:sideways"])
+
+    @pytest.mark.parametrize("expr", ["keyEvents:purchase", "keyEvents:purchase:desc"])
+    def test_colon_field_not_requested_names_whole_field(self, expr):
+        """keyEvents is requested, so ':purchase' parses as a direction."""
+        with pytest.raises(
+            typer.BadParameter,
+            match="If 'keyEvents:purchase' is a field name, add it to -m or -d",
+        ):
+            parse_order_bys([expr], metrics=["keyEvents"])
+
+    def test_field_not_requested_rejected_before_direction(self):
+        with pytest.raises(typer.BadParameter, match="'keyEvents:sign_up' is not one of"):
+            parse_order_bys(["keyEvents:sign_up:desc"], metrics=["sessions"])
+
+    def test_order_type_on_metric_rejected(self):
+        with pytest.raises(typer.BadParameter, match="applies only to dimensions"):
+            parse_order_bys(["keyEvents:x:desc:numeric"], metrics=["keyEvents:x"])
+
+    def test_requested_field_with_bad_direction(self):
+        with pytest.raises(typer.BadParameter, match="Invalid sort direction 'sideways'"):
+            parse_order_bys(["sessions:sideways"], metrics=["sessions"])
 
     def test_invalid_order_type(self):
         with pytest.raises(typer.BadParameter, match="Invalid order type"):
@@ -264,12 +349,19 @@ class TestParseDateRanges:
 
 class TestParseMinuteRanges:
     def test_single_range(self):
-        result = parse_minute_ranges(["0,4"])
-        assert result == [{"startMinutesAgo": 0, "endMinutesAgo": 4}]
+        result = parse_minute_ranges(["4,0"])
+        assert result == [{"startMinutesAgo": 4, "endMinutesAgo": 0}]
 
     def test_multiple_ranges(self):
-        result = parse_minute_ranges(["0,4", "5,10"])
+        result = parse_minute_ranges(["4,0", "29,25"])
         assert len(result) == 2
+
+    def test_same_minute_allowed(self):
+        assert parse_minute_ranges(["3,3"]) == [{"startMinutesAgo": 3, "endMinutesAgo": 3}]
+
+    def test_inverted_range_rejected(self):
+        with pytest.raises(typer.BadParameter, match="did you mean '4,0'"):
+            parse_minute_ranges(["0,4"])
 
     def test_invalid_non_integer(self):
         with pytest.raises(typer.BadParameter, match="must be integers"):
