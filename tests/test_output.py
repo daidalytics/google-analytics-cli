@@ -1,8 +1,12 @@
 """Tests for ga_cli.utils.output."""
 
+import importlib
 import json
-import sys
+from unittest.mock import MagicMock, patch
 
+from typer.testing import CliRunner
+
+from ga_cli.main import app
 from ga_cli.utils.output import (
     _format_header,
     _format_value,
@@ -13,6 +17,7 @@ from ga_cli.utils.output import (
     info,
     is_tty,
     output,
+    resolve_output_format,
     set_output_format,
     success,
     warn,
@@ -32,12 +37,95 @@ class TestGetOutputFormat:
         assert get_output_format("table") == "table"
 
     def test_defaults_to_json_when_not_tty(self, monkeypatch):
-        monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+        monkeypatch.setattr(importlib.import_module("ga_cli.utils.output"), "is_tty", lambda: False)
         assert get_output_format(None) == "json"
 
     def test_defaults_to_table_when_tty(self, monkeypatch):
-        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        monkeypatch.setattr(importlib.import_module("ga_cli.utils.output"), "is_tty", lambda: True)
         assert get_output_format(None) == "table"
+
+
+class TestResolveOutputFormat:
+    def _config(self, monkeypatch, value):
+        monkeypatch.setattr("ga_cli.config.store.get_config_value", lambda key: value)
+
+    def test_configured_table_ignored_when_piped(self, monkeypatch):
+        self._config(monkeypatch, "table")
+        monkeypatch.setattr(importlib.import_module("ga_cli.utils.output"), "is_tty", lambda: False)
+        assert resolve_output_format(None) == "json"
+
+    def test_configured_table_used_on_tty(self, monkeypatch):
+        self._config(monkeypatch, "table")
+        monkeypatch.setattr(importlib.import_module("ga_cli.utils.output"), "is_tty", lambda: True)
+        assert resolve_output_format(None) == "table"
+
+    def test_configured_json_used_on_tty(self, monkeypatch):
+        self._config(monkeypatch, "json")
+        monkeypatch.setattr(importlib.import_module("ga_cli.utils.output"), "is_tty", lambda: True)
+        assert resolve_output_format(None) == "json"
+
+    def test_unconfigured_tty_defaults_to_table(self, monkeypatch):
+        self._config(monkeypatch, None)
+        monkeypatch.setattr(importlib.import_module("ga_cli.utils.output"), "is_tty", lambda: True)
+        assert resolve_output_format(None) == "table"
+
+    def test_flag_wins_when_piped(self, monkeypatch):
+        self._config(monkeypatch, "json")
+        monkeypatch.setattr(importlib.import_module("ga_cli.utils.output"), "is_tty", lambda: False)
+        assert resolve_output_format("table") == "table"
+        assert get_current_output_format() == "table"
+
+
+class TestPipedCliOutput:
+    """End to end through a non-report command with stdout piped (conftest
+    simulates a terminal by default)."""
+
+    ACCOUNTS = [
+        {"name": "accounts/123456", "displayName": "My Account"},
+        {"name": "accounts/789012", "displayName": "Other Account"},
+    ]
+
+    def _list(self, monkeypatch, *args, error=None):
+        monkeypatch.setattr(
+            importlib.import_module("ga_cli.utils.output"), "is_tty", lambda: False
+        )
+        mock_client = MagicMock()
+        execute = mock_client.accounts.return_value.list.return_value.execute
+        execute.return_value = {"accounts": self.ACCOUNTS}
+        execute.side_effect = error
+        with patch("ga_cli.commands.accounts.get_admin_client", return_value=mock_client):
+            return CliRunner().invoke(app, ["accounts", "list", *args])
+
+    def test_defaults_to_json(self, monkeypatch):
+        result = self._list(monkeypatch)
+        assert result.exit_code == 0
+        assert json.loads(result.stdout)[0]["name"] == "accounts/123456"
+
+    def test_table_flag_wins(self, monkeypatch):
+        result = self._list(monkeypatch, "-o", "table")
+        assert result.exit_code == 0
+        assert "My Account" in result.stdout
+        assert not result.stdout.lstrip().startswith("[")
+
+    def test_configured_table_ignored(self, monkeypatch):
+        from ga_cli.config.store import set_config_value
+
+        set_config_value("output_format", "table")
+        assert json.loads(self._list(monkeypatch).stdout)[1]["name"] == "accounts/789012"
+
+    def test_configured_compact_honoured(self, monkeypatch):
+        from ga_cli.config.store import set_config_value
+
+        set_config_value("output_format", "compact")
+        result = self._list(monkeypatch)
+        assert result.stdout.splitlines()[0] == "accounts/123456\tMy Account"
+
+    def test_errors_are_structured_json(self, monkeypatch):
+        result = self._list(monkeypatch, error=Exception("API quota exceeded"))
+        assert result.exit_code != 0
+        payload = json.loads(result.stderr)
+        assert payload["error"] is True
+        assert "API quota exceeded" in payload["message"]
 
 
 class TestFormatHeader:
@@ -122,6 +210,42 @@ class TestOutputCompact:
         assert len(lines) == 2
         assert "accounts/123" in lines[0]
         assert "My Account" in lines[0]
+
+    def test_compact_tsv_has_header_and_rows(self, capsys):
+        data = [
+            {"country": "Switzerland", "sessions": "500"},
+            {"country": "Germany", "sessions": "300"},
+        ]
+        output(data, fmt="compact", tsv=True)
+        assert capsys.readouterr().out == (
+            "country\tsessions\nSwitzerland\t500\nGermany\t300\n"
+        )
+
+    def test_compact_tsv_follows_columns(self, capsys):
+        data = [{"country": "Germany", "sessions": "300", "extra": "x"}]
+        output(data, fmt="compact", columns=["sessions", "country"], tsv=True)
+        assert capsys.readouterr().out == "sessions\tcountry\n300\tGermany\n"
+
+    def test_compact_tsv_escapes_separators(self, capsys):
+        data = [{"pageTitle": "a\tb\nc\\d\re", "sessions": "1"}]
+        output(data, fmt="compact", tsv=True)
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[1] == "a\\tb\\nc\\\\d\\re\t1"
+        assert all(line.count("\t") == 1 for line in lines)
+
+    def test_compact_tsv_escapes_terminal_control_characters(self, capsys):
+        """Report values are attacker-controllable: no raw ESC, CSI or DEL."""
+        data = [{"pageTitle": "\x1b[2J\x1b]0;pwned\x07title\x9b31m\x7f", "sessions": "1"}]
+        output(data, fmt="compact", tsv=True)
+        out = capsys.readouterr().out
+        assert out.splitlines()[1] == (
+            "\\x1b[2J\\x1b]0;pwned\\x07title\\x9b31m\\x7f\t1"
+        )
+        assert not any(ord(ch) < 0x20 and ch not in "\t\n" for ch in out)
+
+    def test_compact_without_tsv_keeps_name_format(self, capsys):
+        output([{"country": "Germany", "sessions": "300"}], fmt="compact")
+        assert capsys.readouterr().out == "\t\n"
 
     def test_compact_single_dict(self, capsys):
         data = {"name": "test"}

@@ -32,6 +32,24 @@ class TestSetupCommand:
         assert config.default_property_id == "67890"
         assert config.output_format == "json"
 
+    def test_setup_auto_leaves_output_format_unset(self, tmp_path):
+        """Writing "table" as a default is what made a configured table ambiguous."""
+        mock_text = MagicMock()
+        mock_text.return_value.ask.side_effect = ["", ""]
+        mock_select = MagicMock()
+        mock_select.return_value.ask.return_value = "auto"
+
+        with (
+            patch("questionary.text", mock_text),
+            patch("questionary.select", mock_select),
+        ):
+            result = runner.invoke(app, ["config", "setup"])
+
+        assert result.exit_code == 0
+        assert mock_select.call_args.kwargs["default"] == "auto"
+        assert load_config().output_format is None
+        assert "output_format" not in (tmp_path / "config.json").read_text()
+
 
 class TestGetCommand:
     def test_get_all(self):
@@ -124,7 +142,7 @@ class TestResetCommand:
 
         config = load_config()
         assert config.default_account_id is None
-        assert config.output_format == "table"
+        assert config.output_format is None
 
     def test_reset_cancelled(self):
         save_config(UserConfig(default_account_id="12345"))

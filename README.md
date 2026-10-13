@@ -214,10 +214,27 @@ Use `ga <command> --help` for detailed usage of any command, or `ga --describe` 
 All read commands support `--output` (`-o`) to control output format:
 
 ```bash
-ga accounts list --output json      # JSON output
-ga accounts list --output table     # Table output (default)
+ga accounts list --output json      # JSON output (default when piped)
+ga accounts list --output table     # Table output (default in a terminal)
 ga accounts list --output compact   # Minimal ID + name output
 ```
+
+Without `-o`, output is a table in a terminal and JSON when piped. A configured
+`output_format` (`ga config set output_format …`) overrides that default, except
+that a configured `table` is ignored on a pipe. *(Changed after 0.4.0: previously
+`table` — configured, or written to the config file as a default — also applied
+to pipes.)*
+
+For report commands (`run`, `realtime`, `pivot`, `funnel`, `metadata`,
+`check-compatibility`), `-o compact` prints TSV: a header line of field names,
+then one line per row, with tabs, newlines and backslashes in values escaped as
+`\t`, `\n`, `\\`. Aggregation rows, quota and data notes go to stderr, so
+stdout holds only rows.
+
+`ga reports run` defaults to `--start-date 7daysAgo --end-date yesterday`, which
+matches the GA4 UI's "Last 7 days" and leaves out today's incomplete data. Without
+`--end-date`, a range starting `today` also ends `today`. *(Changed after 0.4.0:
+the end date used to be `today`.)*
 
 > **Breaking change (post-0.3.0):** `ga reports run` and `ga reports build` with
 > `-o json` return a `{"rows": [...], "metadata": {...}}` envelope instead of a
@@ -227,6 +244,19 @@ ga accounts list --output compact   # Minimal ID + name output
 > discarded. In table output the same information renders as a **Data Notes**
 > section under the results whenever present; unaffected reports look exactly as
 > before.
+>
+> **Breaking change (post-0.4.0):** `ga reports realtime -o json` now returns the
+> same envelope. Every envelope also carries `rowCount` (total rows before
+> `--limit`), plus `totals` / `minimums` / `maximums` when `--metric-aggregation`
+> is used (each row labelled with `dateRange` when several date ranges are
+> requested), and `propertyQuota` with `--return-property-quota`. Previously
+> aggregations were printed as a second JSON document. The Realtime API returns
+> no `ResponseMetaData`, so realtime's `metadata` is always `{}`.
+>
+> ```json
+> {"rows": [...], "metadata": {...}, "rowCount": 652,
+>  "totals": [{"dateRange": "current", "sessions": "800"}], "propertyQuota": {...}}
+> ```
 
 ## Chat
 

@@ -78,8 +78,7 @@ def main(
     describe: bool = typer.Option(False, "--describe", help="Show CLI schema as JSON"),
 ):
     """GA CLI — Command-line interface for Google Analytics 4."""
-    from .config.store import get_effective_value
-    from .utils.output import is_tty, set_no_color, set_output_format, set_quiet
+    from .utils.output import resolve_output_format, set_no_color, set_quiet
 
     if quiet:
         set_quiet(True)
@@ -87,8 +86,7 @@ def main(
         set_no_color(True)
 
     # Resolve output format early so errors are structured when appropriate
-    effective_fmt = get_effective_value(None, "output_format") or ("table" if is_tty() else "json")
-    set_output_format(effective_fmt)
+    resolve_output_format(None)
 
     if version:
         from . import __version__

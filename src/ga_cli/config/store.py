@@ -23,7 +23,8 @@ class UserConfig:
 
     default_property_id: Optional[str] = None
     default_account_id: Optional[str] = None
-    output_format: OutputFormat = "table"
+    # None = not configured: table in a terminal, JSON when piped
+    output_format: Optional[OutputFormat] = None
 
 
 # In-memory cache (same pattern as GTM CLI)
@@ -42,7 +43,7 @@ def load_config() -> UserConfig:
         _cached_config = UserConfig(
             default_property_id=data.get("default_property_id"),
             default_account_id=data.get("default_account_id"),
-            output_format=data.get("output_format", "table"),
+            output_format=data.get("output_format"),
         )
     except (FileNotFoundError, json.JSONDecodeError):
         _cached_config = UserConfig()
@@ -111,5 +112,5 @@ def get_effective_value(cli_value: Optional[str], config_key: str) -> Optional[s
 VALID_CONFIG_KEYS = {
     "default_property_id": "Default GA4 Property ID",
     "default_account_id": "Default Account ID",
-    "output_format": "Output format (json, table, compact)",
+    "output_format": "Output format (json, table, compact); table applies only in a terminal",
 }

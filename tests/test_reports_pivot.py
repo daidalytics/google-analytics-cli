@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from ga_cli.config.store import UserConfig, save_config
@@ -9,6 +10,15 @@ from ga_cli.main import app
 
 runner = CliRunner()
 
+def _pivot_row(device, country, sessions):
+    return {
+        "dimensionValues": [{"value": device}, {"value": country}],
+        "metricValues": [{"value": sessions}],
+    }
+
+
+# Layout of a live runPivotReport response: one row per combination of all
+# dimensions, one value per metric.
 SAMPLE_PIVOT_RESPONSE = {
     "pivotHeaders": [
         {
@@ -16,36 +26,26 @@ SAMPLE_PIVOT_RESPONSE = {
                 {"dimensionValues": [{"value": "desktop"}]},
                 {"dimensionValues": [{"value": "mobile"}]},
             ]
-        }
+        },
+        {
+            "pivotDimensionHeaders": [
+                {"dimensionValues": [{"value": "United States"}]},
+                {"dimensionValues": [{"value": "United Kingdom"}]},
+            ]
+        },
     ],
     "dimensionHeaders": [
-        {"name": "country"},
         {"name": "deviceCategory"},
+        {"name": "country"},
     ],
     "metricHeaders": [
         {"name": "sessions"},
     ],
     "rows": [
-        {
-            "dimensionValues": [
-                {"value": "United States"},
-                {"value": "desktop"},
-            ],
-            "metricValues": [
-                {"value": "1000"},
-                {"value": "500"},
-            ],
-        },
-        {
-            "dimensionValues": [
-                {"value": "United Kingdom"},
-                {"value": "desktop"},
-            ],
-            "metricValues": [
-                {"value": "300"},
-                {"value": "200"},
-            ],
-        },
+        _pivot_row("desktop", "United States", "1000"),
+        _pivot_row("mobile", "United States", "500"),
+        _pivot_row("desktop", "United Kingdom", "300"),
+        _pivot_row("mobile", "United Kingdom", "200"),
     ],
 }
 
@@ -101,6 +101,101 @@ class TestPivotReport:
 
         assert result.exit_code == 0
         assert "pivotHeaders" in result.output
+
+    def test_pivot_limit_defaults_to_five_and_is_configurable(self):
+        for extra, expected in (([], 5), (["--pivot-limit", "20"], 20)):
+            mock_client = _mock_data_client()
+            with patch(
+                "ga_cli.commands.reports.get_data_client",
+                return_value=mock_client,
+            ):
+                runner.invoke(
+                    app,
+                    [
+                        "reports", "pivot", "-p", "123", "-m", "sessions",
+                        "-d", "country,deviceCategory", "--pivot-field", "country",
+                        "--limit", "50", *extra, "-o", "json",
+                    ],
+                )
+            body = mock_client.properties.return_value.runPivotReport.call_args[1]["body"]
+            assert body["pivots"] == [
+                {"fieldNames": ["country"], "limit": expected},
+                {"fieldNames": ["deviceCategory"], "limit": 50},
+            ]
+
+    def _invoke_pivot(self, *args):
+        mock_client = _mock_data_client()
+        with patch("ga_cli.commands.reports.get_data_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                ["reports", "pivot", "-p", "123", "-m", "sessions",
+                 "-d", "country,deviceCategory", "--pivot-field", "deviceCategory", *args],
+            )
+        return result, mock_client
+
+    @pytest.mark.parametrize("flag", ["--pivot-limit", "--limit"])
+    @pytest.mark.parametrize("value", ["0", "-1"])
+    def test_limits_must_be_positive(self, flag, value):
+        result, mock_client = self._invoke_pivot(flag, value)
+        assert result.exit_code == 2
+        mock_client.properties.return_value.runPivotReport.assert_not_called()
+
+    def test_limit_product_capped(self):
+        result, mock_client = self._invoke_pivot("--pivot-limit", "5000", "--limit", "100")
+        assert result.exit_code == 2
+        assert "250,000" in result.output
+        mock_client.properties.return_value.runPivotReport.assert_not_called()
+
+    def test_pivot_limit_capped_with_single_dimension(self):
+        mock_client = _mock_data_client()
+        with patch("ga_cli.commands.reports.get_data_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                ["reports", "pivot", "-p", "123", "-m", "sessions", "-d", "country",
+                 "--pivot-field", "country", "--pivot-limit", "300000"],
+            )
+        assert result.exit_code == 2
+        mock_client.properties.return_value.runPivotReport.assert_not_called()
+
+    def test_limit_product_at_cap_allowed(self):
+        result, _ = self._invoke_pivot("--pivot-limit", "2500", "--limit", "100", "-o", "json")
+        assert result.exit_code == 0
+
+    def test_start_today_ends_today(self):
+        _, mock_client = self._invoke_pivot("--start-date", "today", "-o", "json")
+        body = mock_client.properties.return_value.runPivotReport.call_args[1]["body"]
+        assert body["dateRanges"] == [{"startDate": "today", "endDate": "today"}]
+
+    def test_compact_output_is_tsv(self):
+        result, _ = self._invoke_pivot("-o", "compact")
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            "country\tdesktop_sessions\tmobile_sessions",
+            "United States\t1000\t500",
+            "United Kingdom\t300\t200",
+        ]
+
+    def test_missing_combination_leaves_cell_empty(self):
+        response = {
+            **SAMPLE_PIVOT_RESPONSE,
+            "rows": [
+                _pivot_row("mobile", "United States", "500"),
+                _pivot_row("desktop", "United Kingdom", "300"),
+            ],
+        }
+        mock_client = _mock_data_client(response)
+        with patch("ga_cli.commands.reports.get_data_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                ["reports", "pivot", "-p", "123", "-m", "sessions",
+                 "-d", "country,deviceCategory", "--pivot-field", "deviceCategory",
+                 "-o", "compact"],
+            )
+        assert result.stdout.splitlines() == [
+            "country\tdesktop_sessions\tmobile_sessions",
+            "United States\t\t500",
+            "United Kingdom\t300\t",
+        ]
 
     def test_pivot_requires_metrics(self):
         result = runner.invoke(

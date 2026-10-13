@@ -1,9 +1,12 @@
 """Tests for reports commands (run, realtime, build)."""
 
+import importlib
 import json
 import re
+from datetime import date
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from ga_cli.config.store import UserConfig, save_config
@@ -91,6 +94,18 @@ class TestReportsRun:
         assert result.exit_code == 0
         assert "150" in result.output
         assert "200" in result.output
+
+    def test_run_default_date_range_excludes_today(self):
+        """Matches the GA4 UI's 'Last 7 days': today's data is still incomplete."""
+        mock_client = _mock_data_client()
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            runner.invoke(app, ["reports", "run", "-p", "111"])
+
+        body = mock_client.properties.return_value.runReport.call_args[1]["body"]
+        assert body["dateRanges"] == [{"startDate": "7daysAgo", "endDate": "yesterday"}]
 
     def test_run_json_output(self):
         mock_client = _mock_data_client()
@@ -264,7 +279,9 @@ class TestReportsRealtime:
             )
 
         assert result.exit_code == 0
-        assert '"42"' in result.output
+        parsed = json.loads(result.stdout)
+        assert parsed["rows"] == [{"activeUsers": "42"}]
+        assert parsed["rowCount"] == 1
 
     def test_realtime_with_dimensions(self):
         response = {
@@ -454,6 +471,19 @@ class TestCheckCompatibility:
             response or self.SAMPLE_COMPAT_RESPONSE
         )
         return mock_client
+
+    def test_compact_output_is_tsv(self):
+        mock_client = self._mock_compat_client()
+        with patch("ga_cli.commands.reports.get_data_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                ["reports", "check-compatibility", "-p", "111", "-m", "sessions",
+                 "-o", "compact"],
+            )
+        assert result.exit_code == 0
+        lines = result.stdout.splitlines()
+        assert lines[0] == "type\tapiName\tuiName\tcompatibility"
+        assert "dimension\tcity\tCity\tINCOMPATIBLE" in lines
 
     def test_all_compatible_table(self):
         all_compat = {
@@ -1339,6 +1369,216 @@ class TestBuildMetadataDisplay:
         assert "Data Notes" not in _strip_ansi(result.output)
 
 
+TWO_RANGE_AGG_RESPONSE = {
+    "dimensionHeaders": [{"name": "country"}, {"name": "dateRange"}],
+    "metricHeaders": [{"name": "sessions"}],
+    "rows": [
+        {
+            "dimensionValues": [{"value": "Switzerland"}, {"value": "current"}],
+            "metricValues": [{"value": "500"}],
+        },
+        {
+            "dimensionValues": [{"value": "Switzerland"}, {"value": "previous"}],
+            "metricValues": [{"value": "450"}],
+        },
+    ],
+    # Shape of a live response: aggregation rows carry the range name.
+    "totals": [
+        {
+            "dimensionValues": [{"value": "RESERVED_TOTAL"}, {"value": "previous"}],
+            "metricValues": [{"value": "700"}],
+        },
+        {
+            "dimensionValues": [{"value": "RESERVED_TOTAL"}, {"value": "current"}],
+            "metricValues": [{"value": "800"}],
+        },
+    ],
+    "rowCount": 523,
+    "propertyQuota": {"tokensPerDay": {"consumed": 12, "remaining": 199988}},
+}
+
+
+class TestReportsJsonEnvelopeCompleteness:
+    def _run_json(self, args, response):
+        mock_client = _mock_data_client(report_response=response)
+        with patch("ga_cli.commands.reports.get_data_client", return_value=mock_client):
+            return runner.invoke(app, ["reports", "run", "-p", "111", *args, "-o", "json"])
+
+    def test_aggregations_inside_single_document(self):
+        result = self._run_json(
+            ["-d", "country", "--metric-aggregation", "TOTAL"], TWO_RANGE_AGG_RESPONSE
+        )
+        assert result.exit_code == 0
+        parsed = json.loads(result.stdout)  # one document, not two
+        assert "totals" in parsed
+
+    def test_aggregations_labelled_by_date_range(self):
+        result = self._run_json(
+            ["-d", "country", "--metric-aggregation", "TOTAL"], TWO_RANGE_AGG_RESPONSE
+        )
+        assert json.loads(result.stdout)["totals"] == [
+            {"dateRange": "previous", "sessions": "700"},
+            {"dateRange": "current", "sessions": "800"},
+        ]
+
+    def test_row_count_reports_untruncated_total(self):
+        result = self._run_json([], TWO_RANGE_AGG_RESPONSE)
+        assert json.loads(result.stdout)["rowCount"] == 523
+
+    def test_property_quota_in_envelope(self):
+        result = self._run_json(["--return-property-quota"], TWO_RANGE_AGG_RESPONSE)
+        parsed = json.loads(result.stdout)
+        assert parsed["propertyQuota"]["tokensPerDay"]["consumed"] == 12
+
+    def test_table_aggregations_show_range_names(self):
+        mock_client = _mock_data_client(report_response=TWO_RANGE_AGG_RESPONSE)
+        with patch("ga_cli.commands.reports.get_data_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                ["reports", "run", "-p", "111", "-d", "country",
+                 "--metric-aggregation", "TOTAL", "-o", "table"],
+            )
+        assert result.exit_code == 0
+        assert "previous" in result.stdout and "current" in result.stdout
+
+    def test_realtime_aggregations_inside_envelope(self):
+        mock_client = _mock_data_client(realtime_response=TWO_RANGE_AGG_RESPONSE)
+        with patch("ga_cli.commands.reports.get_data_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                ["reports", "realtime", "-p", "111", "--metric-aggregation", "TOTAL",
+                 "-o", "json"],
+            )
+        assert result.exit_code == 0
+        assert len(json.loads(result.stdout)["totals"]) == 2
+
+
+class TestPipedOutputDefault:
+    def test_piped_run_is_json_despite_configured_table(self, monkeypatch):
+        """Configured output_format applies to terminals only; pipes get JSON."""
+        from ga_cli.config.store import set_config_value
+
+        set_config_value("output_format", "table")
+        monkeypatch.setattr(importlib.import_module("ga_cli.utils.output"), "is_tty", lambda: False)
+        mock_client = _mock_data_client()
+
+        with patch("ga_cli.commands.reports.get_data_client", return_value=mock_client):
+            result = runner.invoke(app, ["reports", "run", "-p", "111"])
+
+        assert result.exit_code == 0
+        assert json.loads(result.stdout)["rowCount"] == 2
+
+
+class TestRunDefaultEndDate:
+    def _date_range(self, *args):
+        mock_client = _mock_data_client()
+        with patch("ga_cli.commands.reports.get_data_client", return_value=mock_client):
+            result = runner.invoke(app, ["reports", "run", "-p", "111", *args])
+        assert result.exit_code == 0
+        return mock_client.properties.return_value.runReport.call_args[1]["body"]["dateRanges"][0]
+
+    def test_default_ends_yesterday(self):
+        assert self._date_range() == {"startDate": "7daysAgo", "endDate": "yesterday"}
+
+    @pytest.mark.parametrize("start", ["today", "Today", "0daysAgo", date.today().isoformat()])
+    def test_range_starting_today_ends_today(self, start):
+        """A start after the default end would be rejected by the API."""
+        assert self._date_range("--start-date", start)["endDate"] == "today"
+
+    def test_start_after_local_today_ends_today(self):
+        """The property's timezone can already be a day ahead."""
+        tomorrow = date.fromordinal(date.today().toordinal() + 1).isoformat()
+        assert self._date_range("--start-date", tomorrow)["endDate"] == "today"
+
+    def test_start_before_today_ends_yesterday(self):
+        two_days_ago = date.fromordinal(date.today().toordinal() - 2).isoformat()
+        assert self._date_range("--start-date", two_days_ago)["endDate"] == "yesterday"
+
+    def test_help_shows_end_date_default(self):
+        result = runner.invoke(app, ["reports", "run", "--help"])
+        assert "default: yesterday" in " ".join(_strip_ansi(result.stdout).split())
+
+    def test_explicit_end_date_kept(self):
+        assert self._date_range("--start-date", "30daysAgo", "--end-date", "today") == {
+            "startDate": "30daysAgo",
+            "endDate": "today",
+        }
+
+
+class TestReportsCompactOutput:
+    def _invoke(self, command, response, *args):
+        mock_client = _mock_data_client(report_response=response, realtime_response=response)
+        with patch("ga_cli.commands.reports.get_data_client", return_value=mock_client):
+            return runner.invoke(app, ["reports", command, "-p", "111", *args, "-o", "compact"])
+
+    def test_run_rows_are_tsv_with_header(self):
+        result = self._invoke("run", SAMPLE_REPORT_RESPONSE)
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            "date\tsessions\ttotalUsers",
+            "20240101\t150\t100",
+            "20240102\t200\t120",
+        ]
+
+    @pytest.mark.parametrize("command", ["run", "realtime"])
+    def test_aggregations_go_to_stderr(self, command):
+        """A TOTAL line on stdout would read as one more data row."""
+        result = self._invoke(
+            command, TWO_RANGE_AGG_RESPONSE, "-d", "country", "--metric-aggregation", "TOTAL"
+        )
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            "country\tdateRange\tsessions",
+            "Switzerland\tcurrent\t500",
+            "Switzerland\tprevious\t450",
+        ]
+        assert "TOTAL\tprevious\t700" in result.stderr
+        assert "TOTAL\tcurrent\t800" in result.stderr
+
+    def test_funnel_rows_are_tsv(self, tmp_path):
+        config = tmp_path / "funnel.json"
+        config.write_text(json.dumps({"funnel": {"steps": [{"name": "First visit"}]}}))
+        mock_client = MagicMock()
+        mock_client.properties.return_value.runFunnelReport.return_value.execute.return_value = {
+            "funnelTable": {
+                "dimensionHeaders": [{"name": "funnelStepName"}],
+                "metricHeaders": [{"name": "activeUsers"}],
+                "rows": [
+                    {
+                        "dimensionValues": [{"value": "First visit"}],
+                        "metricValues": [{"value": "1000"}],
+                    }
+                ],
+            }
+        }
+        with patch("ga_cli.commands.reports.get_data_alpha_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["reports", "funnel", "-p", "111", "-c", str(config), "-o", "compact"]
+            )
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == ["funnelStepName\tactiveUsers", "First visit\t1000"]
+
+
+class TestRealtimeTableExtras:
+    def test_table_shows_aggregations(self):
+        mock_client = _mock_data_client(realtime_response=TWO_RANGE_AGG_RESPONSE)
+        with patch("ga_cli.commands.reports.get_data_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["reports", "realtime", "-p", "111", "--metric-aggregation", "TOTAL"]
+            )
+        assert result.exit_code == 0
+        assert "Aggregations" in result.stdout
+
+    def test_help_examples_use_realtime_fields(self):
+        """sessions, date and pagePath don't exist in the Realtime API."""
+        result = runner.invoke(app, ["reports", "realtime", "--help"])
+        out = _strip_ansi(result.stdout)
+        assert "activeUsers>10" in out
+        assert "29,0" in out
+        assert "sessions" not in out
+        assert "pagePath" not in out
+
+
 class TestReportsJsonEnvelope:
     def test_run_json_is_rows_metadata_envelope(self):
         mock_client = _mock_data_client()
@@ -1352,7 +1592,7 @@ class TestReportsJsonEnvelope:
 
         assert result.exit_code == 0
         parsed = json.loads(result.stdout)
-        assert sorted(parsed) == ["metadata", "rows"]
+        assert sorted(parsed) == ["metadata", "rowCount", "rows"]
         assert parsed["metadata"] == {}
         assert parsed["rows"] == [
             {"date": "20240101", "sessions": "150", "totalUsers": "100"},
@@ -1399,7 +1639,7 @@ class TestReportsJsonEnvelope:
 
         assert result.exit_code == 0
         parsed = json.loads(result.stdout)
-        assert sorted(parsed) == ["metadata", "rows"]
+        assert sorted(parsed) == ["metadata", "rowCount", "rows"]
         assert parsed["rows"][0]["sessions"] == "150"
 
 
