@@ -3,7 +3,6 @@
 Uses the Analytics Data API v1beta.
 """
 
-import contextlib
 import json
 import sys
 import time
@@ -39,6 +38,7 @@ from ..utils.filters import (
     parse_order_bys,
     validate_metric_aggregations,
 )
+from ..utils.output import output_tsv
 
 reports_app = typer.Typer(
     name="reports", help="Run GA4 reports", no_args_is_help=True
@@ -275,8 +275,7 @@ def _display_aggregations(result: dict, effective_format: str) -> None:
     if effective_format == "compact":
         # stderr, like Data Notes: stdout holds only data rows, so a TOTAL
         # line can't be read as one more row.
-        with contextlib.redirect_stdout(sys.stderr):
-            output(agg_rows, effective_format, columns=columns, tsv=True)
+        output_tsv(agg_rows, columns, file=sys.stderr)
         return
     console.print("\n[bold]Aggregations[/bold]")
     output(agg_rows, effective_format, columns=columns, headers=columns)
@@ -311,9 +310,20 @@ def _render_flat_report(result: dict, effective_format: str) -> None:
 
 def _default_end_date(start_date: str) -> str:
     """`yesterday`, which leaves out today's incomplete data, unless the range
-    starts today: the API rejects a start date after the end date."""
+    starts today or later: the API rejects a start date after the end date.
+
+    GA resolves today/yesterday in the property's timezone, which can be a day
+    ahead of the local date, so any YYYY-MM-DD start on or after the local
+    today ends `today`.
+    """
     start = start_date.strip().lower()
-    return "today" if start in ("today", "0daysago", date.today().isoformat()) else "yesterday"
+    if start in ("today", "0daysago"):
+        return "today"
+    try:
+        starts_today = date.fromisoformat(start) >= date.today()
+    except ValueError:  # NdaysAgo, yesterday
+        return "yesterday"
+    return "today" if starts_today else "yesterday"
 
 
 def _display_quota(result: dict) -> None:
@@ -458,8 +468,8 @@ def run_cmd(
     start_date: str = typer.Option("7daysAgo", "--start-date", help="Start date"),
     end_date: Optional[str] = typer.Option(
         None, "--end-date",
-        help="End date [default: yesterday, which leaves out today's incomplete data; "
-        "today when --start-date is today]",
+        help="End date (default: yesterday, which leaves out today's incomplete data; "
+        "today when --start-date is today)",
     ),
     limit: int = typer.Option(
         100, "--limit", help="Max rows to return (JSON rowCount gives the untruncated total)"
@@ -670,11 +680,12 @@ def pivot_cmd(
     ),
     start_date: str = typer.Option("28daysAgo", "--start-date", help="Start date"),
     end_date: Optional[str] = typer.Option(
-        None, "--end-date", help="End date [default: yesterday; today when --start-date is today]"
+        None, "--end-date", help="End date (default: yesterday; today when --start-date is today)"
     ),
     limit: int = typer.Option(
         100, "--limit", "-l", min=1,
-        help="Max rows (combinations of the non-pivot dimensions)",
+        help="Max rows (combinations of the non-pivot dimensions; unused when "
+        "--dimensions holds only the pivot field)",
     ),
     pivot_limit: int = typer.Option(
         5, "--pivot-limit", min=1,
@@ -702,9 +713,11 @@ def pivot_cmd(
 
         row_dims = [d for d in dim_list if d != pivot_field_clean]
 
-        if row_dims and pivot_limit * limit > _MAX_PIVOT_LIMIT_PRODUCT:
+        limit_product = pivot_limit * limit if row_dims else pivot_limit
+        if limit_product > _MAX_PIVOT_LIMIT_PRODUCT:
             raise typer.BadParameter(
-                f"--pivot-limit × --limit is {pivot_limit * limit:,}; the API allows at most "
+                f"{'--pivot-limit × --limit' if row_dims else '--pivot-limit'} is "
+                f"{limit_product:,}; the API allows at most "
                 f"{_MAX_PIVOT_LIMIT_PRODUCT:,} (the product of all pivot limits)."
             )
 
@@ -776,27 +789,21 @@ def _transform_pivot_rows(
             columns.append(col_key)
             headers.append(f"{pv} / {m}")
 
-    rows = []
+    # The API returns one row per combination of all dimensions, with one
+    # value per metric. Merge rows sharing the non-pivot dimension values
+    # and file each metric under its pivot value's column.
+    pivot_idx = dim_headers.index(pivot_field) if pivot_field in dim_headers else None
+    grouped: dict[tuple, dict] = {}
     for row in result.get("rows", []):
-        entry = {}
-        # Fill row dimensions (skip the pivot field dimension)
-        dim_vals = row.get("dimensionValues", [])
-        for i, dname in enumerate(dim_headers):
-            if dname != pivot_field and i < len(dim_vals):
-                entry[dname] = dim_vals[i].get("value", "")
-
-        # Fill metric values per pivot group
+        dim_vals = [v.get("value", "") for v in row.get("dimensionValues", [])]
+        key = tuple(v for i, v in enumerate(dim_vals) if i != pivot_idx)
+        entry = grouped.setdefault(key, dict(zip(row_dims, key)))
+        pv = dim_vals[pivot_idx] if pivot_idx is not None and pivot_idx < len(dim_vals) else ""
         met_vals = row.get("metricValues", [])
-        idx = 0
-        for pv in pivot_values:
-            for m in met_headers:
-                col_key = f"{pv}_{m}"
-                entry[col_key] = met_vals[idx].get("value", "") if idx < len(met_vals) else ""
-                idx += 1
+        for j, m in enumerate(met_headers):
+            entry[f"{pv}_{m}"] = met_vals[j].get("value", "") if j < len(met_vals) else ""
 
-        rows.append(entry)
-
-    return rows, columns, headers
+    return list(grouped.values()), columns, headers
 
 
 @reports_app.command("check-compatibility")

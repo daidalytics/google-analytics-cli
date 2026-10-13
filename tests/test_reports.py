@@ -1485,6 +1485,19 @@ class TestRunDefaultEndDate:
         """A start after the default end would be rejected by the API."""
         assert self._date_range("--start-date", start)["endDate"] == "today"
 
+    def test_start_after_local_today_ends_today(self):
+        """The property's timezone can already be a day ahead."""
+        tomorrow = date.fromordinal(date.today().toordinal() + 1).isoformat()
+        assert self._date_range("--start-date", tomorrow)["endDate"] == "today"
+
+    def test_start_before_today_ends_yesterday(self):
+        two_days_ago = date.fromordinal(date.today().toordinal() - 2).isoformat()
+        assert self._date_range("--start-date", two_days_ago)["endDate"] == "yesterday"
+
+    def test_help_shows_end_date_default(self):
+        result = runner.invoke(app, ["reports", "run", "--help"])
+        assert "default: yesterday" in " ".join(_strip_ansi(result.stdout).split())
+
     def test_explicit_end_date_kept(self):
         assert self._date_range("--start-date", "30daysAgo", "--end-date", "today") == {
             "startDate": "30daysAgo",

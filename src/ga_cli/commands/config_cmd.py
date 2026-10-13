@@ -39,16 +39,17 @@ def setup():
         "Default Property ID (leave empty to skip):"
     ).ask()
 
+    # "auto" leaves output_format unset: table in a terminal, JSON when piped
     output_format = questionary.select(
         "Default output format:",
-        choices=["table", "json", "compact"],
-        default="table",
+        choices=["auto", "table", "json", "compact"],
+        default="auto",
     ).ask()
 
     config = UserConfig(
         default_account_id=account_id or None,
         default_property_id=property_id or None,
-        output_format=output_format or "table",
+        output_format=None if output_format in (None, "auto") else output_format,
     )
     save_config(config)
     success("Configuration saved.")

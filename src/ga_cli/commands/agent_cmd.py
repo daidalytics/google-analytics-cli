@@ -40,10 +40,10 @@ Common per-command flags go **after** the command: `ga accounts list -o json`
 | `-o json` | Machine-readable output (default when stdout is piped) |
 | `-o table` | Rich table (default in a terminal) |
 | `-o compact` | Minimal output: `name<TAB>displayName` for resources, TSV with a header line for report rows |
-
-Without `-o`, the configured `output_format` applies; when piped, a configured `table` is ignored.
 | `--yes` / `-y` | Skip confirmation prompts (destructive commands) |
 | `--dry-run` | Preview mutative requests without executing (create/update/delete commands) |
+
+Without `-o`, the configured `output_format` applies; when piped, a configured `table` is ignored.
 
 ## Resource Hierarchy
 ```

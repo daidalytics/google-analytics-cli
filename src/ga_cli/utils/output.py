@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any, Optional
+from typing import Any, Optional, TextIO
 
 from rich.console import Console
 from rich.table import Table
@@ -113,7 +113,7 @@ def output(
 
     elif effective_fmt == "compact":
         if tsv and isinstance(data, list):
-            _output_tsv(data, columns)
+            output_tsv(data, columns)
         elif isinstance(data, list):
             for item in data:
                 if isinstance(item, dict):
@@ -172,7 +172,9 @@ _TSV_ESCAPES.update(
 )
 
 
-def _output_tsv(data: list[dict], columns: Optional[list[str]] = None) -> None:
+def output_tsv(
+    data: list[dict], columns: Optional[list[str]] = None, file: Optional[TextIO] = None
+) -> None:
     """Print rows as TSV: a header line of column keys, then one line per row.
 
     Backslash, tab, CR and LF inside values are escaped as \\\\, \\t, \\r, \\n
@@ -183,7 +185,8 @@ def _output_tsv(data: list[dict], columns: Optional[list[str]] = None) -> None:
     if not cols:
         return
     for values in [cols, *([item.get(c) for c in cols] for item in data)]:
-        print("\t".join("" if v is None else str(v).translate(_TSV_ESCAPES) for v in values))
+        line = "\t".join("" if v is None else str(v).translate(_TSV_ESCAPES) for v in values)
+        print(line, file=file)
 
 
 def _output_object(data: dict) -> None:
