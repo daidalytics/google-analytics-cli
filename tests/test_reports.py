@@ -253,6 +253,21 @@ class TestReportsRun:
         assert result.exit_code == 0
         assert "2 total rows" in result.output
 
+    def test_run_row_count_per_date_range_in_table_mode(self):
+        """With 2+ date ranges rowCount counts dimension combinations, each
+        returned once per range, so it isn't a total of the rows shown."""
+        mock_client = _mock_data_client(report_response=TWO_RANGE_AGG_RESPONSE)
+
+        with patch(
+            "ga_cli.commands.reports.get_data_client", return_value=mock_client
+        ):
+            result = runner.invoke(
+                app, ["reports", "run", "-p", "111", "-d", "country"]
+            )
+
+        assert result.exit_code == 0
+        assert "523 total rows per date range" in result.output
+
 
 class TestReportsRealtime:
     def test_realtime_single_shot(self):

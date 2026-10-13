@@ -247,7 +247,8 @@ the end date used to be `today`.)*
 >
 > **Breaking change (post-0.4.0):** `ga reports realtime -o json` now returns the
 > same envelope. Every envelope also carries `rowCount` (total rows before
-> `--limit`), plus `totals` / `minimums` / `maximums` when `--metric-aggregation`
+> `--limit`; with several date ranges, total dimension combinations, each of
+> which appears once per range), plus `totals` / `minimums` / `maximums` when `--metric-aggregation`
 > is used (each row labelled with `dateRange` when several date ranges are
 > requested), and `propertyQuota` with `--return-property-quota`. Previously
 > aggregations were printed as a second JSON document. The Realtime API returns
