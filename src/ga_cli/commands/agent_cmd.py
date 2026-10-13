@@ -50,6 +50,34 @@ Without `-o`, the configured `output_format` applies; when piped, a configured `
 Account → Property → Data Stream (Web / Android / iOS)
 ```
 
+## Allowlist
+The user can pin `ga` to a set of accounts and/or properties (`ga config set allowed_account_ids …`
+in a terminal, or the `GA_CLI_ALLOWED_ACCOUNTS` / `GA_CLI_ALLOWED_PROPERTIES` env vars).
+When it is on (`ga auth status -o json | jq .allowlist.enabled`):
+- Any request for an account or property that isn't allowed is blocked **before it is sent**:
+  exit code 5, category `allowlist_error`, with the blocked `resource` in the JSON error
+- `accounts list`, `account-summaries list` and `properties list` only show allowed items
+- An allowed property does not allow account-level commands (`accounts get`, account access
+  bindings / access reports) on its parent account
+- Run `ga allowlist show -o json | jq .effective` to see which properties you may use
+- **You can't change the allowlist**: `ga config set/unset allowed_*`, and `ga config reset` while
+  an allowlist is set, refuse to run without a terminal; env vars can only narrow the config file. On exit 5, don't
+  retry with other flags or run `ga auth login`; tell the user which resource was blocked and ask
+
+## Errors and exit codes
+With JSON output (`-o json` or piped), errors go to stderr as
+`{"error": true, "exit_code": N, "category": "…", "message": "…"}`.
+| Exit | Category | Meaning |
+|------|----------|---------|
+| 1 | `client_error` | Bad input, missing flags, validation failure |
+| 2 | `auth_error` | Not authenticated, token expired, permission denied (401/403) |
+| 3 | `api_error` | Google returned another 4xx or a 5xx |
+| 4 | `network_error` | Timeout, DNS failure, unreachable |
+| 5 | `allowlist_error` | Resource not on the allowlist, or a malformed allowlist (`resource` names it) |
+
+Branch on `category`, not only on the exit code: argument-parsing errors (unknown flag, bad option
+value) also exit 2, with a usage message instead of a JSON payload.
+
 ## Command Reference
 
 ### Auth
@@ -67,7 +95,13 @@ ga config unset KEY
 ga config setup          # Interactive wizard
 ga config reset
 ```
-Keys: `default_account_id`, `default_property_id`, `output_format` (`json`, `table`, `compact`)
+Keys: `default_account_id`, `default_property_id`, `output_format` (`json`, `table`, `compact`),
+`allowed_account_ids`, `allowed_property_ids` (allowlist: interactive only, see "Allowlist" below)
+
+### Allowlist
+```bash
+ga allowlist show [-o json]   # Active allowlist, its sources, allowed properties
+```
 
 ### Accounts
 ```bash
@@ -316,6 +350,8 @@ ga completions bash|zsh|fish
 | `GA_CLI_SERVICE_ACCOUNT` | Service account key path (non-interactive auth) |
 | `GOOGLE_APPLICATION_CREDENTIALS` | GCP credential path (fallback) |
 | `GA_CLI_CONFIG_DIR` | Override config directory |
+| `GA_CLI_ALLOWED_ACCOUNTS` | Comma-separated allowlisted account IDs (narrows the config allowlist) |
+| `GA_CLI_ALLOWED_PROPERTIES` | Comma-separated allowlisted property IDs (narrows the config allowlist) |
 | `NO_COLOR` | Disable colored output |
 
 ## Parsing Output
@@ -380,6 +416,8 @@ ga data-streams list -o json | jq -r '.[].name' | grep -o '[0-9]*$'
 - **Use `check-compatibility` before complex reports** — avoids API errors from incompatible metric/dimension combos
 - **Use `metadata` to discover available metrics/dimensions** — `ga reports metadata -p ID --search revenue -o json`
 - **Parallelize independent operations** — run creates/deletes concurrently with `&` and `wait`
+- **Respect the allowlist** — on exit 5 / `allowlist_error`, stop and ask the user; check
+  `ga allowlist show` before picking a property
 - **Avoid interactive commands** — skip `ga config setup` and `ga reports build`; use explicit flags instead
 - **`ga reports chat` is alpha and gated** — the endpoint returns 403 for accounts without
   access; it is token-metered, so prefer `ga reports run` for deterministic, quota-cheap data
@@ -389,6 +427,7 @@ ga data-streams list -o json | jq -r '.[].name' | grep -o '[0-9]*$'
 | Error | Cause | Fix |
 |-------|-------|-----|
 | "Not authenticated" | No valid credentials | `ga auth login` |
+| "… is not on the allowlist" (exit 5) | The user restricted `ga` to other accounts/properties | `ga allowlist show`; ask the user, don't work around it |
 | "Missing required option: property_id" | No `--property-id` and no default | `ga config set default_property_id ID` |
 | "HttpError 403: …permission" | Account lacks GA4 access | Verify account/property IDs and permissions |
 | "--url is required for WEB_DATA_STREAM" | Missing URL for web stream | Add `--url "https://…"` |
