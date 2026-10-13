@@ -124,7 +124,7 @@ class TestResetCommand:
 
         config = load_config()
         assert config.default_account_id is None
-        assert config.output_format == "table"
+        assert config.output_format is None
 
     def test_reset_cancelled(self):
         save_config(UserConfig(default_account_id="12345"))

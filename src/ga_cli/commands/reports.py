@@ -3,9 +3,11 @@
 Uses the Analytics Data API v1beta.
 """
 
+import contextlib
 import json
 import sys
 import time
+from datetime import date
 from pathlib import Path
 from typing import NoReturn, Optional
 
@@ -51,7 +53,7 @@ _FALLBACK_METRICS = [
     "eventCount",
     "engagementRate",
     "averageSessionDuration",
-    "conversions",
+    "keyEvents",
     "totalRevenue",
 ]
 
@@ -211,28 +213,107 @@ def _build_report_body(
     return body
 
 
-def _display_aggregations(result: dict, effective_format: str) -> None:
-    """Render totals/minimums/maximums as a summary table below the main data."""
+_AGGREGATION_KEYS = ("totals", "minimums", "maximums")
+
+
+def _aggregation_rows(result: dict) -> dict[str, list[dict]]:
+    """Flatten totals/minimums/maximums into {key: [{dateRange?, metric: value}]}.
+
+    With two or more date ranges the API adds a `dateRange` dimension and each
+    aggregation row carries that range's name in its dimensionValues.
+    """
+    dim_headers = [h.get("name", "") for h in result.get("dimensionHeaders", [])]
     met_headers = [h.get("name", "") for h in result.get("metricHeaders", [])]
-    agg_rows = []
-    for agg_type in ("totals", "minimums", "maximums"):
-        for i, row in enumerate(result.get(agg_type, [])):
-            entry: dict = {"aggregation": agg_type.rstrip("s").upper()}
-            if len(result.get("dateRanges", result.get("dateRanges", []))) > 1:
-                entry["dateRange"] = str(i)
+    range_idx = dim_headers.index("dateRange") if "dateRange" in dim_headers else None
+
+    aggregations: dict[str, list[dict]] = {}
+    for agg_type in _AGGREGATION_KEYS:
+        entries = []
+        for row in result.get(agg_type, []):
+            entry: dict = {}
+            dims = row.get("dimensionValues", [])
+            if range_idx is not None and range_idx < len(dims):
+                entry["dateRange"] = dims[range_idx].get("value", "")
             vals = row.get("metricValues", [])
             for j, name in enumerate(met_headers):
                 entry[name] = vals[j].get("value", "") if j < len(vals) else ""
-            agg_rows.append(entry)
+            entries.append(entry)
+        if entries:
+            aggregations[agg_type] = entries
+    return aggregations
+
+
+def _report_envelope(result: dict, rows: list[dict]) -> dict:
+    """JSON output for flat reports: rows plus everything describing the report.
+
+    Aggregations and quota live inside the envelope so stdout stays a single
+    JSON document.
+    """
+    envelope: dict = {
+        "rows": rows,
+        "metadata": result.get("metadata", {}),
+        "rowCount": result.get("rowCount", len(rows)),
+    }
+    envelope.update(_aggregation_rows(result))
+    if result.get("propertyQuota"):
+        envelope["propertyQuota"] = result["propertyQuota"]
+    return envelope
+
+
+def _display_aggregations(result: dict, effective_format: str) -> None:
+    """Render totals/minimums/maximums as a summary table below the main data."""
+    agg_rows = [
+        {"aggregation": agg_type.rstrip("s").upper(), **entry}
+        for agg_type, entries in _aggregation_rows(result).items()
+        for entry in entries
+    ]
 
     if not agg_rows:
         return
 
     columns = list(agg_rows[0].keys())
-    headers = list(agg_rows[0].keys())
-    if effective_format == "table":
-        console.print("\n[bold]Aggregations[/bold]")
-    output(agg_rows, effective_format, columns=columns, headers=headers)
+    if effective_format == "compact":
+        # stderr, like Data Notes: stdout holds only data rows, so a TOTAL
+        # line can't be read as one more row.
+        with contextlib.redirect_stdout(sys.stderr):
+            output(agg_rows, effective_format, columns=columns, tsv=True)
+        return
+    console.print("\n[bold]Aggregations[/bold]")
+    output(agg_rows, effective_format, columns=columns, headers=columns)
+
+
+def _render_flat_report(result: dict, effective_format: str) -> None:
+    """Print a runReport/runRealtimeReport response in the chosen format.
+
+    JSON gets a single envelope. Table and compact print the rows, then the
+    row count, aggregations, quota and data notes; each of those is a no-op
+    when the response doesn't carry it.
+    """
+    rows, columns, headers = _transform_report_rows(result)
+
+    if effective_format == "json":
+        # Envelope rather than a bare rows array: metadata (sampling,
+        # thresholding, truncation) describes the whole report and must
+        # survive into machine-readable output.
+        output(_report_envelope(result, rows), effective_format)
+        return
+
+    output(rows, effective_format, columns=columns, headers=headers, tsv=True)
+
+    row_count = result.get("rowCount", len(rows))
+    if effective_format == "table" and row_count > 0:
+        console.print(f"\n[dim]{row_count} total rows[/dim]")
+
+    _display_aggregations(result, effective_format)
+    _display_quota(result)
+    _display_response_metadata(result.get("metadata"), effective_format)
+
+
+def _default_end_date(start_date: str) -> str:
+    """`yesterday`, which leaves out today's incomplete data, unless the range
+    starts today: the API rejects a start date after the end date."""
+    start = start_date.strip().lower()
+    return "today" if start in ("today", "0daysago", date.today().isoformat()) else "yesterday"
 
 
 def _display_quota(result: dict) -> None:
@@ -329,6 +410,40 @@ def _display_response_metadata(metadata: dict | None, effective_format: str) -> 
             warn(line)
 
 
+_DIM_FILTER_OPS = (
+    "Dimension filter (repeatable; repeated flags are ANDed). "
+    "Operators: == != =~ > >= < <= contains begins_with ends_with in between. "
+    "String matches ignore case; =~ must match the whole value. "
+)
+_METRIC_FILTER_OPS = (
+    "Metric filter (repeatable; repeated flags are ANDed). Operators: == != > >= < <= between. "
+)
+_ORDER_BY_FORMAT = (
+    "Sort expression (repeatable): field[:asc|desc[:alpha|ialpha|numeric]], default desc. "
+    "The field must be one of the requested metrics/dimensions; the order type applies "
+    "to dimensions only. "
+)
+_FILTER_JSON_HELP = (
+    "Raw JSON FilterExpression (applied as the dimension filter), or "
+    '{"dimensionFilter": …, "metricFilter": …}; inline or @file.json'
+)
+
+# Examples differ per command: the Realtime API has its own, smaller field set
+# (no sessions, date or pagePath).
+_DIM_FILTER_HELP = (
+    _DIM_FILTER_OPS
+    + "E.g. 'countryId==US', 'pagePath=~/blog/.*', 'country in Germany,France'"
+)
+_METRIC_FILTER_HELP = _METRIC_FILTER_OPS + "E.g. 'sessions>100', 'sessions between 10,50'"
+_ORDER_BY_HELP = _ORDER_BY_FORMAT + "E.g. 'sessions', 'date:asc', 'keyEvents:sign_up:desc'"
+_RT_DIM_FILTER_HELP = (
+    _DIM_FILTER_OPS
+    + "E.g. 'countryId==US', 'unifiedScreenName contains blog', 'deviceCategory in mobile,tablet'"
+)
+_RT_METRIC_FILTER_HELP = _METRIC_FILTER_OPS + "E.g. 'activeUsers>10', 'eventCount between 10,50'"
+_RT_ORDER_BY_HELP = _ORDER_BY_FORMAT + "E.g. 'activeUsers', 'country:asc'"
+
+
 @reports_app.command("run")
 def run_cmd(
     property_id: Optional[str] = typer.Option(
@@ -341,26 +456,35 @@ def run_cmd(
         None, "--dimensions", "-d", help="Comma-separated dimensions"
     ),
     start_date: str = typer.Option("7daysAgo", "--start-date", help="Start date"),
-    end_date: str = typer.Option("today", "--end-date", help="End date"),
-    limit: int = typer.Option(100, "--limit", help="Max rows to return"),
+    end_date: Optional[str] = typer.Option(
+        None, "--end-date",
+        help="End date [default: yesterday, which leaves out today's incomplete data; "
+        "today when --start-date is today]",
+    ),
+    limit: int = typer.Option(
+        100, "--limit", help="Max rows to return (JSON rowCount gives the untruncated total)"
+    ),
     dim_filter: Optional[list[str]] = typer.Option(
-        None, "--dim-filter", help="Dimension filter (repeatable). E.g. 'country==US'"
+        None, "--dim-filter", help=_DIM_FILTER_HELP
     ),
     metric_filter: Optional[list[str]] = typer.Option(
-        None, "--metric-filter", help="Metric filter (repeatable). E.g. 'sessions>100'"
+        None, "--metric-filter", help=_METRIC_FILTER_HELP
     ),
     filter_json: Optional[str] = typer.Option(
-        None, "--filter-json", help="Raw JSON FilterExpression or @file.json"
+        None, "--filter-json", help=_FILTER_JSON_HELP
     ),
     order_by: Optional[list[str]] = typer.Option(
-        None, "--order-by", help="Sort expression (repeatable). E.g. 'sessions:desc'"
+        None, "--order-by", help=_ORDER_BY_HELP
     ),
     offset: Optional[int] = typer.Option(
         None, "--offset", help="Row offset for pagination"
     ),
     date_ranges: Optional[list[str]] = typer.Option(
         None, "--date-range",
-        help="Date range as start,end (repeatable, overrides --start-date/--end-date)",
+        help="Date range as start,end[,name] (repeatable, overrides --start-date/--end-date). "
+        "With two or more ranges each row gets a dateRange field (the name, or "
+        "date_range_N). E.g. --date-range 7daysAgo,yesterday,current "
+        "--date-range 14daysAgo,8daysAgo,previous",
     ),
     metric_aggregations: Optional[list[str]] = typer.Option(
         None, "--metric-aggregation", help="Request aggregation rows: TOTAL, MINIMUM, MAXIMUM"
@@ -390,7 +514,7 @@ def run_cmd(
             metrics=metrics,
             dimensions=dimensions,
             start_date=start_date,
-            end_date=end_date,
+            end_date=end_date or _default_end_date(start_date),
             limit=limit,
             dim_filter=dim_filter,
             metric_filter=metric_filter,
@@ -409,30 +533,7 @@ def run_cmd(
             body=body,
         ).execute()
 
-        rows, columns, headers = _transform_report_rows(result)
-        row_count = result.get("rowCount", len(rows))
-
-        if effective_format == "json":
-            # Envelope rather than a bare rows array: metadata (sampling,
-            # thresholding, truncation) describes the whole report and must
-            # survive into machine-readable output.
-            output(
-                {"rows": rows, "metadata": result.get("metadata", {})},
-                effective_format,
-            )
-        else:
-            output(rows, effective_format, columns=columns, headers=headers)
-
-        if effective_format == "table" and row_count > 0:
-            console.print(f"\n[dim]{row_count} total rows[/dim]")
-
-        if metric_aggregations:
-            _display_aggregations(result, effective_format)
-
-        if return_property_quota:
-            _display_quota(result)
-
-        _display_response_metadata(result.get("metadata"), effective_format)
+        _render_flat_report(result, effective_format)
 
     except typer.BadParameter:
         raise
@@ -455,16 +556,16 @@ def realtime_cmd(
         None, "--interval", help="Refresh interval in seconds (enables polling)"
     ),
     dim_filter: Optional[list[str]] = typer.Option(
-        None, "--dim-filter", help="Dimension filter (repeatable). E.g. 'country==US'"
+        None, "--dim-filter", help=_RT_DIM_FILTER_HELP
     ),
     metric_filter: Optional[list[str]] = typer.Option(
-        None, "--metric-filter", help="Metric filter (repeatable). E.g. 'activeUsers>10'"
+        None, "--metric-filter", help=_RT_METRIC_FILTER_HELP
     ),
     filter_json: Optional[str] = typer.Option(
-        None, "--filter-json", help="Raw JSON FilterExpression or @file.json"
+        None, "--filter-json", help=_FILTER_JSON_HELP
     ),
     order_by: Optional[list[str]] = typer.Option(
-        None, "--order-by", help="Sort expression (repeatable). E.g. 'activeUsers:desc'"
+        None, "--order-by", help=_RT_ORDER_BY_HELP
     ),
     minute_ranges: Optional[list[str]] = typer.Option(
         None, "--minute-range",
@@ -532,8 +633,7 @@ def realtime_cmd(
                     ).execute()
 
                     console.clear()
-                    rows, columns, headers = _transform_report_rows(result)
-                    output(rows, effective_format, columns=columns, headers=headers)
+                    _render_flat_report(result, effective_format)
 
                     time.sleep(interval)
             except KeyboardInterrupt:
@@ -544,19 +644,16 @@ def realtime_cmd(
                 body=body,
             ).execute()
 
-            rows, columns, headers = _transform_report_rows(result)
-            output(rows, effective_format, columns=columns, headers=headers)
-
-            if metric_aggregations:
-                _display_aggregations(result, effective_format)
-
-            if return_property_quota:
-                _display_quota(result)
+            _render_flat_report(result, effective_format)
 
     except typer.BadParameter:
         raise
     except Exception as e:
         handle_error(e)
+
+
+# RunPivotReportRequest: the product of all pivots' limits must not exceed this
+_MAX_PIVOT_LIMIT_PRODUCT = 250_000
 
 
 @reports_app.command("pivot")
@@ -572,8 +669,18 @@ def pivot_cmd(
         ..., "--pivot-field", help="Dimension to pivot on (must be in --dimensions)"
     ),
     start_date: str = typer.Option("28daysAgo", "--start-date", help="Start date"),
-    end_date: str = typer.Option("yesterday", "--end-date", help="End date"),
-    limit: int = typer.Option(100, "--limit", "-l", help="Max rows per pivot group"),
+    end_date: Optional[str] = typer.Option(
+        None, "--end-date", help="End date [default: yesterday; today when --start-date is today]"
+    ),
+    limit: int = typer.Option(
+        100, "--limit", "-l", min=1,
+        help="Max rows (combinations of the non-pivot dimensions)",
+    ),
+    pivot_limit: int = typer.Option(
+        5, "--pivot-limit", min=1,
+        help="Max --pivot-field values shown as columns (top N). "
+        f"--pivot-limit × --limit may not exceed {_MAX_PIVOT_LIMIT_PRODUCT:,}",
+    ),
     output_format: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
@@ -595,10 +702,16 @@ def pivot_cmd(
 
         row_dims = [d for d in dim_list if d != pivot_field_clean]
 
+        if row_dims and pivot_limit * limit > _MAX_PIVOT_LIMIT_PRODUCT:
+            raise typer.BadParameter(
+                f"--pivot-limit × --limit is {pivot_limit * limit:,}; the API allows at most "
+                f"{_MAX_PIVOT_LIMIT_PRODUCT:,} (the product of all pivot limits)."
+            )
+
         data = get_data_client()
 
         pivots = [
-            {"fieldNames": [pivot_field_clean], "limit": 5},
+            {"fieldNames": [pivot_field_clean], "limit": pivot_limit},
         ]
         if row_dims:
             pivots.append({"fieldNames": row_dims, "limit": limit})
@@ -606,7 +719,9 @@ def pivot_cmd(
         body = {
             "metrics": [{"name": m.strip()} for m in metrics.split(",")],
             "dimensions": [{"name": d} for d in dim_list],
-            "dateRanges": [{"startDate": start_date, "endDate": end_date}],
+            "dateRanges": [
+                {"startDate": start_date, "endDate": end_date or _default_end_date(start_date)}
+            ],
             "pivots": pivots,
         }
 
@@ -615,7 +730,7 @@ def pivot_cmd(
             body=body,
         ).execute()
 
-        if effective_format != "table":
+        if effective_format == "json":
             output(result, effective_format)
             return
 
@@ -623,7 +738,7 @@ def pivot_cmd(
         if not rows:
             info("No data returned.")
         else:
-            output(rows, effective_format, columns=columns, headers=headers)
+            output(rows, effective_format, columns=columns, headers=headers, tsv=True)
 
         _display_response_metadata(result.get("metadata"), effective_format)
 
@@ -722,11 +837,11 @@ def check_compatibility_cmd(
             body=body,
         ).execute()
 
-        if effective_format != "table":
+        if effective_format == "json":
             output(result, effective_format)
             return
 
-        # Build a flat list for table output
+        # Build a flat list for table/compact output
         rows = []
         for item in result.get("dimensionCompatibilities", []):
             dim_meta = item.get("dimensionMetadata", {})
@@ -750,6 +865,7 @@ def check_compatibility_cmd(
             effective_format,
             columns=["type", "apiName", "uiName", "compatibility"],
             headers=["Type", "API Name", "UI Name", "Compatibility"],
+            tsv=True,
         )
 
     except typer.BadParameter:
@@ -824,6 +940,7 @@ def metadata_cmd(
                 effective_format,
                 columns=["type", "apiName", "uiName", "category", "custom"],
                 headers=["Type", "API Name", "UI Name", "Category", "Custom"],
+                tsv=True,
             )
 
     except Exception as e:
@@ -1008,7 +1125,7 @@ def funnel_cmd(
             .execute()
         )
 
-        if effective_format != "table":
+        if effective_format == "json":
             output(result, effective_format)
             return
 
@@ -1016,7 +1133,7 @@ def funnel_cmd(
         if not rows:
             info("No funnel data returned.")
         else:
-            output(rows, effective_format, columns=columns, headers=headers)
+            output(rows, effective_format, columns=columns, headers=headers, tsv=True)
 
     except typer.BadParameter:
         raise
@@ -1585,7 +1702,7 @@ def build_cmd(
 
         body: dict = {
             "metrics": [{"name": m} for m in selected_metrics],
-            "dateRanges": [{"startDate": date_range, "endDate": "today"}],
+            "dateRanges": [{"startDate": date_range, "endDate": "yesterday"}],
         }
         if selected_dims:
             body["dimensions"] = [{"name": d} for d in selected_dims]
@@ -1610,27 +1727,7 @@ def build_cmd(
             body=body,
         ).execute()
 
-        rows, columns, headers = _transform_report_rows(result)
-        row_count = result.get("rowCount", len(rows))
-
-        if effective_format == "json":
-            output(
-                {"rows": rows, "metadata": result.get("metadata", {})},
-                effective_format,
-            )
-        else:
-            output(rows, effective_format, columns=columns, headers=headers)
-
-        if effective_format == "table" and row_count > 0:
-            console.print(f"\n[dim]{row_count} total rows[/dim]")
-
-        if agg_values:
-            _display_aggregations(result, effective_format)
-
-        if return_quota:
-            _display_quota(result)
-
-        _display_response_metadata(result.get("metadata"), effective_format)
+        _render_flat_report(result, effective_format)
 
     except Exception as e:
         handle_error(e)

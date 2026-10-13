@@ -22,19 +22,28 @@ ga auth login                                  # OAuth (interactive)
 ga auth login --service-account /path/key.json # Service account (non-interactive)
 ga config set default_account_id 123456789
 ga config set default_property_id 987654321
-ga config set output_format json               # Recommended for agents
+ga config set output_format json               # Optional: JSON in the terminal too (pipes get JSON by default)
 ```
 
 ## Global Flags
+Go **before** the command: `ga -q reports run …`
 | Flag | Effect |
 |------|--------|
-| `-o json` | Machine-readable output |
-| `-o compact` | Minimal output |
 | `--quiet` / `-q` | Suppress info/warnings (errors still shown) |
 | `--no-color` | Disable colored output |
-| `--yes` / `-y` | Skip confirmation prompts |
 | `--describe` | Output full CLI schema as JSON (all commands, parameters, types) |
-| `--dry-run` | Preview mutative requests without executing (on create/update/delete commands) |
+| `--version` / `-v` | Show version |
+
+Common per-command flags go **after** the command: `ga accounts list -o json`
+| Flag | Effect |
+|------|--------|
+| `-o json` | Machine-readable output (default when stdout is piped) |
+| `-o table` | Rich table (default in a terminal) |
+| `-o compact` | Minimal output: `name<TAB>displayName` for resources, TSV with a header line for report rows |
+
+Without `-o`, the configured `output_format` applies; when piped, a configured `table` is ignored.
+| `--yes` / `-y` | Skip confirmation prompts (destructive commands) |
+| `--dry-run` | Preview mutative requests without executing (create/update/delete commands) |
 
 ## Resource Hierarchy
 ```
@@ -58,7 +67,7 @@ ga config unset KEY
 ga config setup          # Interactive wizard
 ga config reset
 ```
-Keys: `default_account_id`, `default_property_id`, `output_format`
+Keys: `default_account_id`, `default_property_id`, `output_format` (`json`, `table`, `compact`)
 
 ### Accounts
 ```bash
@@ -243,20 +252,49 @@ Requires both `--property-id` and `--stream-id`. `get` retrieves current setting
 
 ### Reports
 ```bash
-ga reports run [-p PROPERTY_ID] -m metrics -d dimensions --start-date DATE --end-date DATE [--limit N] [-o json]  # pipe: | jq '[.rows[] | {date, sessions, totalUsers}]'
-ga reports pivot [-p PROPERTY_ID] -m metrics -d dimensions --pivot-field FIELD [--start-date DATE] [-o json]
+ga reports run [-p PROPERTY_ID] -m metrics [-d dimensions] [--start-date DATE] [--end-date DATE] [--date-range START,END[,NAME]]... [--dim-filter EXPR]... [--metric-filter EXPR]... [--filter-json JSON|@file] [--order-by FIELD[:asc|desc]]... [--limit N] [--offset N] [--metric-aggregation TOTAL|MINIMUM|MAXIMUM]... [--keep-empty-rows] [--currency-code CODE] [--return-property-quota] [-o json]  # pipe: | jq '[.rows[] | {date, sessions, totalUsers}]'
+ga reports pivot [-p PROPERTY_ID] -m metrics -d dimensions --pivot-field FIELD [--pivot-limit N] [--start-date DATE] [--end-date DATE] [--limit N] [-o json]
+ga reports batch [-p PROPERTY_ID] -c batch_config.json [-o json]
+ga reports funnel [-p PROPERTY_ID] -c funnel_config.json [-o json]  # alpha
 ga reports check-compatibility [-p PROPERTY_ID] [-m metrics] [-d dimensions] [-o json]
 ga reports metadata [-p PROPERTY_ID] [--type metrics|dimensions] [--search TEXT] [-o json]
-ga reports realtime [-p PROPERTY_ID] [-m metrics] [-d dimensions] [--interval SECONDS]
+ga reports realtime [-p PROPERTY_ID] [-m metrics] [-d dimensions] [--minute-range START,END]... [--dim-filter EXPR]... [--metric-filter EXPR]... [--order-by EXPR]... [--metric-aggregation AGG]... [--interval SECONDS] [-o json]
 ga reports chat "QUESTION" [-p PROPERTY_ID] [--session-id ID] [--continue] [-i] [-o json]  # alpha
 ```
-Dates: `today`, `yesterday`, `7daysAgo`, `30daysAgo`, `90daysAgo`, or `YYYY-MM-DD`
+Dates: `today`, `yesterday`, `7daysAgo`, `30daysAgo`, `90daysAgo`, or `YYYY-MM-DD`.
+`reports run` defaults to `7daysAgo`..`yesterday` (today's data is incomplete). Without
+`--end-date`, a range starting `today` also ends `today`.
 
-`reports run` JSON output is a `{rows, metadata}` envelope. `metadata` is the API's
-`ResponseMetaData`: always `currencyCode`/`timeZone`, plus — when applicable —
-`samplingMetadatas`, `subjectToThresholding`, and `dataTruncationReasons`. Check it
-before treating report data as complete; `pivot`/`batch` return it in their raw
-responses under the same key.
+`reports run` and `reports realtime` JSON output is one envelope:
+`{rows, metadata, rowCount}`, plus `totals`/`minimums`/`maximums` with
+`--metric-aggregation` and `propertyQuota` with `--return-property-quota`.
+- `rows` are flat objects keyed by field name. **Metric values are strings**
+  (`"1234"`; use `tonumber` in jq); `date` is `YYYYMMDD`.
+- `rowCount` is the total before `--limit` (default **100**). If it exceeds
+  `rows | length`, raise `--limit` or page with `--offset` before computing totals or shares.
+- `metadata` (`reports run`) is the API's `ResponseMetaData`: `currencyCode`/`timeZone`, plus —
+  when applicable — `samplingMetadatas`, `subjectToThresholding`, and `dataTruncationReasons`.
+  Check it before treating report data as complete. The Realtime API returns no metadata, so for
+  `reports realtime` it is always `{}`.
+- `pivot`, `batch`, `funnel` and `check-compatibility` return the raw API response instead
+  (`dimensionHeaders`, `rows[].dimensionValues[].value`, …).
+
+`-o compact` prints report rows as TSV: a header line of field names, then one line per row.
+Tabs, newlines and backslashes inside values are escaped as `\t`, `\n`, `\\`. Aggregation rows,
+quota and data notes go to stderr, so stdout holds only rows. Applies to `run`, `realtime`, `pivot`,
+`funnel`, `metadata` and `check-compatibility`; `batch` prints its raw response as one JSON line.
+
+Filters and sorting (`reports run`/`realtime`; details: `ga agent guide --section reports`):
+```bash
+--dim-filter 'countryId==US'                 # == != =~ > >= < <= contains begins_with ends_with in between
+--dim-filter 'pagePath=~/blog/.*'            # =~ must match the WHOLE value; string matches ignore case
+--metric-filter 'sessions>=100'              # metrics: == != > >= < <= between
+--order-by keyEvents:sign_up:desc            # field must be in -m/-d; dimensions also take :alpha|ialpha|numeric
+```
+Repeated `--dim-filter`/`--metric-filter` flags are ANDed; use `--filter-json` for OR/NOT. A bare
+`--filter-json` expression filters **dimensions**; wrap metric logic as `{"metricFilter": …}`.
+Realtime has its own fields: `activeUsers`, `eventCount`, `unifiedScreenName`, … (no `sessions`,
+`date` or `pagePath`).
 
 ### Upgrade
 ```bash
@@ -369,7 +407,8 @@ _SECTION_REPORTS = r"""# Reports — Detailed Reference
 | `eventCount` | Total events |
 | `engagementRate` | Engaged sessions ratio |
 | `averageSessionDuration` | Avg session duration (seconds) |
-| `conversions` | Total conversions |
+| `keyEvents` | Total key events (formerly `conversions`) |
+| `keyEvents:EVENT_NAME` | Key events for one event, e.g. `keyEvents:purchase` |
 | `totalRevenue` | Total revenue |
 | `activeUsers` | Active users (realtime only) |
 
@@ -377,7 +416,8 @@ _SECTION_REPORTS = r"""# Reports — Detailed Reference
 | Dimension | Description |
 |-----------|-------------|
 | `date` | Date (YYYYMMDD) |
-| `country` | User country |
+| `country` | User country name (`United States`) |
+| `countryId` | ISO country code (`US`) |
 | `city` | User city |
 | `deviceCategory` | desktop, mobile, tablet |
 | `operatingSystem` | OS name |
@@ -387,8 +427,62 @@ _SECTION_REPORTS = r"""# Reports — Detailed Reference
 | `pagePath` | Page URL path |
 | `pageTitle` | Page title |
 
+## Filters
+| Operator | Example | Notes |
+|----------|---------|-------|
+| `==` / `!=` | `countryId==US`, `sessions!=0` | Exact match (numeric equality for metrics) |
+| `=~` | `pagePath=~/blog/.*` | Regex, must match the **whole** value |
+| `contains` / `begins_with` / `ends_with` | `pagePath contains /blog` | Dimensions only |
+| `in` | `country in Germany,France` | Dimensions only |
+| `>` `>=` `<` `<=` | `sessions>100` | Numeric |
+| `between` | `sessions between 10,50` | Numeric, inclusive |
+
+String matches ignore case. Repeated flags are ANDed. For OR/NOT logic pass a raw
+`FilterExpression` with `--filter-json` (inline or `@file.json`; not combinable with
+`--dim-filter`/`--metric-filter`). A bare expression is applied as the **dimension** filter. For
+metric logic, or both, use an object with `dimensionFilter` and/or `metricFilter` keys:
+```bash
+--filter-json '{"orGroup": {"expressions": [
+  {"filter": {"fieldName": "countryId", "stringFilter": {"value": "US"}}},
+  {"filter": {"fieldName": "countryId", "stringFilter": {"value": "CA"}}}]}}'
+--filter-json '{"metricFilter": {"orGroup": {"expressions": [
+  {"filter": {"fieldName": "sessions", "numericFilter": {"operation": "GREATER_THAN", "value": {"int64Value": "100"}}}},
+  {"filter": {"fieldName": "keyEvents", "numericFilter": {"operation": "GREATER_THAN", "value": {"int64Value": "5"}}}}]}}}'
+```
+
+## Sorting
+`--order-by FIELD[:asc|desc[:alpha|ialpha|numeric]]` (default `desc`, repeatable). The field must
+also be requested with `-m`/`-d`; the order type applies to dimensions only. Field names containing
+`:` work: `-m keyEvents:purchase --order-by keyEvents:purchase`.
+
+## Period Comparison
+Request several named ranges in one call. With two or more ranges every row (and every
+aggregation row) gets a `dateRange` field holding the name (`date_range_0`, … if unnamed):
+```bash
+ga reports run -m sessions -d sessionDefaultChannelGroup \
+  --date-range 2026-10-05,2026-10-11,current --date-range 2026-09-28,2026-10-04,previous \
+  --metric-aggregation TOTAL -o json \
+  | jq '{rows: [.rows[] | {channel: .sessionDefaultChannelGroup, range: .dateRange, sessions: (.sessions | tonumber)}], totals}'
+```
+
+## Batch Reports
+Up to 5 reports in one API call. The config holds raw `RunReportRequest` bodies; each needs its
+own `dateRanges` (metrics/dimensions may be plain name lists):
+```bash
+cat > batch.json <<'JSON'
+{"reports": [
+  {"metrics": ["sessions"], "dimensions": ["country"], "dateRanges": [{"startDate": "7daysAgo", "endDate": "yesterday"}], "limit": 10},
+  {"metrics": ["keyEvents"], "dimensions": ["sessionDefaultChannelGroup"], "dateRanges": [{"startDate": "7daysAgo", "endDate": "yesterday"}]}
+]}
+JSON
+ga reports batch -p 987654321 -c batch.json -o json   # raw BatchRunReportsResponse: {"reports": [...]}
+```
+
 ## Pivot Reports
-The `--pivot-field` must be one of the `--dimensions`. It becomes column headers in table output.
+The `--pivot-field` must be one of the `--dimensions`. Its values become column headers in table
+output — only the top `--pivot-limit` values (default **5**) are returned. `--limit` caps the rows
+(combinations of the other dimensions); `--pivot-limit × --limit` may not exceed 250,000. JSON
+output is the raw `RunPivotReportResponse`.
 ```bash
 ga reports pivot -p 987654321 -m sessions,totalUsers -d country,deviceCategory --pivot-field deviceCategory --start-date 7daysAgo -o json
 ```
@@ -396,13 +490,17 @@ ga reports pivot -p 987654321 -m sessions,totalUsers -d country,deviceCategory -
 ## Compatibility Check
 Verify dimensions and metrics can be used together before running a report:
 ```bash
-ga reports check-compatibility -p 987654321 -m sessions,conversions -d date,city -o json
+ga reports check-compatibility -p 987654321 -m sessions,keyEvents -d date,city -o json
 ```
 
 ## Real-Time Reports
-Only support a subset of metrics (e.g., `activeUsers`). No date ranges.
+Only support a subset of metrics and dimensions (e.g., `activeUsers`, `eventCount`, `country`,
+`unifiedScreenName`, `minutesAgo`). No date ranges; use `--minute-range START,END` in minutes ago,
+START >= END (`29,0` is the last 30 minutes; up to 29, or 59 on GA4 360). JSON output uses the same
+`{rows, metadata, rowCount, …}` envelope as `reports run`, with `metadata` always `{}`.
 ```bash
 ga reports realtime -p 987654321 -m activeUsers -d country -o json
+ga reports realtime -p 987654321 -m activeUsers --minute-range 4,0 -o json  # Last 5 minutes
 ga reports realtime -p 987654321 --interval 10  # Poll every 10s
 ```
 

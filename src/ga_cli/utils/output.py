@@ -3,7 +3,7 @@
 Supports three formats:
 - json: Machine-readable JSON (default when piping)
 - table: Human-readable Rich tables (default for TTY)
-- compact: Minimal ID + name output
+- compact: Minimal ID + name output, or TSV for report rows (output(..., tsv=True))
 
 Equivalent to GTM CLI's utils/output.ts.
 """
@@ -67,15 +67,21 @@ def get_output_format(requested: Optional[str] = None) -> str:
 def resolve_output_format(cli_value: Optional[str] = None) -> str:
     """Resolve and track the output format from a subcommand's -o flag.
 
-    Replaces the common pattern:
-        effective_format = get_effective_value(output_format, "output_format") or "table"
-
-    This resolves CLI flag > config > TTY detection, then updates the
-    global format so that handle_error() uses the correct format.
+    Precedence: -o flag > configured output_format > (TTY ? "table" : "json").
+    On a pipe a configured "table" is ignored: tables are for terminals, and
+    releases up to 0.4.0 wrote "table" into every config file as a default, so
+    that value doesn't tell us the user chose it. Also updates the global
+    format so that handle_error() uses the correct format.
     """
-    from ..config.store import get_effective_value
+    from ..config.store import get_config_value
 
-    fmt = get_effective_value(cli_value, "output_format") or ("table" if is_tty() else "json")
+    configured = get_config_value("output_format")
+    if cli_value:
+        fmt = cli_value
+    elif is_tty():
+        fmt = configured or "table"
+    else:
+        fmt = configured if configured in ("json", "compact") else "json"
     set_output_format(fmt)
     return fmt
 
@@ -85,14 +91,20 @@ def output(
     fmt: str = "table",
     columns: Optional[list[str]] = None,
     headers: Optional[list[str]] = None,
+    *,
+    tsv: bool = False,
 ) -> None:
     """Output data in the specified format.
 
     Args:
         data: The data to display (list of dicts, or a single dict).
         fmt: Output format — "json", "table", or "compact".
-        columns: Which keys to show in table mode.
+        columns: Which keys to show in table mode (and TSV mode).
         headers: Column headers for table mode.
+        tsv: In compact mode, print a list of flat rows as tab-separated
+            values (a header line of `columns`, then one line per row)
+            instead of name/displayName pairs. For rows with no resource name,
+            such as report rows.
     """
     effective_fmt = get_output_format(fmt)
 
@@ -100,7 +112,9 @@ def output(
         print(json.dumps(data, indent=2, default=str))
 
     elif effective_fmt == "compact":
-        if isinstance(data, list):
+        if tsv and isinstance(data, list):
+            _output_tsv(data, columns)
+        elif isinstance(data, list):
             for item in data:
                 if isinstance(item, dict):
                     name = item.get("name", item.get("displayName", ""))
@@ -144,6 +158,22 @@ def _output_table(
         table.add_row(*row)
 
     console.print(table)
+
+
+_TSV_ESCAPES = str.maketrans({"\\": "\\\\", "\t": "\\t", "\n": "\\n", "\r": "\\r"})
+
+
+def _output_tsv(data: list[dict], columns: Optional[list[str]] = None) -> None:
+    """Print rows as TSV: a header line of column keys, then one line per row.
+
+    Backslash, tab, CR and LF inside values are escaped as \\\\, \\t, \\r, \\n
+    (jq's @tsv convention), so every line keeps the header's column count.
+    """
+    cols = columns or (list(data[0]) if data else [])
+    if not cols:
+        return
+    for values in [cols, *([item.get(c) for c in cols] for item in data)]:
+        print("\t".join("" if v is None else str(v).translate(_TSV_ESCAPES) for v in values))
 
 
 def _output_object(data: dict) -> None:
