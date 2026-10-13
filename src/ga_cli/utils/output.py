@@ -160,14 +160,24 @@ def _output_table(
     console.print(table)
 
 
-_TSV_ESCAPES = str.maketrans({"\\": "\\\\", "\t": "\\t", "\n": "\\n", "\r": "\\r"})
+# Separators as in jq's @tsv; every other C0/C1 control character and DEL as
+# \xNN. Report values (page titles, event parameters) can be set by anyone
+# sending hits, so they must neither shift columns nor reach a terminal as
+# escape sequences.
+_TSV_ESCAPES = {ord("\\"): "\\\\", ord("\t"): "\\t", ord("\n"): "\\n", ord("\r"): "\\r"}
+_TSV_ESCAPES.update(
+    (c, f"\\x{c:02x}")
+    for c in (*range(0x20), 0x7F, *range(0x80, 0xA0))
+    if c not in _TSV_ESCAPES
+)
 
 
 def _output_tsv(data: list[dict], columns: Optional[list[str]] = None) -> None:
     """Print rows as TSV: a header line of column keys, then one line per row.
 
     Backslash, tab, CR and LF inside values are escaped as \\\\, \\t, \\r, \\n
-    (jq's @tsv convention), so every line keeps the header's column count.
+    (jq's @tsv convention), so every line keeps the header's column count;
+    other control characters become \\xNN.
     """
     cols = columns or (list(data[0]) if data else [])
     if not cols:

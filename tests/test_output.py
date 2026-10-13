@@ -233,6 +233,16 @@ class TestOutputCompact:
         assert lines[1] == "a\\tb\\nc\\\\d\\re\t1"
         assert all(line.count("\t") == 1 for line in lines)
 
+    def test_compact_tsv_escapes_terminal_control_characters(self, capsys):
+        """Report values are attacker-controllable: no raw ESC, CSI or DEL."""
+        data = [{"pageTitle": "\x1b[2J\x1b]0;pwned\x07title\x9b31m\x7f", "sessions": "1"}]
+        output(data, fmt="compact", tsv=True)
+        out = capsys.readouterr().out
+        assert out.splitlines()[1] == (
+            "\\x1b[2J\\x1b]0;pwned\\x07title\\x9b31m\\x7f\t1"
+        )
+        assert not any(ord(ch) < 0x20 and ch not in "\t\n" for ch in out)
+
     def test_compact_without_tsv_keeps_name_format(self, capsys):
         output([{"country": "Germany", "sessions": "300"}], fmt="compact")
         assert capsys.readouterr().out == "\t\n"
