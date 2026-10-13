@@ -193,3 +193,82 @@ class TestStatusCommand:
 
         assert result.exit_code == 0
         assert not result.stdout.lstrip().startswith("{")
+
+
+class TestAllowlistIntegration:
+    def _status_json(self, monkeypatch):
+        monkeypatch.delenv("GA_CLI_SERVICE_ACCOUNT", raising=False)
+        monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+        with (
+            patch("ga_cli.commands.auth_cmd.load_auth_method", return_value=None),
+            patch(
+                "ga_cli.commands.auth_cmd.get_auth_status",
+                return_value={"authenticated": True, "email": "user@example.com"},
+            ),
+        ):
+            result = runner.invoke(app, ["auth", "status", "-o", "json"])
+        assert result.exit_code == 0
+        return json.loads(result.stdout)
+
+    def test_status_allowlist_disabled(self, monkeypatch):
+        assert self._status_json(monkeypatch)["allowlist"] == {"enabled": False}
+
+    def test_status_allowlist_enabled_from_env_without_network(self, monkeypatch):
+        monkeypatch.setenv("GA_CLI_ALLOWED_PROPERTIES", "1")
+        with patch("ga_cli.api.client._get_credentials") as creds:
+            assert self._status_json(monkeypatch)["allowlist"] == {"enabled": True}
+        creds.assert_not_called()
+
+    def test_status_service_account_env_has_allowlist(self, monkeypatch):
+        monkeypatch.setenv("GA_CLI_SERVICE_ACCOUNT", "/path/to/key.json")
+        result = runner.invoke(app, ["auth", "status", "-o", "json"])
+        assert json.loads(result.stdout)["allowlist"] == {"enabled": False}
+
+    def test_login_clears_allowlist_cache(self, tmp_path):
+        cache = tmp_path / "allowlist-cache.json"
+        cache.write_text("{}")
+        with (
+            patch("ga_cli.commands.auth_cmd.get_auth_status") as mock_status,
+            patch("ga_cli.commands.auth_cmd.login"),
+            patch("ga_cli.commands.auth_cmd.clear_client_cache"),
+        ):
+            mock_status.side_effect = [
+                {"authenticated": False},
+                {"authenticated": True, "email": "user@example.com"},
+            ]
+            result = runner.invoke(app, ["auth", "login"])
+        assert result.exit_code == 0
+        assert not cache.exists()
+
+    def test_service_account_login_clears_allowlist_cache(self, tmp_path):
+        cache = tmp_path / "allowlist-cache.json"
+        cache.write_text("{}")
+        with patch(
+            "ga_cli.commands.auth_cmd.login_with_service_account", return_value="sa@x.iam"
+        ):
+            result = runner.invoke(app, ["auth", "login", "-s", "/k.json"])
+        assert result.exit_code == 0
+        assert not cache.exists()
+
+    def test_logout_clears_allowlist_cache(self, tmp_path):
+        cache = tmp_path / "allowlist-cache.json"
+        cache.write_text("{}")
+        with (
+            patch("ga_cli.commands.auth_cmd.load_auth_method", return_value=None),
+            patch("ga_cli.commands.auth_cmd.get_auth_status",
+                  return_value={"authenticated": True}),
+            patch("ga_cli.commands.auth_cmd.logout"),
+            patch("ga_cli.commands.auth_cmd.clear_client_cache"),
+        ):
+            result = runner.invoke(app, ["auth", "logout"])
+        assert result.exit_code == 0
+        assert not cache.exists()
+
+    def test_logout_without_cache_file_is_fine(self):
+        with (
+            patch("ga_cli.commands.auth_cmd.load_auth_method", return_value=None),
+            patch("ga_cli.commands.auth_cmd.get_auth_status",
+                  return_value={"authenticated": False}),
+        ):
+            result = runner.invoke(app, ["auth", "logout"])
+        assert result.exit_code == 0

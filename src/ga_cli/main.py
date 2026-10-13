@@ -7,6 +7,7 @@ from .commands.access_reports import access_reports_app
 from .commands.account_summaries import account_summaries_app
 from .commands.accounts import accounts_app
 from .commands.agent_cmd import agent_app
+from .commands.allowlist_cmd import allowlist_app
 from .commands.annotations import annotations_app
 from .commands.audiences import audiences_app
 from .commands.auth_cmd import auth_app
@@ -41,6 +42,7 @@ app = typer.Typer(
 # Register command groups
 app.add_typer(auth_app, name="auth")
 app.add_typer(config_app, name="config")
+app.add_typer(allowlist_app, name="allowlist")
 app.add_typer(accounts_app, name="accounts")
 app.add_typer(account_summaries_app, name="account-summaries")
 app.add_typer(properties_app, name="properties")

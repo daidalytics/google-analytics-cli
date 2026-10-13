@@ -50,6 +50,7 @@ class TestDescribeTopLevel:
             "ga annotations",
             "ga config",
             "ga auth",
+            "ga allowlist",
         ]
         for group in expected_groups:
             matching = [k for k in commands if k.startswith(group)]
