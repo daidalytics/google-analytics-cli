@@ -216,6 +216,13 @@ def parse_order_bys(
             split = 1
         field = ":".join(parts[:split])
         rest = parts[split:]
+        if field == "dateRange":
+            # Added by the API with 2+ date ranges, but sorting by it fails
+            # with a 500 (checked live)
+            raise typer.BadParameter(
+                "The API can't sort by dateRange. Sort by another field and group "
+                "the rows by dateRange afterwards (e.g. jq 'group_by(.dateRange)')."
+            )
         if known_fields and field not in known_fields:
             raise typer.BadParameter(
                 f"--order-by field '{field}' is not one of the requested metrics/dimensions "
@@ -306,6 +313,10 @@ def parse_minute_ranges(ranges: list[str]) -> list[dict]:
         except ValueError:
             raise typer.BadParameter(
                 f"Minute range values must be integers (got '{r}')"
+            )
+        if start < 0 or end < 0:
+            raise typer.BadParameter(
+                f"Minute range values are minutes ago and can't be negative (got '{r}')"
             )
         if start < end:
             raise typer.BadParameter(

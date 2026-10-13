@@ -308,6 +308,12 @@ class TestParseOrderBys:
         with pytest.raises(typer.BadParameter, match="'keyEvents:sign_up' is not one of"):
             parse_order_bys(["keyEvents:sign_up:desc"], metrics=["sessions"])
 
+    def test_date_range_rejected_with_explanation(self):
+        """The API adds dateRange with 2+ date ranges but fails with a 500
+        when asked to sort by it."""
+        with pytest.raises(typer.BadParameter, match="can't sort by dateRange"):
+            parse_order_bys(["dateRange:asc"], metrics=["sessions"], dimensions=["country"])
+
     def test_order_type_on_metric_rejected(self):
         with pytest.raises(typer.BadParameter, match="applies only to dimensions"):
             parse_order_bys(["keyEvents:x:desc:numeric"], metrics=["keyEvents:x"])
@@ -358,6 +364,10 @@ class TestParseMinuteRanges:
 
     def test_same_minute_allowed(self):
         assert parse_minute_ranges(["3,3"]) == [{"startMinutesAgo": 3, "endMinutesAgo": 3}]
+
+    def test_negative_minutes_rejected(self):
+        with pytest.raises(typer.BadParameter, match="can't be negative"):
+            parse_minute_ranges(["-1,0"])
 
     def test_inverted_range_rejected(self):
         with pytest.raises(typer.BadParameter, match="did you mean '4,0'"):
