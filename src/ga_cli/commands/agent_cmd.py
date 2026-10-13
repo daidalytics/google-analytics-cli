@@ -272,6 +272,10 @@ Dates: `today`, `yesterday`, `7daysAgo`, `30daysAgo`, `90daysAgo`, or `YYYY-MM-D
   (`"1234"`; use `tonumber` in jq); `date` is `YYYYMMDD`.
 - `rowCount` is the total before `--limit` (default **100**). If it exceeds
   `rows | length`, raise `--limit` or page with `--offset` before computing totals or shares.
+- With two or more date ranges, `rowCount` and `--limit` count dimension combinations, not rows:
+  each combination appears once per range, so `rows | length` can equal or exceed `rowCount`
+  while rows are still missing. Compare `rowCount` with the distinct combinations instead,
+  e.g. for `-d country,deviceCategory`: `[.rows[] | [.country, .deviceCategory]] | unique | length`.
 - `metadata` (`reports run`) is the API's `ResponseMetaData`: `currencyCode`/`timeZone`, plus —
   when applicable — `samplingMetadatas`, `subjectToThresholding`, and `dataTruncationReasons`.
   Check it before treating report data as complete. The Realtime API returns no metadata, so for

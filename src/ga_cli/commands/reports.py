@@ -301,7 +301,10 @@ def _render_flat_report(result: dict, effective_format: str) -> None:
 
     row_count = result.get("rowCount", len(rows))
     if effective_format == "table" and row_count > 0:
-        console.print(f"\n[dim]{row_count} total rows[/dim]")
+        # With 2+ date ranges the API counts dimension combinations, and
+        # each one comes back once per range
+        per_range = " per date range" if "dateRange" in columns else ""
+        console.print(f"\n[dim]{row_count} total rows{per_range}[/dim]")
 
     _display_aggregations(result, effective_format)
     _display_quota(result)
@@ -472,7 +475,10 @@ def run_cmd(
         "today when --start-date is today)",
     ),
     limit: int = typer.Option(
-        100, "--limit", help="Max rows to return (JSON rowCount gives the untruncated total)"
+        100, "--limit",
+        help="Max rows to return (JSON rowCount gives the untruncated total). With several "
+        "--date-range values, limits and counts dimension combinations, "
+        "each returned once per range",
     ),
     dim_filter: Optional[list[str]] = typer.Option(
         None, "--dim-filter", help=_DIM_FILTER_HELP
