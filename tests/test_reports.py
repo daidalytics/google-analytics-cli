@@ -1251,6 +1251,23 @@ class TestResponseMetadataDisplay:
         assert result.exit_code == 0
         assert "Data Notes" not in _strip_ansi(result.output)
 
+    def test_compact_note_with_brackets_printed_verbatim(self):
+        """API message text is not markup: '[/docs]' used to raise MarkupError."""
+        result = _run_with_metadata(
+            {
+                "dataTruncationReasons": [
+                    {
+                        "dataTruncationType": "DATA_TRUNCATION_TYPE_DATE_RANGE",
+                        "dataTruncationMessage": "See [/docs] and [foo].",
+                    }
+                ]
+            },
+            fmt="compact",
+        )
+
+        assert result.exit_code == 0
+        assert "Truncated (Date Range): See [/docs] and [foo]." in _strip_ansi(result.output)
+
     def test_sampling_percentage_one_decimal(self):
         result = _run_with_metadata({
             "samplingMetadatas": [

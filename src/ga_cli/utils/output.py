@@ -237,22 +237,24 @@ def _format_value(value: Any) -> str:
     return escape(str(value))
 
 
-# Convenience functions for styled messages (equivalent to GTM CLI)
+# Convenience functions for styled messages (equivalent to GTM CLI).
+# `message` is plain text, escaped like table values: it often carries API
+# text (error messages, data notes) that may contain square brackets.
 def success(message: str) -> None:
     if not _quiet:
-        err_console.print(f"[green]OK[/green] {message}")
+        err_console.print(f"[green]OK[/green] {escape(message)}")
 
 
 def error(message: str) -> None:
     # Errors are NEVER suppressed, even in quiet mode
-    err_console.print(f"[red]Error:[/red] {message}")
+    err_console.print(f"[red]Error:[/red] {escape(message)}")
 
 
 def warn(message: str) -> None:
     if not _quiet:
-        err_console.print(f"[yellow]Warning:[/yellow] {message}")
+        err_console.print(f"[yellow]Warning:[/yellow] {escape(message)}")
 
 
 def info(message: str) -> None:
     if not _quiet:
-        err_console.print(f"[blue]Info:[/blue] {message}")
+        err_console.print(f"[blue]Info:[/blue] {escape(message)}")

@@ -196,6 +196,12 @@ class TestHandleError:
         captured = capsys.readouterr()
         assert "visible error" in captured.err
 
+    def test_error_message_with_brackets_printed_verbatim(self, capsys):
+        """API error text is not markup: '[/x]' used to raise MarkupError."""
+        with pytest.raises(SystemExit):
+            handle_error(ValueError("Invalid value [/x] in [foo]"))
+        assert "Invalid value [/x] in [foo]" in capsys.readouterr().err
+
 
 # ---------------------------------------------------------------------------
 # handle_error — JSON format (structured output for agents)

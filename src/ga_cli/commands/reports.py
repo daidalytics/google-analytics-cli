@@ -418,7 +418,7 @@ def _display_response_metadata(metadata: dict | None, effective_format: str) -> 
             # escape(): message text is API-sourced and may contain square
             # brackets Rich would otherwise parse as style tags.
             console.print(f"  [yellow]![/yellow] {escape(line)}")
-    else:  # compact — stderr, keeping stdout pipeable
+    else:  # compact — stderr, keeping stdout pipeable; warn() escapes markup
         for line in lines:
             warn(line)
 
