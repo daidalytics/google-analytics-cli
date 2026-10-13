@@ -7,6 +7,7 @@ from typing import Optional
 
 import typer
 
+from ..api.allowlist_guard import delete_cache_file
 from ..api.client import clear_client_cache
 from ..auth.oauth import get_auth_status, login, logout
 from ..auth.service_account import (
@@ -110,6 +111,7 @@ def login_cmd(
         if service_account:
             info(f"Authenticating with service account: {service_account}")
             email = login_with_service_account(service_account)
+            delete_cache_file()
             success(f"Authenticated as {email}")
             info("Service account credentials are now active.")
             return
@@ -124,6 +126,7 @@ def login_cmd(
         info("Opening browser for authentication...")
         login()
         clear_client_cache()
+        delete_cache_file()
 
         # Fetch user info to display
         status = get_auth_status()
@@ -140,6 +143,7 @@ def logout_cmd():
     try:
         auth_method = load_auth_method()
         status = get_auth_status()
+        delete_cache_file()
 
         if not auth_method and not status.get("authenticated"):
             info("Not currently authenticated.")
@@ -172,6 +176,11 @@ def status_cmd(
     try:
         import os
 
+        from ..config.allowlist import is_allowlist_configured
+
+        # Config/env only: no validation, no network
+        allowlist = {"enabled": is_allowlist_configured()}
+
         # Check for env var override (same priority as GTM CLI)
         env_key = os.environ.get("GA_CLI_SERVICE_ACCOUNT") or os.environ.get(
             "GOOGLE_APPLICATION_CREDENTIALS"
@@ -182,6 +191,7 @@ def status_cmd(
                 "method": "service-account",
                 "source": "environment variable",
                 "key_path": env_key,
+                "allowlist": allowlist,
             }
             output(data, output_format)
             return
@@ -194,6 +204,7 @@ def status_cmd(
                 "method": "service-account",
                 "email": auth_method.get("service_account_email"),
                 "key_path": auth_method.get("service_account_path"),
+                "allowlist": allowlist,
             }
             output(data, output_format)
             return
@@ -201,6 +212,7 @@ def status_cmd(
         # Fall back to OAuth
         auth_status = get_auth_status()
         auth_status["method"] = "oauth"
+        auth_status["allowlist"] = allowlist
         output(auth_status, output_format)
 
         if not auth_status.get("authenticated"):

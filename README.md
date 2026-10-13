@@ -57,6 +57,7 @@ Read an introductory blog post on the GA CLI on [gunnargriese.com](https://gunna
 - **Dry run** — Preview mutative requests (create, update, delete) without executing them
 - **Structured errors** — Categorized exit codes and JSON error output for programmatic handling
 - **Agent guide** — Built-in AI agent quick reference via `ga agent guide`
+- **Allowlist** — Pin `ga` to specific accounts or properties so an agent stays on one client's data ([details](#allowlist))
 
 ## Installation
 
@@ -180,6 +181,7 @@ export GA_CLI_SERVICE_ACCOUNT="/path/to/key.json"
 |---------|-------------|-------------|
 | `ga auth` | `setup`, `login`, `logout`, `status` | Manage authentication |
 | `ga config` | `setup`, `get`, `set`, `unset`, `path`, `reset` | Manage CLI configuration |
+| `ga allowlist` | `show` | Show the account/property allowlist |
 | `ga accounts` | `list`, `get`, `update`, `delete`, `get-data-sharing`, `change-history` | Manage GA4 accounts |
 | `ga account-summaries` | `list` | Quick overview of all accounts and properties |
 | `ga properties` | `list`, `get`, `create`, `update`, `delete`, `acknowledge-udc`, `quotas` | Manage GA4 properties |
@@ -291,6 +293,48 @@ ga reports chat "top pages" -o json    # raw ChatResponse for scripts
 >
 > Uses AI and may return inaccurate information.
 
+## Allowlist
+
+If one Google login can see many clients' accounts, you can pin `ga` to the ones you are working
+on. A wrong `-p`, a stale default, or an AI agent working for one client then can't read or change
+another client's data:
+
+```bash
+ga config set allowed_account_ids 123456789           # every property in these accounts
+ga config set allowed_property_ids 250400352,250400353 # or single properties
+ga allowlist show                                      # what is allowed right now
+```
+
+- **Checked before sending:** every API request is checked before it is sent. A blocked request
+  exits with code 5 (`allowlist_error`, with the blocked `resource` in the JSON error).
+  `accounts list`, `account-summaries list` and `properties list` only show allowed items.
+- **Property-only allowlists:** a property on the allowlist doesn't allow account-level commands
+  (`accounts get`, account access bindings, account access reports) on its parent account.
+  Allowlist the account for those.
+- **Interactive only:** `ga config set` / `unset` on the allowlist keys, and `ga config reset`
+  while an allowlist is set, need a terminal and a confirmation. There is no flag to override
+  the allowlist.
+- **Unreadable config file:** if `config.json` isn't valid JSON, `ga` can't tell whether it holds
+  an allowlist. Every API command then exits 5, even if you never set one, and `ga config`
+  refuses to overwrite the file. Fix the file by hand.
+- **Environment variables:** `GA_CLI_ALLOWED_ACCOUNTS` / `GA_CLI_ALLOWED_PROPERTIES` take
+  comma-separated IDs. With both config and env set, a request must pass **both**, so env can
+  narrow the config allowlist for one session (for example when launching an agent) but never
+  widen it. An env var set to an empty string allows nothing.
+- **Property → account cache:** to place a property in its account, `ga` caches the result of one
+  `accountSummaries` call for an hour (`~/.config/ga-cli/allowlist-cache.json`, cleared by
+  `ga auth login` / `logout`). If you move a property to another account, `ga` can keep placing
+  it in its old account until the cache expires, so an account allowlist may still allow it (or
+  still block it) for up to an hour. Delete the cache file to apply the move straight away.
+
+> **A guardrail, not a security boundary.** The allowlist stops mistakes and keeps a well-meaning
+> agent on track. It can't stop a process that wants to get around it: anything holding your
+> token can call the API directly, edit `config.json`, point `GA_CLI_CONFIG_DIR` elsewhere, or fake
+> a terminal. An allowlist set only through env vars is advisory, because the agent's shell can
+> unset them; put the allowlist in the config file and use env only to narrow it. For a hard
+> boundary, give the agent a **service account** that has only been granted access to the
+> allowed accounts or properties in GA, and log in with `ga auth login --service-account`.
+
 ## Global Options
 
 ```
@@ -318,6 +362,8 @@ ga completions fish > ~/.config/fish/completions/ga.fish
 | `GA_CLI_SERVICE_ACCOUNT` | Path to service account key file |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Standard GCP credential path (fallback) |
 | `GA_CLI_CONFIG_DIR` | Override config directory |
+| `GA_CLI_ALLOWED_ACCOUNTS` | Comma-separated allowlisted account IDs; narrows the config allowlist (see [Allowlist](#allowlist)) |
+| `GA_CLI_ALLOWED_PROPERTIES` | Comma-separated allowlisted property IDs; narrows the config allowlist |
 | `NO_COLOR` | Disable colored output |
 
 ## CI/CD Integration

@@ -96,10 +96,18 @@ def get_chat_sessions_path() -> Path:
     return get_config_dir() / "chat-sessions.json"
 
 
+def get_allowlist_cache_path() -> Path:
+    """Path to the allowlist's property → account cache."""
+    return get_config_dir() / "allowlist-cache.json"
+
+
 def get_update_check_path() -> Path:
     """Path to update-check timestamp file."""
     return get_config_dir() / "update-check.json"
 
+
+# How long the allowlist's property → account map is trusted before a refresh
+ALLOWLIST_CACHE_TTL_SECONDS = 3600
 
 # Pagination defaults
 DEFAULT_PAGE_SIZE = 50

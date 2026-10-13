@@ -152,3 +152,33 @@ class TestAgentGuideSection:
 
         assert result.exit_code == 0
         assert "Custom Dimensions" in result.output
+
+
+class TestAgentGuideAllowlist:
+    def test_guide_documents_allowlist(self):
+        result = runner.invoke(app, ["agent", "guide"])
+
+        assert "## Allowlist" in result.output
+        assert "ga allowlist show" in result.output
+        assert "allowlist_error" in result.output
+        assert "GA_CLI_ALLOWED_ACCOUNTS" in result.output
+        assert "GA_CLI_ALLOWED_PROPERTIES" in result.output
+
+    def test_guide_lists_all_exit_codes(self):
+        result = runner.invoke(app, ["agent", "guide"])
+
+        assert "## Errors and exit codes" in result.output
+        for code, category in [
+            (1, "client_error"), (2, "auth_error"), (3, "api_error"),
+            (4, "network_error"), (5, "allowlist_error"),
+        ]:
+            assert f"| {code} | `{category}` |" in result.output
+
+    def test_exit_codes_match_classify_error_docstring(self):
+        from ga_cli.utils.errors import classify_error
+
+        for code, category in [
+            (1, "client_error"), (2, "auth_error"), (3, "api_error"),
+            (4, "network_error"), (5, "allowlist_error"),
+        ]:
+            assert f"{code} — {category}" in classify_error.__doc__

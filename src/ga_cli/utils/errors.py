@@ -13,6 +13,24 @@ from typing import NoReturn
 
 from .output import error as print_error
 
+ALLOWLIST_HINT = (
+    "Run 'ga allowlist show' for the allowed properties; "
+    "only the user can change the allowlist."
+)
+
+
+class AllowlistError(Exception):
+    """A request blocked by the account/property allowlist, or a malformed allowlist.
+
+    Deliberately not a RuntimeError or OSError: googleapiclient retries the OSError
+    family, and classify_error maps RuntimeErrors mentioning auth to auth_error.
+    """
+
+    def __init__(self, resource: str, reason: str):
+        self.resource = resource
+        self.reason = reason
+        super().__init__(f"{reason}. {ALLOWLIST_HINT}")
+
 
 def format_api_error(err: Exception) -> str:
     """Extract a human-readable message from a Google API error.
@@ -41,11 +59,15 @@ def classify_error(err: Exception) -> tuple[int, str]:
         2 — auth_error: not authenticated, token expired, permission denied (401/403)
         3 — api_error: Google returned 4xx (not auth) or 5xx
         4 — network_error: connection timeout, DNS failure, unreachable
+        5 — allowlist_error: resource not on the allowlist, or a malformed allowlist
 
     Returns:
         (exit_code, category)
     """
     from googleapiclient.errors import HttpError
+
+    if isinstance(err, AllowlistError):
+        return 5, "allowlist_error"
 
     if isinstance(err, HttpError):
         status = err.resp.status
@@ -128,6 +150,8 @@ def handle_error(err: Exception) -> NoReturn:
 
         if isinstance(err, HttpError):
             payload["status_code"] = err.resp.status
+        if isinstance(err, AllowlistError):
+            payload["resource"] = err.resource
 
         # Write raw JSON to stderr — avoid Rich Console which may wrap lines
         print(json.dumps(payload, default=str), file=sys.stderr)

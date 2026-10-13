@@ -336,3 +336,57 @@ class TestRequireOptions:
         options = {"account_id": "123", "property_id": None}
         with pytest.raises(typer.BadParameter):
             require_options(options, ["account_id", "property_id"])
+
+
+# ---------------------------------------------------------------------------
+# AllowlistError
+# ---------------------------------------------------------------------------
+class TestAllowlistError:
+    def _err(self):
+        from ga_cli.utils.errors import AllowlistError
+
+        return AllowlistError(
+            "properties/999", "properties/999 is not on the allowlist (config: accounts 123)"
+        )
+
+    def test_not_runtime_or_os_error(self):
+        err = self._err()
+        assert not isinstance(err, (RuntimeError, OSError))
+
+    def test_classified_as_allowlist_error(self):
+        assert classify_error(self._err()) == (5, "allowlist_error")
+
+    def test_classified_first_even_when_message_mentions_auth(self):
+        from ga_cli.utils.errors import AllowlistError
+
+        err = AllowlistError("properties/1", "auth-related reason")
+        assert classify_error(err) == (5, "allowlist_error")
+
+    def test_message_tells_agent_to_ask_user(self):
+        msg = str(self._err())
+        assert msg.startswith("properties/999 is not on the allowlist (config: accounts 123).")
+        assert "ga allowlist show" in msg
+        assert "only the user can change the allowlist" in msg
+
+    def test_json_payload_has_resource(self, capsys):
+        set_output_format("json")
+        with pytest.raises(SystemExit) as exc_info:
+            handle_error(self._err())
+        assert exc_info.value.code == 5
+        payload = json.loads(capsys.readouterr().err)
+        assert payload["category"] == "allowlist_error"
+        assert payload["exit_code"] == 5
+        assert payload["resource"] == "properties/999"
+        assert "status_code" not in payload
+
+    def test_table_mode_prints_message(self, capsys):
+        with pytest.raises(SystemExit) as exc_info:
+            handle_error(self._err())
+        assert exc_info.value.code == 5
+        assert "not on the allowlist" in capsys.readouterr().err
+
+    def test_other_errors_have_no_resource(self, capsys):
+        set_output_format("json")
+        with pytest.raises(SystemExit):
+            handle_error(ValueError("x"))
+        assert "resource" not in json.loads(capsys.readouterr().err)
