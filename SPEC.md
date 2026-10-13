@@ -1,6 +1,6 @@
 # Spec: Output escaping and input validation fixes
 
-Status: **Approved: in progress** (branch `fix/escape-and-validation`)
+Status: **Implemented: pending release** (branch `fix/escape-and-validation`)
 Target version: 0.5.0 (ships alongside the #30 breaking changes)
 Previous spec (ResponseMetaData, shipped in 0.4.0): `git show 72e3a4f:SPEC.md`
 

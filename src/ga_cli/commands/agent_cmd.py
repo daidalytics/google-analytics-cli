@@ -441,6 +441,9 @@ _SECTION_REPORTS = r"""# Reports — Detailed Reference
 | `>` `>=` `<` `<=` | `sessions>100` | Numeric |
 | `between` | `sessions between 10,50` | Numeric, inclusive |
 
+The operator is the first one after the field name, so values may contain operator symbols:
+`pageTitle contains Home > Blog`. Field names are letters, digits, `_` and `:`.
+
 String matches ignore case. Repeated flags are ANDed. For OR/NOT logic pass a raw
 `FilterExpression` with `--filter-json` (inline or `@file.json`; not combinable with
 `--dim-filter`/`--metric-filter`). A bare expression is applied as the **dimension** filter. For
