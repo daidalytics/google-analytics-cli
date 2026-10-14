@@ -12,19 +12,26 @@ Legend: `∥` = runs in parallel with its siblings, each in its own worktree age
 
 ## Wave 1 (6 agents in parallel)
 
-- [ ] ∥ **A1** · Console-script alias + plugin manifests + version-sync test (S)
-- [ ] ∥ **A2 → A3** · `build_cli_schema()` (XS) → skill in repo + generator + guard tests (M) (one agent)
-- [ ] ∥ **A4** · README "Use with AI agents" section (XS)
-- [ ] ∥ **B1** · Profile foundation: selection, paths, implicit creation, conftest (M)
-- [ ] ∥ **C1 → C2 → C3** · audience-exports list/get (S) → query (S) → create + `--dry-run` + `--wait` (M) (one long-running agent)
-- [ ] ∥ **O1** · Suppress the update notice under an ephemeral uvx env (XS) (approved; lane A)
+- [x] ∥ **A1** · Console-script alias + plugin manifests + version-sync test (S) · `58a8324`
+- [x] ∥ **A2 → A3** · `build_cli_schema()` (XS) → skill in repo + generator + guard tests (M) (one agent) · `bb3a7b8` `46caed5`
+      · the draft's 35 commands all exist; short-flag table had 4 corrections
+- [x] ∥ **A4** · README "Use with AI agents" section (XS) · `f73928d`
+- [x] ∥ **B1** · Profile foundation: selection, paths, implicit creation, conftest (M) · `25eb01b` (lane B)
+      · invalid name → exit 1 (not Click's 2); explicit `--profile ""` rejected; config cache keyed by path
+- [x] ∥ **C1 → C2 → C3** · audience-exports list/get (S) → query (S) → create + `--dry-run` + `--wait` (M) (one long-running agent) · `3eaf1f2` `0087858` `e46a16a` (lane C)
+- [x] ∥ **O1** · Suppress the update notice under an ephemeral uvx env (XS) (approved; lane A) · `07129e8`
 
 - [ ] **CHECKPOINT A**: merge A1–A4 · `uv build` + uvx wheel smoke test · `claude plugin validate .` · `npx skills add ./ --list` · review agent · **human review → PR A, decide on 0.4.1**
+      - [x] merged; 1070 tests green; ruff clean; drift check clean
+      - [x] uvx from the built wheel → `ga-cli 0.4.0`; `claude plugin validate` passes (only warning: local gitignored CLAUDE.md)
+      - [x] `npx skills add ./ --list` initially found **no skills**: the unquoted `: ` in the SKILL.md description broke strict YAML → fixed + regression test (`f5e9cd4`); now lists `ga-cli`
+      - [x] review agent: no correctness issues; one README duplication finding judged acceptable (one uvx form, shown in agents section + install list); CI doesn't lint `scripts/` (follow-up, ask-first)
+      - [ ] human review → PR A, decide on 0.4.1
 
 ## Wave 2 (after B1 is merged into `feat/profiles`)
 
 - [ ] ∥ **B2** · Credential resolution table + ADC fallback + `ProfileNotFoundError` (M)
-- [ ] ∥ **B3** · `ga profiles list` / `delete` (S)
+- [x] ∥ **B3** · `ga profiles list` / `delete` (S) · `c9629a1` (lane B)
 
 ## Wave 3
 
