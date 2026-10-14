@@ -1,6 +1,6 @@
 ---
 name: ga-cli
-description: Answer Google Analytics 4 questions and manage GA4 configuration by driving the `ga` command-line tool (google-analytics-cli) instead of guessing or asking the user to check the GA interface. Use this whenever the user asks about website or app traffic, sessions, users, pageviews, conversions or key events, traffic sources, channels, campaigns, landing pages, bounce/engagement rate, realtime visitors, or "how is the site doing" — and also for GA4 admin work: properties, data streams, custom dimensions and metrics, audiences, key events, BigQuery links, access bindings, or auditing an account's setup. Use it even when the user never says "GA4", "Google Analytics", or "ga" — a question about site traffic or marketing performance is enough.
+description: "Answer Google Analytics 4 questions and manage GA4 configuration by driving the `ga` command-line tool (google-analytics-cli) instead of guessing or asking the user to check the GA interface. Use this whenever the user asks about website or app traffic, sessions, users, pageviews, conversions or key events, traffic sources, channels, campaigns, landing pages, bounce/engagement rate, realtime visitors, or \"how is the site doing\" — and also for GA4 admin work: properties, data streams, custom dimensions and metrics, audiences, key events, BigQuery links, access bindings, or auditing an account's setup. Use it even when the user never says \"GA4\", \"Google Analytics\", or \"ga\" — a question about site traffic or marketing performance is enough."
 ---
 
 # Driving the GA CLI

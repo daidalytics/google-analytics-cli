@@ -9,6 +9,7 @@ exist, and nothing that shouldn't be distributed.
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 from pathlib import Path
 
@@ -72,6 +73,31 @@ def _parse_frontmatter(text: str) -> dict[str, str]:
     return fields
 
 
+def _strict_yaml_problems(text: str) -> list[str]:
+    """Single-line frontmatter values that a strict YAML parser would reject.
+
+    A plain (unquoted) scalar may not contain ": " or " #", and a
+    double-quoted one must be a valid escaped string (checked as JSON, which
+    is a subset of YAML double-quoted syntax).
+    """
+    lines = text.splitlines()
+    end = next(i for i, line in enumerate(lines[1:], start=1) if line.strip() == "---")
+    problems = []
+    for line in lines[1:end]:
+        match = re.match(r"^([A-Za-z_][\w-]*):\s*(.*)$", line)
+        if not match or not match.group(2):
+            continue
+        key, value = match.groups()
+        if value[0] == '"':
+            try:
+                json.loads(value)
+            except json.JSONDecodeError as exc:
+                problems.append(f"{key}: invalid double-quoted value ({exc})")
+        elif value[0] not in "'>|" and (": " in value or " #" in value):
+            problems.append(f"{key}: unquoted value contains ': ' or ' #'; quote it")
+    return problems
+
+
 class TestSkillFrontmatter:
     def test_parser_handles_quotes_and_continuations(self):
         fields = _parse_frontmatter('---\nname: "x"\ndescription: >\n  one\n  two\n---\n')
@@ -88,6 +114,16 @@ class TestSkillFrontmatter:
     def test_description_is_present(self):
         fields = _parse_frontmatter(SKILL_MD.read_text())
         assert fields.get("description", "").strip()
+
+    def test_strict_yaml_check_flags_colon_in_plain_value(self):
+        problems = _strict_yaml_problems("---\ndescription: admin work: properties\n---\n")
+        assert problems and "description" in problems[0]
+
+    def test_frontmatter_is_valid_for_strict_yaml_parsers(self):
+        # `npx skills add` uses a strict YAML parser: an unquoted value containing
+        # ": " is a parse error, and the skill is silently reported as "No skills
+        # found". The hand parser above is lenient, so check this separately.
+        assert _strict_yaml_problems(SKILL_MD.read_text()) == []
 
 
 # ---------------------------------------------------------------------------
