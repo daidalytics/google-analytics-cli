@@ -131,13 +131,21 @@ def _introspect_group(group: Any, prefix: str) -> list[dict]:
     return commands
 
 
-def handle_describe_all(typer_app: typer.Typer) -> None:
-    """Output schemas for all CLI commands as JSON and exit."""
+def build_cli_schema(typer_app: typer.Typer) -> dict:
+    """Build the schema for all CLI commands without printing anything.
+
+    Returns exactly the dict that ``ga --describe`` prints, so dev tooling
+    (e.g. the skill reference generator) can use it in-process.
+    """
     click_group = typer.main.get_group(typer_app)
     schemas = _introspect_group(click_group, "ga")
-    result = {
+    return {
         "cli": "ga-cli",
         "commands": {s["command"]: s for s in schemas},
     }
-    print(json.dumps(result, indent=2), file=sys.stdout)
+
+
+def handle_describe_all(typer_app: typer.Typer) -> None:
+    """Output schemas for all CLI commands as JSON and exit."""
+    print(json.dumps(build_cli_schema(typer_app), indent=2), file=sys.stdout)
     raise typer.Exit(0)

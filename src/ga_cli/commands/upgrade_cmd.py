@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -114,13 +116,51 @@ def upgrade_cmd(
         raise typer.Exit(1)
 
 
+def _uv_cache_dir() -> Optional[Path]:
+    """Resolve uv's cache directory the way uv does, without spawning uv.
+
+    Order: ``UV_CACHE_DIR``, then ``$XDG_CACHE_HOME/uv``, then the platform
+    default (``~/.cache/uv`` on macOS/Linux, ``%LOCALAPPDATA%\\uv\\cache`` on
+    Windows).
+    """
+    env_dir = os.environ.get("UV_CACHE_DIR")
+    if env_dir:
+        return Path(env_dir)
+    xdg_cache = os.environ.get("XDG_CACHE_HOME")
+    if xdg_cache:
+        return Path(xdg_cache) / "uv"
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        return Path(local_app_data) / "uv" / "cache" if local_app_data else None
+    return Path.home() / ".cache" / "uv"
+
+
+def _is_ephemeral_uvx_env() -> bool:
+    """Return True if running from a ``uvx`` environment inside uv's cache.
+
+    'ga upgrade' can't update such an environment: uvx keeps serving its
+    cached version until the user runs ``uvx google-analytics-cli@latest``.
+    """
+    try:
+        cache_dir = _uv_cache_dir()
+        if cache_dir is None:
+            return False
+        return Path(sys.prefix).resolve().is_relative_to(cache_dir.resolve())
+    except Exception:
+        return False
+
+
 def maybe_check_for_updates() -> None:
     """Run a non-blocking daily update check.
 
     Called from main.py after command dispatch. Prints a dim notice
-    to stderr if a newer version is available. Never raises.
+    to stderr if a newer version is available. Never raises. Skipped
+    entirely inside an ephemeral uvx environment.
     """
     try:
+        if _is_ephemeral_uvx_env():
+            return
+
         check_path = get_update_check_path()
 
         # Read last check timestamp

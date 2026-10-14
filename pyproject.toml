@@ -33,6 +33,7 @@ dependencies = [
 
 [project.scripts]
 ga = "ga_cli.main:run"
+google-analytics-cli = "ga_cli.main:run"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,5 +1,7 @@
 """GA CLI entry point."""
 
+from typing import Optional
+
 import typer
 
 from .commands.access_bindings import access_bindings_app
@@ -26,6 +28,7 @@ from .commands.firebase_links import firebase_links_app
 from .commands.google_ads_links import google_ads_links_app
 from .commands.key_events import key_events_app
 from .commands.mp_secrets import mp_secrets_app
+from .commands.profiles import profiles_app
 from .commands.properties import properties_app
 from .commands.property_settings import property_settings_app
 from .commands.reports import reports_app
@@ -41,6 +44,7 @@ app = typer.Typer(
 # Register command groups
 app.add_typer(auth_app, name="auth")
 app.add_typer(config_app, name="config")
+app.add_typer(profiles_app, name="profiles")
 app.add_typer(accounts_app, name="accounts")
 app.add_typer(account_summaries_app, name="account-summaries")
 app.add_typer(properties_app, name="properties")
@@ -70,12 +74,49 @@ app.add_typer(user_provided_data_app, name="user-provided-data")
 app.add_typer(completions_app, name="completions")
 
 
+def _select_profile(name: Optional[str]) -> None:
+    """Activate the profile chosen by ``--profile`` / ``GA_CLI_PROFILE``.
+
+    Exits 1 (client_error) on an invalid or explicitly empty name. When the
+    profile differs from the one active earlier in this process (several
+    invocations share a process under CliRunner), cached API clients are
+    dropped so they can never serve another profile's identity. The config
+    cache needs no reset: it is keyed by the profile's config path.
+    """
+    from .config.constants import get_active_profile, set_active_profile
+    from .utils.output import error
+
+    # An empty GA_CLI_PROFILE is ignored by Click (None), but an explicit
+    # `--profile ""` (e.g. an unset "$CLIENT") must not quietly run as default.
+    if name == "":
+        error("Profile name cannot be empty. Omit --profile to use the default profile.")
+        raise typer.Exit(1)
+
+    previous = get_active_profile()
+    try:
+        set_active_profile(name)
+    except ValueError as exc:
+        error(str(exc))
+        raise typer.Exit(1)
+
+    if get_active_profile() != previous:
+        from .api.client import clear_client_cache
+
+        clear_client_cache()
+
+
 @app.callback(invoke_without_command=True)
 def main(
     version: bool = typer.Option(False, "--version", "-v", help="Show version"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress non-essential output"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output"),
     describe: bool = typer.Option(False, "--describe", help="Show CLI schema as JSON"),
+    profile: Optional[str] = typer.Option(
+        None,
+        "--profile",
+        envvar="GA_CLI_PROFILE",
+        help="Named profile (credentials + config) to use. Default: the 'default' profile.",
+    ),
 ):
     """GA CLI — Command-line interface for Google Analytics 4."""
     from .utils.output import resolve_output_format, set_no_color, set_quiet
@@ -84,6 +125,9 @@ def main(
         set_quiet(True)
     if no_color:
         set_no_color(True)
+
+    # Select the profile before anything reads config or credentials.
+    _select_profile(profile)
 
     # Resolve output format early so errors are structured when appropriate
     resolve_output_format(None)
