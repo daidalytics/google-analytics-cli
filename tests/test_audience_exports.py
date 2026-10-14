@@ -169,7 +169,7 @@ class TestAudienceExportsList:
     def test_list_missing_property_id(self):
         result = runner.invoke(app, ["audience-exports", "list"])
         assert result.exit_code != 0
-        assert "property-id" in result.output.lower()
+        assert "property-id" in _strip_ansi(result.output).lower()
 
     def test_list_uses_config_default_property(self):
         save_config(UserConfig(default_property_id="555"))
@@ -235,7 +235,7 @@ class TestAudienceExportsGet:
     def test_get_missing_property_id(self):
         result = runner.invoke(app, ["audience-exports", "get", "--export-id", "789"])
         assert result.exit_code != 0
-        assert "property-id" in result.output.lower()
+        assert "property-id" in _strip_ansi(result.output).lower()
 
     def test_get_not_found_exits_3(self):
         client, exports = _mock_data_client()
@@ -376,7 +376,7 @@ class TestAudienceExportsQuery:
     def test_query_missing_property_id(self):
         result = runner.invoke(app, ["audience-exports", "query", "--export-id", "789"])
         assert result.exit_code != 0
-        assert "property-id" in result.output.lower()
+        assert "property-id" in _strip_ansi(result.output).lower()
 
 
 class TestAudienceExportsQueryNotActive:
@@ -609,7 +609,7 @@ class TestAudienceExportsCreate:
             ["audience-exports", "create", "--audience-id", "456", "--dimensions", "deviceId"],
         )
         assert result.exit_code != 0
-        assert "property-id" in result.output.lower()
+        assert "property-id" in _strip_ansi(result.output).lower()
 
     def test_create_api_error_exits_3(self):
         client, exports = _create_client()
