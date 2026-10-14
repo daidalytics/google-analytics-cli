@@ -8,6 +8,8 @@ How to read an entry:
 - `[-a | -p]` — identity flags that are optional *only* because they fall back to `ga config` defaults. If no default is set and you don't pass one, the command fails. Pass them explicitly whenever you know the ID.
 - `MUTATES` — changes the user's live GA4 setup. Preview with `--dry-run` first and get agreement before running for real. `--yes` skips the confirmation prompt.
 - `opts:` — the useful optional flags, abbreviated. `-o json` is available on every read command and is omitted here.
+- Positional arguments aren't listed. There are five: `ga config get [KEY]`, `ga config set KEY VALUE`, `ga config unset KEY`, `ga profiles delete NAME`, and `ga reports chat "QUESTION"`. Everything else, every ID included, is a flag.
+- Root options aren't listed either. `--profile NAME`, `-q`, and `--no-color` go right after `ga`, before the group: `ga --profile client-a reports run …`. Placed after the subcommand they fail with "No such option".
 
 ## Short-flag collisions that will bite you
 
@@ -232,6 +234,11 @@ Each of these was hit by an agent driving this CLI and cost a wasted round-trip:
 - `ga mp-secrets list` -s X [-p]
 - `ga mp-secrets update` -s X --secret-id X [-p]  _MUTATES, --dry-run_
   - opts: --display-name
+
+### ga profiles
+
+- `ga profiles delete`
+- `ga profiles list`
 
 ### ga properties
 
