@@ -1,0 +1,12 @@
+{
+  "name": "daidalytics",
+  "owner": { "name": "Gunnar Griese" },
+  "description": "Analytics CLIs and skills for AI agents",
+  "plugins": [
+    {
+      "name": "google-analytics-cli",
+      "source": "./",
+      "description": "Google Analytics 4 skill for AI agents, driving the ga CLI"
+    }
+  ]
+}
