@@ -104,16 +104,25 @@ def has_credentials() -> bool:
 def has_scope(scope: str) -> bool:
     """Check whether the credentials we would authenticate with carry ``scope``.
 
+    Follows the same resolution as ``api.client.resolve_credentials()``: the
+    active profile's service account (a named profile ignores the env vars),
+    then its stored OAuth token.
+
     Returns False only when stored OAuth credentials *demonstrably* lack the
     scope — the case worth warning about, since a refresh token cannot gain
     scopes it was never granted and the user must re-run ``ga auth login``.
 
     Anything undeterminable returns True: service accounts (built with
-    OAUTH_SCOPES, so always current), no stored credentials, or an unreadable
-    file. In those cases the caller's own API call surfaces the real
-    authentication error rather than a misleading re-auth instruction.
+    OAUTH_SCOPES, so always current), gcloud ADC or no stored credentials
+    (ADC scopes cannot be inspected), an unreadable file, or a named profile
+    that does not exist. In those cases the caller's own API call surfaces the
+    real authentication error rather than a misleading re-auth instruction.
     """
+    from ..config.constants import get_active_profile, profile_exists
     from .service_account import get_service_account_credentials
+
+    if not profile_exists(get_active_profile()):
+        return True
 
     if get_service_account_credentials() is not None:
         return True

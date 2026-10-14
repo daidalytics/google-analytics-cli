@@ -13,6 +13,27 @@ from typing import NoReturn
 
 from .output import error as print_error
 
+# Creates gcloud Application Default Credentials that carry the scopes GA needs.
+# gcloud *user* ADC ignores the scopes a client requests unless it was created
+# with them (SPEC B4), so every ADC hint names them explicitly.
+ADC_LOGIN_COMMAND = (
+    "gcloud auth application-default login --scopes="
+    "https://www.googleapis.com/auth/analytics.readonly,"
+    "https://www.googleapis.com/auth/cloud-platform"
+)
+
+
+class NotAuthenticatedError(RuntimeError):
+    """No usable credentials for the active profile. Exit 2 (``auth_error``)."""
+
+
+class ProfileNotFoundError(RuntimeError):
+    """The selected named profile does not exist. Exit 2 (``auth_error``).
+
+    Raised before any credential source is read or API client is built: a typo
+    in ``--profile`` must never fall back to another identity.
+    """
+
 
 def format_api_error(err: Exception) -> str:
     """Extract a human-readable message from a Google API error.
@@ -53,6 +74,10 @@ def classify_error(err: Exception) -> tuple[int, str]:
             return 2, "auth_error"
         return 3, "api_error"
 
+    # Our own credential-resolution errors
+    if isinstance(err, (NotAuthenticatedError, ProfileNotFoundError)):
+        return 2, "auth_error"
+
     # Auth-specific exceptions
     try:
         from google.auth.exceptions import DefaultCredentialsError, RefreshError
@@ -83,7 +108,8 @@ def classify_error(err: Exception) -> tuple[int, str]:
     if isinstance(err, OSError) and _is_network_os_error(err):
         return 4, "network_error"
 
-    # RuntimeError from our own auth code ("Not authenticated...")
+    # Any other RuntimeError that mentions auth (kept for messages raised
+    # without one of the explicit classes above)
     if isinstance(err, RuntimeError) and "auth" in str(err).lower():
         return 2, "auth_error"
 
