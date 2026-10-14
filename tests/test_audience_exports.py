@@ -259,3 +259,205 @@ class TestAudienceExportsDescribe:
         export_id = commands["ga audience-exports get"]["parameters"]["properties"]["export_id"]
         assert export_id["flag"] == "--export-id"
         assert "aliases" not in export_id
+
+
+QUERY_RESPONSE = {
+    "audienceExport": {
+        **EXPORT_ACTIVE,
+        # Deliberately not alphabetical: columns must follow this order.
+        "dimensions": [{"dimensionName": "userId"}, {"dimensionName": "deviceId"}],
+    },
+    "audienceRows": [
+        {"dimensionValues": [{"value": "user-a"}, {"value": "1000276123.1681742376"}]},
+        {"dimensionValues": [{"value": "user-b"}, {"value": "1000374452.1668627377"}]},
+    ],
+    "rowCount": 2,
+}
+
+
+def _query_args(*extra):
+    return ["audience-exports", "query", "-p", "123", "--export-id", "789", *extra]
+
+
+class TestAudienceExportsQuery:
+    def _client(self, response=None):
+        client, exports = _mock_data_client()
+        exports.query.return_value.execute.return_value = (
+            QUERY_RESPONSE if response is None else response
+        )
+        return client, exports
+
+    def test_query_calls_full_resource_name_with_empty_body_by_default(self):
+        client, exports = self._client()
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(app, _query_args("-o", "json"))
+
+        assert result.exit_code == 0, result.output
+        exports.query.assert_called_once_with(
+            name="properties/123/audienceExports/789", body={}
+        )
+
+    def test_query_sends_limit_and_offset_as_strings(self):
+        client, exports = self._client()
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(
+                app, _query_args("--limit", "10000", "--offset", "0", "-o", "json")
+            )
+
+        assert result.exit_code == 0, result.output
+        assert exports.query.call_args.kwargs["body"] == {"limit": "10000", "offset": "0"}
+
+    def test_query_sends_only_the_provided_paging_field(self):
+        client, exports = self._client()
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(app, _query_args("--limit", "50", "-o", "json"))
+
+        assert result.exit_code == 0
+        assert exports.query.call_args.kwargs["body"] == {"limit": "50"}
+
+    def test_query_rejects_non_positive_limit(self):
+        result = runner.invoke(app, _query_args("--limit", "0"))
+        assert result.exit_code != 0
+        assert "--limit" in _strip_ansi(result.output)
+
+    def test_query_json_is_raw_response(self):
+        client, _ = self._client()
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(app, _query_args("-o", "json"))
+
+        assert json.loads(result.stdout) == QUERY_RESPONSE
+
+    def test_query_table_has_one_column_per_dimension_in_export_order(self):
+        client, _ = self._client()
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(app, _query_args("-o", "table"))
+
+        out = _strip_ansi(result.stdout)
+        assert result.exit_code == 0, out
+        header = next(line for line in out.splitlines() if "userId" in line)
+        assert "deviceId" in header
+        assert header.index("userId") < header.index("deviceId")
+        assert "user-a" in out
+        assert "user-b" in out
+        assert "1000276123.1681742376" in out
+
+    def test_query_empty_rows_renders_standard_empty_output(self):
+        client, _ = self._client(
+            {"audienceExport": QUERY_RESPONSE["audienceExport"], "rowCount": 0}
+        )
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(app, _query_args("-o", "table"))
+
+        assert result.exit_code == 0
+        assert "No results found" in result.output
+
+    def test_query_table_hints_at_next_offset_when_more_rows_exist(self):
+        client, _ = self._client({**QUERY_RESPONSE, "rowCount": 5})
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(app, _query_args("--offset", "2", "-o", "table"))
+
+        assert result.exit_code == 0
+        err = _strip_ansi(result.stderr)
+        assert "of 5" in err
+        assert "--offset 4" in err
+
+    def test_query_missing_property_id(self):
+        result = runner.invoke(app, ["audience-exports", "query", "--export-id", "789"])
+        assert result.exit_code != 0
+        assert "property-id" in result.output.lower()
+
+
+class TestAudienceExportsQueryNotActive:
+    RAW_API_MESSAGE = "Audience export is not ready for query. raw-api-detail"
+
+    def _client(self, export_state=None, get_error=None, status=400):
+        client, exports = _mock_data_client()
+        exports.query.return_value.execute.side_effect = _http_error(
+            status, self.RAW_API_MESSAGE, "FAILED_PRECONDITION"
+        )
+        if get_error is not None:
+            exports.get.return_value.execute.side_effect = get_error
+        elif export_state is not None:
+            exports.get.return_value.execute.return_value = export_state
+        return client, exports
+
+    def test_creating_export_gives_friendly_message(self):
+        client, exports = self._client({**EXPORT_CREATING, "name": EXPORT_ACTIVE["name"]})
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(app, _query_args("-o", "table"))
+
+        out = _strip_ansi(result.output)
+        assert result.exit_code == 3
+        assert "export 789 is still CREATING (42%) — try again later" in out
+        assert "raw-api-detail" not in out
+        exports.get.assert_called_once_with(name="properties/123/audienceExports/789")
+
+    def test_failed_export_includes_error_message(self):
+        client, _ = self._client({**EXPORT_FAILED, "name": EXPORT_ACTIVE["name"]})
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(app, _query_args("-o", "table"))
+
+        out = _strip_ansi(result.output)
+        assert result.exit_code == 3
+        assert "FAILED" in out
+        assert "Quota exhausted for property" in out
+        assert "raw-api-detail" not in out
+
+    def test_friendly_error_is_structured_in_json_mode(self):
+        client, _ = self._client({**EXPORT_CREATING, "name": EXPORT_ACTIVE["name"]})
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(app, _query_args("-o", "json"))
+
+        assert result.exit_code == 3
+        assert result.stdout == ""
+        payload = json.loads(_strip_ansi(result.stderr).strip())
+        assert payload["error"] is True
+        assert payload["exit_code"] == 3
+        assert payload["category"] == "api_error"
+        assert "still CREATING (42%)" in payload["message"]
+
+    def test_active_export_surfaces_original_error(self):
+        client, _ = self._client(EXPORT_ACTIVE)
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(app, _query_args("-o", "table"))
+
+        assert result.exit_code == 3
+        assert "raw-api-detail" in _strip_ansi(result.output)
+
+    def test_get_failure_surfaces_original_error(self):
+        client, _ = self._client(get_error=_http_error(404, "not found", "NOT_FOUND"))
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(app, _query_args("-o", "table"))
+
+        assert result.exit_code == 3
+        assert "raw-api-detail" in _strip_ansi(result.output)
+
+    def test_auth_error_keeps_its_exit_code_when_state_is_active(self):
+        client, _ = self._client(EXPORT_ACTIVE, status=403)
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(app, _query_args("-o", "table"))
+
+        assert result.exit_code == 2
+
+    def test_server_error_does_not_look_up_state(self):
+        client, exports = self._client(EXPORT_CREATING, status=503)
+
+        with patch(PATCH_CLIENT, return_value=client):
+            result = runner.invoke(app, _query_args("-o", "table"))
+
+        assert result.exit_code == 3
+        assert "raw-api-detail" in _strip_ansi(result.output)
+        exports.get.assert_not_called()
