@@ -90,6 +90,30 @@ ga properties create -a ACCT --name "New Site" --timezone Europe/Berlin --dry-ru
 
 Dry-run, show the user what it would do, get agreement, then run it. `--yes` skips the confirmation prompt — that flag is a commitment, so don't reach for it just to get past a stall. Reports are read-only and safe to run freely.
 
+## Audience exports
+
+`ga audience-exports` pulls the *users* in an existing audience: one row per user, carrying the dimensions you ask for (`deviceId`, `userId`). It's a Data API snapshot, a different thing from `ga audiences`, which manages audience *definitions*. `list`, `get` and `query` are read-only; only `create` needs agreement. Find the audience ID first with `ga audiences list -p PROP -o json`; `--audience-id` takes the numeric ID or the full `properties/PROP/audiences/ID` name.
+
+**Dry-run `create` first, even though it changes no GA config.** The reference marks it `MUTATES` because it creates a server-side resource and charges quota tokens, so the Mutations rule applies in full: `--dry-run`, show the user, get agreement. It has no confirmation prompt and no `--yes`, so your agreement step is the only gate. Every `create` charges again, so don't re-run it to recover an ID (if `exportId` comes back `null`, find it with `ga audience-exports list -p PROP -o json`), and ask before retrying a `FAILED` export.
+
+**Never pass `--wait` in an agent session, which is every session you run.** An export typically takes ~15 minutes to become `ACTIVE`, which outlives your tool-call timeout. A `sleep`-and-`get` loop is the same mistake. Run `create` without it, report the `exportId` from its JSON to the user, and check on a later turn with `ga audience-exports get -p PROP --export-id EXPORT -o json`. If the user wants to block until it's done, that's `--wait` in their own terminal, not yours.
+
+**Run `query` only once `state` is `ACTIVE`.** Before that it fails with "still CREATING (N%) — try again later". Page with `--limit` and `--offset`: the default is 10,000 rows and the maximum is 250,000 per request. Advance `--offset` by the rows actually returned until you reach `rowCount`. A page of IDs is too big to read into your context, so write it to a file and report counts.
+
+The ID flags are long-only: `--export-id`, `--audience-id`. There are no short forms (`-a` is `--audience-id` in `ga audiences`, not here).
+
+Only request dimension names you can verify. `deviceId` and `userId` are safe. Export dimensions are their own schema, not report dimensions, and the CLI passes `--dimensions` through unchecked, so for anything else check Google's list at https://developers.google.com/analytics/devguides/reporting/data/v1/audience-list-api-schema#dimensions rather than guessing.
+
+```bash
+ga audiences list -p PROP -o json      # find the audience ID
+ga audience-exports create -p PROP --audience-id AUDIENCE --dimensions deviceId,userId --dry-run
+ga audience-exports create -p PROP --audience-id AUDIENCE --dimensions deviceId,userId -o json   # after agreement; NO --wait
+ga audience-exports get -p PROP --export-id EXPORT -o json      # a later turn: is state ACTIVE?
+ga audience-exports query -p PROP --export-id EXPORT --limit 10000 --offset 0 -o json > users_0.json
+```
+
+`references/recipes.md` has the full sequence, with paging.
+
 ## Reference files
 
 - `references/commands.md` — every command, its flags, and the short-flag collisions. Read before composing non-obvious commands.

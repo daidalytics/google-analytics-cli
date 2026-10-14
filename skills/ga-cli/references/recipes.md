@@ -1,6 +1,6 @@
 # Worked patterns
 
-Command shapes for the analyses people actually ask for. `PROP` is the numeric property ID; omit `-p` entirely if `default_property_id` is set. All of these are read-only.
+Command shapes for the analyses people actually ask for. `PROP` is the numeric property ID; omit `-p` entirely if `default_property_id` is set. All of these are read-only except the `create` step in [Export the users in an audience](#export-the-users-in-an-audience), which charges quota tokens.
 
 Contents:
 - [Traffic trend over time](#traffic-trend-over-time)
@@ -13,6 +13,7 @@ Contents:
 - [Funnels](#funnels)
 - [Auditing an account's configuration](#auditing-an-accounts-configuration)
 - [Investigating a drop](#investigating-a-drop)
+- [Export the users in an audience](#export-the-users-in-an-audience)
 
 ## Traffic trend over time
 
@@ -232,3 +233,48 @@ A structured sequence, because "traffic dropped" has a small number of usual cau
 5. **Check for config changes.** `ga accounts change-history -a ACCT -o json` shows who changed what and when — a tracking change on the right date explains a lot. `ga annotations list -p PROP -o json` may record a known event (a migration, a campaign launch).
 
 Report the finding, not the process: which segment moved, by how much, and what the evidence points to.
+
+## Export the users in an audience
+
+For "give me the device IDs in my Purchasers audience". This spans two turns, because an export takes ~15 minutes to build. SKILL.md's "Audience exports" section explains each rule.
+
+```bash
+# 1. Find the audience. `name` ends in the audience ID.
+ga audiences list -p PROP -o json | jq -r '.[] | "\(.name)\t\(.displayName)"'
+
+# 2. Preview the request, show the user, get agreement
+ga audience-exports create -p PROP --audience-id AUDIENCE \
+  --dimensions deviceId,userId --dry-run
+
+# 3. Create it. No --wait: it would outlive your tool-call timeout.
+ga audience-exports create -p PROP --audience-id AUDIENCE \
+  --dimensions deviceId,userId -o json | jq -r '.exportId'
+```
+
+Report the export ID and stop. Tell the user it typically takes ~15 minutes and that you'll check when they're back. If `exportId` is `null`, find the export with `ga audience-exports list -p PROP -o json` instead of creating another one; each `create` charges quota tokens again.
+
+On a later turn:
+
+```bash
+# 4. Is it ready?
+ga audience-exports get -p PROP --export-id EXPORT -o json \
+  | jq '{state, percentageCompleted, rowCount, errorMessage}'
+```
+
+`CREATING` means not yet: report `percentageCompleted` and check again later. `FAILED` carries an `errorMessage`; a common cause is quota exhaustion. Report it, and ask before creating a replacement. Only `ACTIVE` can be queried.
+
+```bash
+# 5. Page through the users, one file per page
+ga audience-exports query -p PROP --export-id EXPORT \
+  --limit 10000 --offset 0 -o json > users_0.json
+jq '{rowCount, returned: (.audienceRows | length)}' users_0.json
+
+# Next page: advance --offset by `returned`, until it reaches rowCount
+ga audience-exports query -p PROP --export-id EXPORT \
+  --limit 10000 --offset 10000 -o json > users_1.json
+
+# Flatten to CSV; .audienceExport.dimensions names the columns, in order
+jq -r '.audienceRows[] | [.dimensionValues[].value] | @csv' users_*.json > users.csv
+```
+
+`--limit` defaults to 10,000 and is capped at 250,000 per request, and a page can come back shorter than `--limit`, so step by `returned`, not by `--limit`. Thousands of IDs don't belong in your context or in the reply. Report `rowCount`, where the file is, and a few sample rows if the user wants them.

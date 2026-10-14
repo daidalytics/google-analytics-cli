@@ -10,6 +10,7 @@ from .commands.account_summaries import account_summaries_app
 from .commands.accounts import accounts_app
 from .commands.agent_cmd import agent_app
 from .commands.annotations import annotations_app
+from .commands.audience_exports import audience_exports_app
 from .commands.audiences import audiences_app
 from .commands.auth_cmd import auth_app
 from .commands.bigquery_links import bigquery_links_app
@@ -56,6 +57,7 @@ app.add_typer(access_bindings_app, name="access-bindings")
 app.add_typer(access_reports_app, name="access-reports")
 app.add_typer(annotations_app, name="annotations")
 app.add_typer(audiences_app, name="audiences")
+app.add_typer(audience_exports_app, name="audience-exports")
 app.add_typer(bigquery_links_app, name="bigquery-links")
 app.add_typer(calculated_metrics_app, name="calculated-metrics")
 app.add_typer(channel_groups_app, name="channel-groups")
