@@ -16,7 +16,7 @@ import platform
 from datetime import datetime, timezone
 from typing import Optional
 
-from .constants import get_chat_sessions_path, get_config_dir
+from .constants import get_chat_sessions_path
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ def _read_all() -> dict:
 
 def _write_all(data: dict) -> None:
     path = get_chat_sessions_path()
-    get_config_dir().mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2))
 
     if platform.system() != "Windows":

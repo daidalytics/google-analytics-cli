@@ -410,3 +410,35 @@ class TestIsEphemeralUvxEnv:
 
         monkeypatch.setattr(Path, "home", classmethod(_no_home))
         assert _is_ephemeral_uvx_env() is False
+
+
+class TestRunEntryPoint:
+    """`run()` is the console-script entry point. Typer's app() always ends in
+    sys.exit(), so the daily check must still run after it."""
+
+    def _run(self, monkeypatch, argv):
+        from ga_cli.main import run
+
+        monkeypatch.setattr("sys.argv", ["ga", *argv])
+        with patch("ga_cli.commands.upgrade_cmd.maybe_check_for_updates") as mock_check:
+            with pytest.raises(SystemExit) as exc_info:
+                run()
+        return exc_info.value.code, mock_check
+
+    def test_checks_for_updates_after_success(self, monkeypatch):
+        code, mock_check = self._run(monkeypatch, ["config", "path"])
+
+        assert code in (None, 0)
+        mock_check.assert_called_once()
+
+    def test_skips_check_after_failure(self, monkeypatch):
+        code, mock_check = self._run(monkeypatch, ["config", "get", "not_a_key"])
+
+        assert code == 1
+        mock_check.assert_not_called()
+
+    def test_skips_check_after_usage_error(self, monkeypatch):
+        code, mock_check = self._run(monkeypatch, ["no-such-command"])
+
+        assert code == 2
+        mock_check.assert_not_called()

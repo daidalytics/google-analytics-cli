@@ -30,6 +30,8 @@ npx skills add daidalytics/google-analytics-cli
 
 - **OAuth 2.0** — Browser-based login flow with automatic token refresh
 - **Service accounts** — Key-file authentication for CI/CD and server environments
+- **Named profiles** — One flag (`--profile`, or `GA_CLI_PROFILE`) switches client identity and default property together, for working across several clients' GA4 setups
+- **gcloud ADC fallback** — Uses gcloud Application Default Credentials when nothing else is configured, including keyless Workload Identity Federation in CI
 
 ### [GA4 Data API](https://developers.google.com/analytics/devguides/reporting/data/v1)
 
@@ -195,12 +197,62 @@ Or set an environment variable:
 export GA_CLI_SERVICE_ACCOUNT="/path/to/key.json"
 ```
 
+### Multiple clients: named profiles
+
+A profile bundles one client's credentials with that client's defaults (default property, default account, output format), so switching profile switches identity and target property together. Profiles share one OAuth client (`client_secret.json`), and each is created by the first `auth login` or `config set` that names it.
+
+```bash
+# Log in once per profile (OAuth or service account)
+ga --profile client-a auth login
+ga --profile client-b auth login --service-account /path/to/client-b-key.json
+
+# Give each profile its own default property
+ga --profile client-a config set default_property_id 123456789
+ga --profile client-b config set default_property_id 987654321
+
+# Pick a profile per command...
+ga --profile client-a reports run --metrics sessions --dimensions date
+
+# ...or per shell session
+export GA_CLI_PROFILE=client-b
+ga reports run --metrics sessions --dimensions date
+
+# See every profile, its auth method, its default property, and which one is active
+ga profiles list
+
+# Remove a profile's stored credentials and config (a service account key file is left alone)
+ga profiles delete old-client
+```
+
+- **`--profile` goes right after `ga`**, before the command group: `ga --profile client-a reports run …`. `ga reports run --profile client-a` fails with "No such option". `--profile` overrides `GA_CLI_PROFILE`.
+- **Nothing is saved as an "active profile".** Selection lasts for one command (`--profile`) or one shell (`GA_CLI_PROFILE`), so a new shell always starts on the default profile unless your shell config exports `GA_CLI_PROFILE`.
+- **A named profile never falls back.** It uses only its own stored credentials and ignores `GA_CLI_SERVICE_ACCOUNT`, `GOOGLE_APPLICATION_CREDENTIALS`, the default profile, and gcloud ADC. An unknown profile name is an error (exit code 2) that lists the known profiles.
+- **The default profile is your existing setup:** the files directly in `~/.config/ga-cli/`. Nothing is migrated, and without `--profile` everything works as before. Named profiles live in `~/.config/ga-cli/profiles/NAME/`, and `ga --profile NAME config path` prints a profile's config file.
+- Profile names use letters, digits, `.`, `_`, and `-`, starting with a letter or digit. `default` means the default profile.
+
+### gcloud Application Default Credentials
+
+If you use the gcloud CLI, GA CLI can authenticate with [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials) instead of its own login:
+
+```bash
+gcloud auth application-default login --scopes=https://www.googleapis.com/auth/analytics.readonly,https://www.googleapis.com/auth/cloud-platform
+
+# Optional: set the project used for quota and billing, if Google asks for one.
+# The Analytics Admin and Data APIs must be enabled in it.
+gcloud auth application-default set-quota-project YOUR_PROJECT_ID
+```
+
+The `--scopes` flag matters: gcloud user credentials carry only the scopes they were created with. The command above covers reading. For admin changes, add `https://www.googleapis.com/auth/analytics.edit` to `--scopes` (plus `analytics.manage.users` for access bindings, `analytics.chatbot.read` for `ga reports chat`). If a call fails for missing scopes while using ADC, the error includes the read-only login command above; add the extra scopes to it if the failing command needs them.
+
+ADC is the last resort. It is only used by the default profile, and only when nothing else is configured: no `GA_CLI_SERVICE_ACCOUNT`, no service-account `GOOGLE_APPLICATION_CREDENTIALS`, and no `ga auth login`. Named profiles never use it. `ga auth status` shows `adc` as the method when it's in use.
+
 ## Command Reference
 
 | Command | Subcommands | Description |
 |---------|-------------|-------------|
 | `ga auth` | `setup`, `login`, `logout`, `status` | Manage authentication |
 | `ga config` | `setup`, `get`, `set`, `unset`, `path`, `reset` | Manage CLI configuration |
+| `ga profiles` | `list`, `delete` | Manage named credential profiles |
 | `ga accounts` | `list`, `get`, `update`, `delete`, `get-data-sharing`, `change-history` | Manage GA4 accounts |
 | `ga account-summaries` | `list` | Quick overview of all accounts and properties |
 | `ga properties` | `list`, `get`, `create`, `update`, `delete`, `acknowledge-udc`, `quotas` | Manage GA4 properties |
@@ -321,7 +373,10 @@ ga reports chat "top pages" -o json    # raw ChatResponse for scripts
 --quiet, -q     Suppress non-essential output
 --no-color      Disable colored output
 --describe      Show full CLI schema as JSON (for agents and tooling)
+--profile NAME  Use a named profile (credentials + config); also GA_CLI_PROFILE
 ```
+
+Global options go right after `ga`, before the command group: `ga --profile client-a reports run …`.
 
 ## Shell Completions
 
@@ -337,8 +392,9 @@ ga completions fish > ~/.config/fish/completions/ga.fish
 |----------|-------------|
 | `GA_CLI_CLIENT_ID` | OAuth client ID (alternative to client_secret.json) |
 | `GA_CLI_CLIENT_SECRET` | OAuth client secret (alternative to client_secret.json) |
-| `GA_CLI_SERVICE_ACCOUNT` | Path to service account key file |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Standard GCP credential path (fallback) |
+| `GA_CLI_SERVICE_ACCOUNT` | Path to service account key file (default profile only) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Standard GCP credential path (default profile only): a service account key, or any other ADC credential file such as a Workload Identity Federation config, which is used via ADC |
+| `GA_CLI_PROFILE` | Named profile to use, like `--profile` (which takes precedence) |
 | `GA_CLI_CONFIG_DIR` | Override config directory |
 | `NO_COLOR` | Disable colored output |
 
@@ -361,6 +417,8 @@ jobs:
             --start-date 7daysAgo -o json > report.json
           rm /tmp/sa-key.json
 ```
+
+To avoid storing a key, use Workload Identity Federation instead: [`google-github-actions/auth`](https://github.com/google-github-actions/auth) (with `id-token: write` permission, impersonating a service account that has access to the GA4 property) sets `GOOGLE_APPLICATION_CREDENTIALS` to an `external_account` credential file, which GA CLI picks up through ADC. Skip `ga auth login` and use the default profile.
 
 ## Troubleshooting
 

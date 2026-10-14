@@ -26,11 +26,33 @@ A report against the wrong property looks exactly like an answer, which is what 
 ```bash
 ga auth status -o json    # authenticated? whose account?
 ga config get             # is there a default_property_id?
+ga profiles list -o json  # which client identities exist, and which is active
 ```
 
 If unauthenticated, tell the user to run `ga auth login` — it opens a browser and you can't complete it for them. If no default property is set and the user hasn't named one, list what's there (`ga account-summaries list -o json`) and ask which they mean. Don't silently pick the first one.
 
 Use `-o json` for anything you parse, and pipe through `jq`. Piped output already defaults to JSON, but pass `-o json` anyway so a user's configured `output_format` can't change it. Table output is for humans. `-o compact` on reports prints TSV with a header line, which is fine for a quick look.
+
+## Profiles
+
+A profile is one client's credentials plus its defaults (`default_property_id`, `default_account_id`, `output_format`). Switching profile switches identity and target property together, so the wrong profile doesn't fail: it returns another client's real numbers.
+
+**Never pick or switch to a profile the user didn't name.** If the request names a client ("how did Acme do last week?"), map it to a profile with `ga profiles list -o json` (`name`, `service_account_email`, `default_property_id`). If no profile clearly matches, or more than one could, ask. Running against the wrong client returns plausible numbers, so neither of you will notice the mistake. If the user names no client, don't add `--profile` at all; `"active": true` shows what bare commands use (`GA_CLI_PROFILE` may already be exported in their shell).
+
+**`--profile NAME` goes right after `ga`, before the command group, never after the subcommand.** `ga --profile client-a reports run …` works; `ga reports run … --profile client-a` fails with "No such option: --profile". The per-command env prefix `GA_CLI_PROFILE=client-a ga reports run …` is equivalent and often safer, because it can't be misplaced. Either way, repeat it on every command, orientation included. Nothing persists between your tool calls, so a command without it quietly runs on whatever profile is active, usually the default.
+
+```bash
+ga profiles list -o json                     # map the client the user named to a profile
+ga --profile client-a auth status -o json    # its identity
+ga --profile client-a config get             # its default_property_id
+GA_CLI_PROFILE=client-a ga reports run -m sessions -d date --end-date yesterday --order-by date:asc -o json
+```
+
+**A named profile never falls back.** It uses only its own stored credentials and ignores `GA_CLI_SERVICE_ACCOUNT`, `GOOGLE_APPLICATION_CREDENTIALS`, and gcloud ADC. An unknown profile exits 2 with `Profile 'X' does not exist. Known profiles: …`, and a profile without credentials also exits 2. A typo is therefore loud, not silent: report it, don't guess a fix. Two places stay quiet: `ga auth status` reports an unknown profile as `"authenticated": false` (exit 0) with that same message, and writes (`auth login`, `config set`) create the profile they name. Check a name against `ga profiles list` before writing to it.
+
+**Creating or deleting a profile needs the user.** `ga --profile X auth login` opens a browser, so tell the user to run it. `ga --profile X auth login --service-account KEY` works non-interactively, but only with a key path the user gave you; then `ga --profile X config set default_property_id PROP`. `ga profiles delete NAME` removes that profile's stored credentials and config, which is destructive. Ask first, and pass `--yes` only once they've agreed.
+
+**gcloud ADC is the default profile's last resort**, used only when no service account or `ga auth login` is configured. `ga auth status -o json` then shows `"method": "adc"`. gcloud user ADC carries only the scopes it was created with. If a call fails with insufficient scopes, the JSON error includes a `hint` field with the exact `gcloud auth application-default login --scopes=…` command. Relay it to the user: it's a browser login you can't run. Two follow-ups may be needed. If Google asks for a quota project, the user runs `gcloud auth application-default set-quota-project PROJECT`. And since the hinted scopes are read-only, admin writes need `https://www.googleapis.com/auth/analytics.edit` added to that login's `--scopes`.
 
 ## The working loop
 

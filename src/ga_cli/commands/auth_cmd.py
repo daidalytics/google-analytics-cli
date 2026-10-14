@@ -3,18 +3,25 @@
 Equivalent to GTM CLI's commands/auth.ts.
 """
 
-from typing import Optional
+from __future__ import annotations
+
+import os
+from typing import Any, Optional
 
 import typer
 
-from ..api.client import clear_client_cache
+from ..api.client import clear_client_cache, resolve_credentials
+from ..auth.credentials import has_credentials
 from ..auth.oauth import get_auth_status, login, logout
 from ..auth.service_account import (
     clear_auth_method,
     load_auth_method,
     login_with_service_account,
+    validate_service_account_key,
 )
+from ..config.constants import get_active_profile, is_named_profile
 from ..utils import error, info, output, resolve_output_format, success
+from ..utils.errors import NotAuthenticatedError, ProfileNotFoundError
 
 auth_app = typer.Typer(name="auth", help="Manage authentication", no_args_is_help=True)
 
@@ -167,45 +174,101 @@ def status_cmd(
         None, "--output", "-o", help="Output format (json, table, compact)"
     ),
 ):
-    """Show current authentication status."""
+    """Show the active profile's authentication status.
+
+    Reports the credentials API commands would actually use (service account,
+    OAuth, or gcloud ADC), resolved the same way. Not being authenticated is
+    reported, not an error: exit code 0 with "authenticated": false.
+    """
     output_format = resolve_output_format(output_format)
     try:
-        import os
-
-        # Check for env var override (same priority as GTM CLI)
-        env_key = os.environ.get("GA_CLI_SERVICE_ACCOUNT") or os.environ.get(
-            "GOOGLE_APPLICATION_CREDENTIALS"
-        )
-        if env_key:
-            data = {
-                "authenticated": True,
-                "method": "service-account",
-                "source": "environment variable",
-                "key_path": env_key,
-            }
-            output(data, output_format)
-            return
-
-        # Check saved auth method
-        auth_method = load_auth_method()
-        if auth_method and auth_method.get("method") == "service-account":
-            data = {
-                "authenticated": True,
-                "method": "service-account",
-                "email": auth_method.get("service_account_email"),
-                "key_path": auth_method.get("service_account_path"),
-            }
-            output(data, output_format)
-            return
-
-        # Fall back to OAuth
-        auth_status = get_auth_status()
-        auth_status["method"] = "oauth"
-        output(auth_status, output_format)
-
-        if not auth_status.get("authenticated"):
-            info("Run 'ga auth login' to authenticate.")
-
+        output(_auth_status(), output_format)
     except Exception as e:
         error(f"Failed to get status: {e}")
         raise typer.Exit(1)
+
+
+def _auth_status() -> dict[str, Any]:
+    """Status of the active profile, via the same resolution API calls use."""
+    profile = get_active_profile()
+    try:
+        creds, method = resolve_credentials()
+    except (NotAuthenticatedError, ProfileNotFoundError) as exc:
+        # A stored OAuth login that can no longer be used is still "oauth".
+        return _not_authenticated(profile, "oauth" if has_credentials() else "none", exc)
+    except (FileNotFoundError, ValueError) as exc:
+        # Only a configured service account key raises these: missing or invalid.
+        return _not_authenticated(profile, "service-account", exc)
+
+    if method == "service-account":
+        details = _service_account_details(creds)
+    elif method == "oauth":
+        details = {k: v for k, v in get_auth_status().items() if k != "authenticated"}
+    else:
+        details = _adc_details(creds)
+    return {"profile": profile, "authenticated": True, "method": method, **details}
+
+
+def _not_authenticated(profile: str, method: str, exc: Exception) -> dict[str, Any]:
+    return {
+        "profile": profile,
+        "authenticated": False,
+        "method": method,
+        "message": str(exc),
+    }
+
+
+def _string_attr(obj: object, name: str) -> Optional[str]:
+    value = getattr(obj, name, None)
+    return value if isinstance(value, str) and value else None
+
+
+def _service_account_details(creds: object) -> dict[str, Any]:
+    """Identity and key file of the service account resolution picked."""
+    email = _string_attr(creds, "service_account_email")
+    env_key = None if is_named_profile() else _env_service_account_key()
+    if env_key:
+        return {"source": "environment variable", "email": email, "key_path": env_key}
+
+    saved = load_auth_method() or {}
+    return {
+        "email": email or saved.get("service_account_email"),
+        "key_path": saved.get("service_account_path"),
+    }
+
+
+def _env_service_account_key() -> Optional[str]:
+    """The env var key the default profile's service account came from, if any.
+
+    Mirrors get_service_account_credentials(): ``GA_CLI_SERVICE_ACCOUNT`` wins;
+    ``GOOGLE_APPLICATION_CREDENTIALS`` counts only when it is a service account
+    key (any other credential type was skipped in favor of the saved account).
+    """
+    key = os.environ.get("GA_CLI_SERVICE_ACCOUNT")
+    if key:
+        return key
+    key = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if not key:
+        return None
+    try:
+        validate_service_account_key(key)
+    except (OSError, ValueError):
+        return None
+    return key
+
+
+def _adc_details(creds: object) -> dict[str, Any]:
+    """What gcloud ADC credentials reveal without a network call.
+
+    The ADC project is not shown: resolve_credentials() does not keep it, and
+    asking google.auth.default() again could mean another slow metadata probe.
+    """
+    details: dict[str, Any] = {}
+    # Service account flavors carry an email; GCE says "default" until refreshed.
+    email = _string_attr(creds, "service_account_email")
+    if email and "@" in email:
+        details["email"] = email
+    quota_project = _string_attr(creds, "quota_project_id")
+    if quota_project:
+        details["quota_project"] = quota_project
+    return details
