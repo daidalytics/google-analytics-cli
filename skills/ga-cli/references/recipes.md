@@ -111,7 +111,7 @@ ga reports run -p PROP -m 'keyEvents:purchase,sessionKeyEventRate:purchase' \
   -d sessionDefaultChannelGroup --start-date 30daysAgo -o json
 ```
 
-**`--order-by` can't take a colon-containing metric name.** The sort DSL splits on `:`, so `--order-by 'keyEvents:purchase:desc'` is parsed as field `keyEvents` with direction `purchase` and fails with "Invalid sort direction". Omit `--order-by` — results already default to the first metric descending, which is usually what you wanted — or sort client-side with `jq 'sort_by(...)'`.
+**Sorting by a colon-containing metric needs that metric in `-m`.** `--order-by 'keyEvents:purchase:desc'` works because `keyEvents:purchase` is one of the requested metrics, and the parser uses `-m`/`-d` to tell the field name from the direction. Without it, `purchase` is read as the direction and fails with "Invalid sort direction". Results already default to the first metric descending, so `--order-by` is often unnecessary here.
 
 Check which per-event metrics the property actually has before using them:
 

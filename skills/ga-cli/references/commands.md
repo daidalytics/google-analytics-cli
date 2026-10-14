@@ -33,8 +33,6 @@ Each of these was hit by an agent driving this CLI and cost a wasted round-trip:
 - **IDs are positional-looking but aren't.** `ga properties get 250400352` fails; it is `ga properties get -p 250400352`. Every ID goes through a flag.
 - **`accounts change-history --since/--until` needs full RFC3339 ending in `Z`.** Both `--since 2026-03-01` and `--since 180daysAgo` fail with an "Illegal timestamp format" API error; use `--since 2026-03-01T00:00:00Z`. The relative `NdaysAgo` keywords work for *report* date ranges only, not here. Omitting `--since` also works and returns recent history.
 - **`ga user-provided-data get` is broken** in the current release — it fails with `'Resource' object has no attribute 'getUserProvidedDataSettings'`. Skip it during audits; there's no CLI-side workaround.
-- **`-o compact` is broken for `reports run`** — exits 0 and prints nothing. It works fine elsewhere (`ga accounts list -o compact`). Use `-o json`.
-
 ---
 
 <!-- BEGIN GENERATED: ga --describe -->
@@ -266,7 +264,7 @@ Each of these was hit by an agent driving this CLI and cost a wasted round-trip:
 - `ga reports metadata` [-p]
   - opts: -t, -s
 - `ga reports pivot` -m X -d X --pivot-field X [-p]
-  - opts: --start-date, --end-date, -l
+  - opts: --start-date, --end-date, -l, --pivot-limit
 - `ga reports realtime` [-p]
   - opts: -m, -d, --interval, --dim-filter, --metric-filter, --filter-json, --order-by, --minute-range, --metric-aggregation, --return-property-quota
 - `ga reports run` [-p]

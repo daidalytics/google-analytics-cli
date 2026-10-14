@@ -30,7 +30,7 @@ ga config get             # is there a default_property_id?
 
 If unauthenticated, tell the user to run `ga auth login` — it opens a browser and you can't complete it for them. If no default property is set and the user hasn't named one, list what's there (`ga account-summaries list -o json`) and ask which they mean. Don't silently pick the first one.
 
-Use `-o json` for anything you parse, and pipe through `jq`. Table output is for humans. Avoid `-o compact` on reports specifically — it currently renders blank rows.
+Use `-o json` for anything you parse, and pipe through `jq`. Piped output already defaults to JSON, but pass `-o json` anyway so a user's configured `output_format` can't change it. Table output is for humans. `-o compact` on reports prints TSV with a header line, which is fine for a quick look.
 
 ## The working loop
 
@@ -49,7 +49,7 @@ Use `-o json` for anything you parse, and pipe through `jq`. Table output is for
 
 These are properties of this tool, not of GA4, so nothing else will warn you:
 
-- **`--order-by` can't take a colon-containing metric.** The sort DSL splits on `:`, so `--order-by 'keyEvents:purchase:desc'` parses `purchase` as the direction and fails. Omit it (results already default to first-metric-descending) or sort client-side with `jq`.
+- **A colon-containing field in `--order-by` must also be in `-m` or `-d`.** `--order-by 'keyEvents:purchase:desc'` works when `keyEvents:purchase` is one of your `-m` metrics: the parser uses `-m`/`-d` to tell the field name from the direction. If it isn't listed, `purchase` is read as the direction and the command fails with "Invalid sort direction". The format is `field[:asc|desc[:alpha|ialpha|numeric]]`; anything more is rejected.
 - **The filter DSL has no OR.** Repeated `--dim-filter` flags AND together. For OR across *one* field use `in`: `--dim-filter 'country in United States,Canada'`. For OR across *different* fields you must drop to raw JSON: `--filter-json '{"orGroup":{"expressions":[...]}}'` or `--filter-json @file.json`.
 - **Interactive commands will hang a non-interactive session.** `ga reports build`, `ga config setup`, and `ga reports realtime --interval` never return. Use `ga reports run` with explicit flags and `ga config set KEY VALUE`.
 - **`ga reports chat` is alpha and gated** — a 403 means either no access or not enabled, indistinguishable — and it's token-metered. Prefer `ga reports run`.
