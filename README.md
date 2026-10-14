@@ -6,6 +6,24 @@ Manage GA4 accounts, properties, data streams, and run reports — all from your
 
 Read an introductory blog post on the GA CLI on [gunnargriese.com](https://gunnargriese.com/posts/google-analytics-cli/).
 
+## Use with AI agents
+
+GA CLI ships an agent skill, `ga-cli`, that teaches coding agents to run reports and manage GA4 through the CLI.
+
+```bash
+# Run without installing (needs uv)
+uvx google-analytics-cli --help
+
+# Add the skill to Claude Code, Cursor, Codex, …
+npx skills add daidalytics/google-analytics-cli
+```
+
+```
+# Or as a Claude Code plugin
+/plugin marketplace add daidalytics/google-analytics-cli
+/plugin install google-analytics-cli@daidalytics
+```
+
 ## Features
 
 ### Authentication
@@ -100,8 +118,10 @@ uv run ga --help
 
 ### One-off execution (no install)
 
+With [uv](https://docs.astral.sh/uv/), swap `ga` for `uvx google-analytics-cli` in any command:
+
 ```bash
-uvx --from git+https://github.com/daidalytics/google-analytics-cli.git ga --help
+uvx google-analytics-cli accounts list
 ```
 
 ## Quick Start
@@ -342,7 +362,7 @@ jobs:
 
 ## Troubleshooting
 
-**`ga` runs `git add` instead of GA CLI.** You have a shell alias shadowing the command — commonly `alias ga='git add'` in `~/.gitconfig`-style setups or `~/.zshrc`/`~/.bashrc`. Run `type ga` to confirm, then `unalias ga` (or remove the alias from your shell config) and restart your shell.
+**`ga` runs `git add` instead of GA CLI.** You have a shell alias shadowing the command — commonly `alias ga='git add'` in `~/.gitconfig`-style setups or `~/.zshrc`/`~/.bashrc`. Run `type ga` to confirm, then `unalias ga` (or remove the alias from your shell config) and restart your shell. The same CLI is also installed as `google-analytics-cli`, which sidesteps the alias entirely.
 
 **`ga: command not found` after install.** Your Python user bin directory isn't on `PATH`. For `pip install --user`, `pipx`, or `uv tool install`, the binary lives in `~/.local/bin` on Linux/macOS. Add it to your shell config:
 
