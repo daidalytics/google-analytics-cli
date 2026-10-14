@@ -28,6 +28,7 @@ from .commands.firebase_links import firebase_links_app
 from .commands.google_ads_links import google_ads_links_app
 from .commands.key_events import key_events_app
 from .commands.mp_secrets import mp_secrets_app
+from .commands.profiles import profiles_app
 from .commands.properties import properties_app
 from .commands.property_settings import property_settings_app
 from .commands.reports import reports_app
@@ -43,6 +44,7 @@ app = typer.Typer(
 # Register command groups
 app.add_typer(auth_app, name="auth")
 app.add_typer(config_app, name="config")
+app.add_typer(profiles_app, name="profiles")
 app.add_typer(accounts_app, name="accounts")
 app.add_typer(account_summaries_app, name="account-summaries")
 app.add_typer(properties_app, name="properties")
