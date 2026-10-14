@@ -81,6 +81,15 @@ Each of these was hit by an agent driving this CLI and cost a wasted round-trip:
 - `ga annotations update` -a X [-p]  _MUTATES, --dry-run_
   - opts: --title, --description, --color
 
+### ga audience-exports
+
+- `ga audience-exports create` --audience-id X --dimensions X [-p]  _MUTATES, --dry-run_
+  - opts: --wait, --timeout
+- `ga audience-exports get` --export-id X [-p]
+- `ga audience-exports list` [-p]
+- `ga audience-exports query` --export-id X [-p]
+  - opts: --limit, --offset
+
 ### ga audiences
 
 - `ga audiences archive` -a X [-p]

@@ -38,6 +38,7 @@ npx skills add daidalytics/google-analytics-cli
 - **Report builder** — Interactive metric/dimension selection via `ga reports build`
 - **Compatibility checks** — Validate metric/dimension combinations before running reports
 - **Metadata** — Browse and search available metrics and dimensions
+- **Audience exports** — Export the users in an audience (e.g. device and user IDs) as a snapshot, then page through them
 
 ### [GA4 Admin API](https://developers.google.com/analytics/devguides/config/admin/v1)
 
@@ -209,6 +210,7 @@ export GA_CLI_SERVICE_ACCOUNT="/path/to/key.json"
 | `ga data-streams` | `list`, `get`, `create`, `update`, `delete` | Manage data streams |
 | `ga key-events` | `list`, `get`, `create`, `update`, `delete` | Manage key events (conversions) |
 | `ga audiences` | `list`, `get`, `create`, `update`, `archive` | Manage audiences |
+| `ga audience-exports` | `list`, `get`, `query`, `create` | Export the users in an audience |
 | `ga access-bindings` | `list`, `get`, `create`, `update`, `delete` | Manage user-role assignments |
 | `ga access-reports` | `run-account`, `run-property` | Run data-access reports |
 | `ga data-retention` | `get`, `update` | View and update data retention settings |
