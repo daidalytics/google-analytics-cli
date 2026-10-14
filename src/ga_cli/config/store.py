@@ -1,8 +1,9 @@
 """User configuration persistence.
 
 Implements the same pattern as GTM CLI:
-- JSON file at ~/.config/ga-cli/config.json
-- In-memory cache for performance
+- JSON file at ~/.config/ga-cli/config.json (the default profile), or
+  ~/.config/ga-cli/profiles/<name>/config.json for a named profile
+- In-memory cache for performance, keyed by the file it was read from
 - CLI flag > config file > None resolution via get_effective_value()
 """
 
@@ -10,9 +11,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Literal, Optional
 
-from .constants import get_config_dir, get_config_path
+from .constants import get_config_path
 
 OutputFormat = Literal["json", "table", "compact"]
 
@@ -27,17 +29,21 @@ class UserConfig:
     output_format: Optional[OutputFormat] = None
 
 
-# In-memory cache (same pattern as GTM CLI)
+# In-memory cache (same pattern as GTM CLI). It remembers which file it came
+# from, so switching profiles (which changes get_config_path()) can never serve
+# another profile's config.
 _cached_config: Optional[UserConfig] = None
+_cached_config_path: Optional[Path] = None
 
 
 def load_config() -> UserConfig:
     """Load config from disk, merge with defaults, cache in memory."""
-    global _cached_config
-    if _cached_config is not None:
+    global _cached_config, _cached_config_path
+    config_path = get_config_path()
+    if _cached_config is not None and _cached_config_path == config_path:
         return _cached_config
 
-    config_path = get_config_path()
+    _cached_config_path = config_path
     try:
         data = json.loads(config_path.read_text())
         _cached_config = UserConfig(
@@ -52,15 +58,19 @@ def load_config() -> UserConfig:
 
 
 def save_config(config: UserConfig) -> None:
-    """Write config to disk and update cache."""
-    global _cached_config
-    config_dir = get_config_dir()
-    config_dir.mkdir(parents=True, exist_ok=True)
+    """Write config to disk and update cache.
+
+    Creates the active profile's directory on first write.
+    """
+    global _cached_config, _cached_config_path
+    config_path = get_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Only write non-None values
     data = {k: v for k, v in asdict(config).items() if v is not None}
-    get_config_path().write_text(json.dumps(data, indent=2))
+    config_path.write_text(json.dumps(data, indent=2))
     _cached_config = config
+    _cached_config_path = config_path
 
 
 def update_config(**updates: str) -> UserConfig:

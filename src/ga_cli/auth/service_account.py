@@ -19,7 +19,7 @@ from typing import Optional
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 
-from ..config.constants import OAUTH_SCOPES, get_auth_method_path, get_config_dir
+from ..config.constants import OAUTH_SCOPES, get_auth_method_path
 
 logger = logging.getLogger(__name__)
 
@@ -128,10 +128,10 @@ def get_service_account_credentials() -> Optional[service_account.Credentials]:
 
 
 def _save_auth_method(config: dict) -> None:
-    """Save auth method configuration."""
-    config_dir = get_config_dir()
-    config_dir.mkdir(parents=True, exist_ok=True)
-    get_auth_method_path().write_text(json.dumps(config, indent=2))
+    """Save auth method configuration, creating the active profile's dir."""
+    path = get_auth_method_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2))
 
 
 def _load_auth_method() -> Optional[dict]:

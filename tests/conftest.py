@@ -10,10 +10,21 @@ def isolated_config_dir(tmp_path, monkeypatch):
     """Point GA_CLI_CONFIG_DIR to a temp dir so tests never touch real config."""
     monkeypatch.setenv("GA_CLI_CONFIG_DIR", str(tmp_path))
 
+    # A developer may have a profile exported; every test starts on default.
+    monkeypatch.delenv("GA_CLI_PROFILE", raising=False)
+    from ga_cli.config.constants import set_active_profile
+
+    set_active_profile(None)
+
     # Also clear the in-memory config cache between tests
     from ga_cli.config import store
 
     store._cached_config = None
+
+    # Drop API clients cached by a previous test (possibly under another profile)
+    from ga_cli.api.client import clear_client_cache
+
+    clear_client_cache()
 
     # Reset global output flags between tests
     from ga_cli.utils.output import set_no_color, set_output_format, set_quiet

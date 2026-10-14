@@ -19,7 +19,6 @@ from google.oauth2.credentials import Credentials
 
 from ..config.constants import (
     OAUTH_SCOPES,
-    get_config_dir,
     get_credentials_path,
 )
 
@@ -29,12 +28,11 @@ logger = logging.getLogger(__name__)
 def save_credentials(credentials: Credentials) -> None:
     """Save OAuth credentials to disk.
 
-    Stores the token data as JSON with 0o600 permissions on Unix.
+    Stores the token data as JSON with 0o600 permissions on Unix. Creates the
+    active profile's directory on first write.
     """
-    config_dir = get_config_dir()
-    config_dir.mkdir(parents=True, exist_ok=True)
-
     creds_path = get_credentials_path()
+    creds_path.parent.mkdir(parents=True, exist_ok=True)
 
     data = {
         "token": credentials.token,
