@@ -1,5 +1,6 @@
 """Tests for config commands (setup, get, set, unset, path, reset)."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
@@ -125,6 +126,48 @@ class TestPathCommand:
 
         assert result.exit_code == 0
         assert "config.json" in result.output
+
+    def test_default_profile_path_is_unchanged(self, isolated_config_dir):
+        """The default profile is the config root: same output as before profiles."""
+        result = runner.invoke(app, ["config", "path"])
+
+        assert result.exit_code == 0
+        assert result.stdout == f"{isolated_config_dir / 'config.json'}\n"
+
+    def test_named_profile_path(self, isolated_config_dir):
+        result = runner.invoke(app, ["--profile", "client-a", "config", "path"])
+
+        assert result.exit_code == 0
+        expected = isolated_config_dir / "profiles" / "client-a" / "config.json"
+        assert result.stdout == f"{expected}\n"
+
+    def test_profile_from_env_var(self, isolated_config_dir, monkeypatch):
+        monkeypatch.setenv("GA_CLI_PROFILE", "client-b")
+
+        result = runner.invoke(app, ["config", "path"])
+
+        assert result.exit_code == 0
+        expected = isolated_config_dir / "profiles" / "client-b" / "config.json"
+        assert result.stdout == f"{expected}\n"
+
+    def test_path_does_not_create_the_profile(self, isolated_config_dir):
+        """It shows where `config set` would write; only a write creates the profile."""
+        result = runner.invoke(app, ["--profile", "client-a", "config", "path"])
+
+        assert result.exit_code == 0
+        assert not (isolated_config_dir / "profiles" / "client-a").exists()
+
+    def test_path_matches_where_config_set_writes(self, isolated_config_dir):
+        printed = runner.invoke(app, ["--profile", "client-a", "config", "path"]).stdout.strip()
+
+        result = runner.invoke(
+            app, ["--profile", "client-a", "config", "set", "default_property_id", "123"]
+        )
+
+        assert result.exit_code == 0
+        assert Path(printed).is_file()
+        assert '"default_property_id": "123"' in Path(printed).read_text()
+        assert not (isolated_config_dir / "config.json").exists()
 
 
 class TestResetCommand:

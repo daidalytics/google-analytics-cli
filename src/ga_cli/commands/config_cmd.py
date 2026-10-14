@@ -99,7 +99,11 @@ def unset(key: str = typer.Argument(help="Config key to remove")):
 
 @config_app.command("path")
 def path():
-    """Show configuration file path."""
+    """Show the active profile's configuration file path.
+
+    The default profile's file sits in the config root; a named profile's in
+    profiles/NAME/. Printing it does not create the profile.
+    """
     print(get_config_path())
 
 

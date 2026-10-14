@@ -22,6 +22,14 @@ ADC_LOGIN_COMMAND = (
     "https://www.googleapis.com/auth/cloud-platform"
 )
 
+# Google's ErrorInfo reason for an access token that lacks a required scope.
+SCOPE_INSUFFICIENT_REASON = "ACCESS_TOKEN_SCOPE_INSUFFICIENT"
+
+ADC_SCOPE_HINT = (
+    "These credentials come from gcloud Application Default Credentials "
+    f"without the Analytics scopes. Run: {ADC_LOGIN_COMMAND}"
+)
+
 
 class NotAuthenticatedError(RuntimeError):
     """No usable credentials for the active profile. Exit 2 (``auth_error``)."""
@@ -131,16 +139,63 @@ def _is_network_os_error(err: OSError) -> bool:
     return err.errno in network_errnos
 
 
+def _error_reasons(err: Exception) -> set[str]:
+    """The ``reason`` values in a Google API error body's ``error.details``.
+
+    Empty for anything that is not an HttpError with a parseable body.
+    """
+    from googleapiclient.errors import HttpError
+
+    if not isinstance(err, HttpError):
+        return set()
+    try:
+        details = json.loads(err.content.decode()).get("error", {}).get("details")
+    except (ValueError, AttributeError):  # ValueError covers JSON and Unicode errors
+        return set()
+    if not isinstance(details, list):
+        return set()
+    return {
+        detail["reason"]
+        for detail in details
+        if isinstance(detail, dict) and isinstance(detail.get("reason"), str)
+    }
+
+
+def error_hint(err: Exception) -> str | None:
+    """Advice to show alongside an error, or None.
+
+    Only case today: a 403 ``ACCESS_TOKEN_SCOPE_INSUFFICIENT`` while the
+    credentials came from gcloud ADC. User ADC ignores the scopes a client asks
+    for unless it was created with them (SPEC B4), so the fix is a re-login.
+    """
+    from googleapiclient.errors import HttpError
+
+    if not isinstance(err, HttpError) or err.resp.status != 403:
+        return None
+    if SCOPE_INSUFFICIENT_REASON not in _error_reasons(err):
+        return None
+
+    # Imported lazily: api.client imports this module.
+    from ..api.client import get_last_auth_method
+
+    if get_last_auth_method() != "adc":
+        return None
+    return ADC_SCOPE_HINT
+
+
 def handle_error(err: Exception) -> NoReturn:
     """Print error and exit with a classified exit code.
 
     When output format is JSON (explicit or non-TTY), emit structured
-    JSON to stderr. Otherwise, emit human-readable Rich text.
+    JSON to stderr. Otherwise, emit human-readable Rich text. Advice from
+    ``error_hint()`` goes in a separate ``"hint"`` field (JSON) or on its own
+    line after the message (text); the message itself is never altered.
     """
     from .output import get_current_output_format
 
     exit_code, category = classify_error(err)
     message = format_api_error(err)
+    hint = error_hint(err)
     fmt = get_current_output_format()
 
     if fmt == "json":
@@ -154,11 +209,13 @@ def handle_error(err: Exception) -> NoReturn:
 
         if isinstance(err, HttpError):
             payload["status_code"] = err.resp.status
+        if hint:
+            payload["hint"] = hint
 
         # Write raw JSON to stderr — avoid Rich Console which may wrap lines
         print(json.dumps(payload, default=str), file=sys.stderr)
     else:
-        print_error(message)
+        print_error(f"{message}\n{hint}" if hint else message)
 
     sys.exit(exit_code)
 

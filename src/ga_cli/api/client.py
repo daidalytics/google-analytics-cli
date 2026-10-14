@@ -53,6 +53,11 @@ _cached_admin_alpha_client: Optional[Resource] = None
 _cached_data_client: Optional[Resource] = None
 _cached_data_alpha_client: Optional[Resource] = None
 
+# How the most recent successful resolve_credentials() call authenticated, so
+# error handling can tailor its advice (the ADC scope hint). Reset with the
+# client cache.
+_last_auth_method: Optional[AuthMethod] = None
+
 # The pre-ADC "Not authenticated" message. Still used when a stored OAuth token
 # exists but cannot be loaded or refreshed: that is a login to repair, and ADC
 # is not consulted while it is there.
@@ -73,6 +78,9 @@ def resolve_credentials() -> tuple[Credentials, AuthMethod]:
         FileNotFoundError, ValueError: A configured service account key is
             missing or invalid (there is no fallback past it).
     """
+    global _last_auth_method
+    _last_auth_method = None
+
     profile = get_active_profile()
     named = is_named_profile()
 
@@ -90,11 +98,13 @@ def resolve_credentials() -> tuple[Credentials, AuthMethod]:
             from google.auth.transport.requests import Request
 
             sa_creds.refresh(Request())
+        _last_auth_method = "service-account"
         return sa_creds, "service-account"
 
     # The active profile's stored OAuth token (refreshed if expired).
     oauth_creds = get_valid_credentials()
     if oauth_creds is not None:
+        _last_auth_method = "oauth"
         return oauth_creds, "oauth"
 
     if named:
@@ -113,7 +123,17 @@ def resolve_credentials() -> tuple[Credentials, AuthMethod]:
         adc_creds, _project = google.auth.default(scopes=OAUTH_SCOPES)
     except DefaultCredentialsError as exc:
         raise NotAuthenticatedError(_not_authenticated_message(exc)) from exc
+    _last_auth_method = "adc"
     return adc_creds, "adc"
+
+
+def get_last_auth_method() -> Optional[AuthMethod]:
+    """How the most recent successful ``resolve_credentials()`` call authenticated.
+
+    None before any resolution, after a failed one, and after
+    ``clear_client_cache()``.
+    """
+    return _last_auth_method
 
 
 def _not_authenticated_message(adc_error: DefaultCredentialsError) -> str:
@@ -222,7 +242,9 @@ def clear_client_cache() -> None:
     """Clear cached API clients (e.g., after re-authentication)."""
     global _cached_admin_client, _cached_admin_alpha_client
     global _cached_data_client, _cached_data_alpha_client
+    global _last_auth_method
     _cached_admin_client = None
     _cached_admin_alpha_client = None
     _cached_data_client = None
     _cached_data_alpha_client = None
+    _last_auth_method = None

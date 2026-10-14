@@ -1,8 +1,33 @@
 """Shared fixtures for auth tests."""
 
 import importlib
+from unittest.mock import MagicMock
 
 import pytest
+from google.auth.exceptions import DefaultCredentialsError
+
+
+@pytest.fixture(autouse=True)
+def no_gcloud_adc(monkeypatch):
+    """Never let a test reach the dev machine's real gcloud ADC.
+
+    ``google.auth.default`` raises ``DefaultCredentialsError`` in every test,
+    so credential resolution ends in "not authenticated" instead of picking up
+    real credentials (or probing the GCE metadata server). A test that wants
+    ADC patches ``google.auth.default`` itself, or sets this mock's
+    ``side_effect``/``return_value``.
+
+    Exported credential env vars are dropped for the same reason: tests that
+    need them set their own.
+    """
+    monkeypatch.delenv("GA_CLI_SERVICE_ACCOUNT", raising=False)
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+
+    mock = MagicMock(
+        side_effect=DefaultCredentialsError("gcloud ADC is disabled in tests (conftest)")
+    )
+    monkeypatch.setattr("google.auth.default", mock)
+    return mock
 
 
 @pytest.fixture(autouse=True)
