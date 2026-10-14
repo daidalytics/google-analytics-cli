@@ -2,7 +2,7 @@
 
 Status: **Implemented on three local lanes. Live checks and PR/release decisions pending.** See
 Implementation Notes at the end.
-Target version: 0.5.0 (tentative; release is ask-first)
+Target version: **0.6.0** (0.5.0 shipped upstream on 2026-10-13; release is ask-first)
 Date: 2026-10-14
 
 Previous spec (ResponseMetaData / Data Notes, shipped in 0.4.0) lives in git history at `83d793b`.
@@ -643,6 +643,8 @@ is sequential.
    marketplaces sharing a name on users' machines.
 
 ## Implementation Notes (2026-10-14)
+
+**Rebased onto 0.5.0.** The lanes were first cut from a stale local `master` (0.4.0). They were then rebased onto `origin/master` @ `225822f` (v0.5.0), which shipped output escaping, pipe-aware JSON defaults, TSV compact output and order-by fixes. Upstream's spec for that work is at `git show 225822f:SPEC.md`. Two skill warnings became wrong in 0.5.0 (compact output on reports; colon fields in `--order-by`) and were rewritten. `plugin.json` now tracks 0.5.0.
 
 These are deviations and findings recorded during implementation (`tasks/plan.md`, `tasks/todo.md`).
 Each one is pinned by a test unless marked otherwise.

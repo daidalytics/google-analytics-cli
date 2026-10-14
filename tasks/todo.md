@@ -1,5 +1,7 @@
 # TODO: Agent distribution, named profiles, and audience exports
 
+> **2026-10-14:** all lanes rebased onto `origin/master` v0.5.0 (`225822f`). They had been cut from a stale local `master` (0.4.0). Pre-rebase state is kept in `backup/pre-rebase-0.5.0/*`.
+
 Task detail in [plan.md](plan.md) · design in [SPEC.md](../SPEC.md) · baseline 997 tests green
 
 Legend: `∥` = runs in parallel with its siblings, each in its own worktree agent.
@@ -55,5 +57,5 @@ Legend: `∥` = runs in parallel with its siblings, each in its own worktree age
 - [x] ∥ **D1** · Profiles + ADC in SKILL.md / README; regenerate reference (S) · behaviour checked by running the CLI against a scratch config
 - [x] ∥ **D2** · Audience exports in SKILL.md / recipes / README; regenerate reference (S)
 
-- [ ] **FINAL CHECKPOINT** (trial merge of all three lanes: **no conflicts**, 1343 tests green, drift check clean, ruff clean): PRs B + C green on CI · second merge regenerates `commands.md` · Success Criteria 1–15 mapped · SPEC.md living updates · **ask about the 0.5.0 bump** (`pyproject.toml` + `plugin.json`)
+- [ ] **FINAL CHECKPOINT** (trial merge of all three lanes: **no conflicts**, 1343 tests green, drift check clean, ruff clean): PRs B + C green on CI · second merge regenerates `commands.md` · Success Criteria 1–15 mapped · SPEC.md living updates · **ask about the 0.6.0 bump** (`pyproject.toml` + `plugin.json`; 0.5.0 already shipped upstream)
 
