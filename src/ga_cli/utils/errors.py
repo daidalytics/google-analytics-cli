@@ -42,6 +42,17 @@ class ProfileNotFoundError(RuntimeError):
     in ``--profile`` must never fall back to another identity.
     """
 
+    @classmethod
+    def for_profile(cls, profile: str) -> ProfileNotFoundError:
+        """Build the error with the known-profiles list and the create hint."""
+        from ..config.constants import list_profiles
+
+        return cls(
+            f"Profile '{profile}' does not exist. "
+            f"Known profiles: {', '.join(list_profiles())}.\n"
+            f"Create it with: ga --profile {profile} auth login"
+        )
+
 
 def format_api_error(err: Exception) -> str:
     """Extract a human-readable message from a Google API error.

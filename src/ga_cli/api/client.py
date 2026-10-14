@@ -40,7 +40,6 @@ from ..config.constants import (
     OAUTH_SCOPES,
     get_active_profile,
     is_named_profile,
-    list_profiles,
     profile_exists,
 )
 from ..utils.errors import ADC_LOGIN_COMMAND, NotAuthenticatedError, ProfileNotFoundError
@@ -85,11 +84,7 @@ def resolve_credentials() -> tuple[Credentials, AuthMethod]:
     named = is_named_profile()
 
     if named and not profile_exists(profile):
-        raise ProfileNotFoundError(
-            f"Profile '{profile}' does not exist. "
-            f"Known profiles: {', '.join(list_profiles())}.\n"
-            f"Create it with: ga --profile {profile} auth login"
-        )
+        raise ProfileNotFoundError.for_profile(profile)
 
     # Service account. A named profile only reads its own auth-method.json.
     sa_creds = get_service_account_credentials()

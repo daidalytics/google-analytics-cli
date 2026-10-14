@@ -7,6 +7,7 @@ from typing import Optional
 
 import typer
 
+from ..config.constants import get_active_profile, profile_exists
 from ..config.store import (
     VALID_CONFIG_KEYS,
     UserConfig,
@@ -18,9 +19,21 @@ from ..config.store import (
     set_config_value,
     unset_config_value,
 )
-from ..utils import error, info, output, success
+from ..utils import error, handle_error, info, output, success
+from ..utils.errors import ProfileNotFoundError
 
 config_app = typer.Typer(name="config", help="Manage CLI configuration", no_args_is_help=True)
+
+
+def _require_existing_profile() -> None:
+    """Exit 2 if the active named profile doesn't exist.
+
+    Only `set` and `setup` create a profile. A typo in --profile must not read
+    as an empty config, or be created by `unset`/`reset`.
+    """
+    profile = get_active_profile()
+    if not profile_exists(profile):
+        handle_error(ProfileNotFoundError.for_profile(profile))
 
 
 @config_app.command("setup")
@@ -58,6 +71,7 @@ def setup():
 @config_app.command("get")
 def get_cmd(key: Optional[str] = typer.Argument(None, help="Config key to retrieve")):
     """Get configuration values."""
+    _require_existing_profile()
     if key:
         if key not in VALID_CONFIG_KEYS:
             error(f"Unknown config key: {key}. Valid keys: {', '.join(VALID_CONFIG_KEYS)}")
@@ -93,6 +107,7 @@ def unset(key: str = typer.Argument(help="Config key to remove")):
     if key not in VALID_CONFIG_KEYS:
         error(f"Unknown config key: {key}. Valid keys: {', '.join(VALID_CONFIG_KEYS)}")
         raise typer.Exit(1)
+    _require_existing_profile()
     unset_config_value(key)
     success(f"Unset {key}")
 
@@ -111,6 +126,7 @@ def path():
 def reset():
     """Reset all configuration to defaults."""
     import questionary
+    _require_existing_profile()
     if questionary.confirm("Reset all configuration to defaults?", default=False).ask():
         clear_config()
         success("Configuration reset.")

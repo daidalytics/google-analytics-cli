@@ -261,6 +261,7 @@ class TestImplicitCreation:
         runner.invoke(app, ["config", "set", "default_property_id", "root-prop"])
         # Prime the in-memory cache under the default profile.
         assert runner.invoke(app, ["config", "get", "default_property_id"]).exit_code == 0
+        runner.invoke(app, ["--profile", "x", "config", "set", "output_format", "json"])
 
         result = runner.invoke(app, ["--profile", "x", "config", "get", "default_property_id"])
 
@@ -362,7 +363,7 @@ class TestClientCacheIsolation:
 
         self._prime_admin_client()
 
-        result = runner.invoke(app, ["--profile", "x", "config", "get"])
+        result = runner.invoke(app, ["--profile", "x", "config", "path"])
 
         assert result.exit_code == 0, result.output
         assert client._cached_admin_client is None
