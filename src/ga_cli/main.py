@@ -148,8 +148,14 @@ def run():
     """Entry point for the CLI (called by pyproject.toml [project.scripts])."""
     from .commands.upgrade_cmd import maybe_check_for_updates
 
-    app()
-    maybe_check_for_updates()
+    try:
+        app()
+    except SystemExit as exc:
+        # Typer's standalone mode always ends in sys.exit(), so the check must
+        # run here. Skipped after errors to keep stderr to the error alone.
+        if exc.code in (None, 0):
+            maybe_check_for_updates()
+        raise
 
 
 if __name__ == "__main__":
