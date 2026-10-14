@@ -368,10 +368,11 @@ class TestCredentialResolution:
         assert "--service-account" in message
         assert "GA_CLI_SERVICE_ACCOUNT" in message
         assert (
-            "gcloud auth application-default login --scopes="
-            "https://www.googleapis.com/auth/analytics.readonly,"
+            "gcloud auth application-default login --client-id-file=CLIENT_SECRET_JSON "
+            "--scopes=https://www.googleapis.com/auth/analytics.readonly,"
             "https://www.googleapis.com/auth/cloud-platform"
         ) in message
+        assert "--impersonate-service-account=" in message
         assert classify_error(exc_info.value) == (2, "auth_error")
 
     @pytest.mark.parametrize(

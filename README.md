@@ -232,17 +232,36 @@ ga profiles delete old-client
 
 ### gcloud Application Default Credentials
 
-If you use the gcloud CLI, GA CLI can authenticate with [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials) instead of its own login:
+If you use the gcloud CLI, GA CLI can authenticate with [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials) instead of its own login.
+
+A plain `gcloud auth application-default login --scopes=…analytics.readonly…` does **not** work: Google blocks gcloud's built-in OAuth client from the Analytics scopes ("This app is blocked"). Use one of these instead.
+
+**Option 1: your own OAuth client.** Pass the Desktop-app `client_secret.json` you created for `ga auth login`:
 
 ```bash
-gcloud auth application-default login --scopes=https://www.googleapis.com/auth/analytics.readonly,https://www.googleapis.com/auth/cloud-platform
+gcloud auth application-default login \
+  --client-id-file=PATH/TO/client_secret.json \
+  --scopes=https://www.googleapis.com/auth/analytics.readonly,https://www.googleapis.com/auth/cloud-platform
+```
 
-# Optional: set the project used for quota and billing, if Google asks for one.
-# The Analytics Admin and Data APIs must be enabled in it.
+The `--scopes` flag matters: gcloud user credentials carry only the scopes they were created with. The command above covers reading. For admin changes, add `https://www.googleapis.com/auth/analytics.edit` to `--scopes` (plus `analytics.manage.users` for access bindings, `analytics.chatbot.read` for `ga reports chat`). If your Google Workspace blocks unverified third-party apps, an admin has to trust the OAuth client first, or use option 2.
+
+**Option 2: impersonate a service account.** No consent screen and no scopes at login. GA CLI requests the scopes it needs. The service account needs access to your GA4 properties, and your Google account needs the Service Account Token Creator role on it:
+
+```bash
+gcloud iam service-accounts add-iam-policy-binding SA_EMAIL \
+  --member="user:YOU@example.com" \
+  --role=roles/iam.serviceAccountTokenCreator
+gcloud auth application-default login --impersonate-service-account=SA_EMAIL
+```
+
+With either option, Google may ask for a project to use for quota and billing. The Analytics Admin and Data APIs must be enabled in it:
+
+```bash
 gcloud auth application-default set-quota-project YOUR_PROJECT_ID
 ```
 
-The `--scopes` flag matters: gcloud user credentials carry only the scopes they were created with. The command above covers reading. For admin changes, add `https://www.googleapis.com/auth/analytics.edit` to `--scopes` (plus `analytics.manage.users` for access bindings, `analytics.chatbot.read` for `ga reports chat`). If a call fails for missing scopes while using ADC, the error includes the read-only login command above; add the extra scopes to it if the failing command needs them.
+If a call fails for missing scopes while using ADC, the error includes both login commands. Add the extra scopes to option 1 if the failing command needs them.
 
 ADC is the last resort. It is only used by the default profile, and only when nothing else is configured: no `GA_CLI_SERVICE_ACCOUNT`, no service-account `GOOGLE_APPLICATION_CREDENTIALS`, and no `ga auth login`. Named profiles never use it. `ga auth status` shows `adc` as the method when it's in use.
 

@@ -15,11 +15,21 @@ from .output import error as print_error
 
 # Creates gcloud Application Default Credentials that carry the scopes GA needs.
 # gcloud *user* ADC ignores the scopes a client requests unless it was created
-# with them (SPEC B4), so every ADC hint names them explicitly.
+# with them (SPEC B4), so every ADC hint names them explicitly. Google blocks
+# gcloud's built-in OAuth client from the Analytics scopes ("This app is
+# blocked"), so the login must use the user's own Desktop-app OAuth client,
+# e.g. the client_secret.json that `ga auth login` uses.
 ADC_LOGIN_COMMAND = (
-    "gcloud auth application-default login --scopes="
-    "https://www.googleapis.com/auth/analytics.readonly,"
+    "gcloud auth application-default login --client-id-file=CLIENT_SECRET_JSON "
+    "--scopes=https://www.googleapis.com/auth/analytics.readonly,"
     "https://www.googleapis.com/auth/cloud-platform"
+)
+
+# The alternative Google suggests: ADC that impersonates a service account.
+# No consent screen or scopes at login; needs roles/iam.serviceAccountTokenCreator
+# on the service account.
+ADC_IMPERSONATE_COMMAND = (
+    "gcloud auth application-default login --impersonate-service-account=SA_EMAIL"
 )
 
 # Google's ErrorInfo reason for an access token that lacks a required scope.
@@ -27,7 +37,9 @@ SCOPE_INSUFFICIENT_REASON = "ACCESS_TOKEN_SCOPE_INSUFFICIENT"
 
 ADC_SCOPE_HINT = (
     "These credentials come from gcloud Application Default Credentials "
-    f"without the Analytics scopes. Run: {ADC_LOGIN_COMMAND}"
+    f"without the Analytics scopes. Run: {ADC_LOGIN_COMMAND} "
+    "(CLIENT_SECRET_JSON: your Desktop-app OAuth client file, e.g. the one "
+    f"'ga auth login' uses), or impersonate a service account: {ADC_IMPERSONATE_COMMAND}"
 )
 
 

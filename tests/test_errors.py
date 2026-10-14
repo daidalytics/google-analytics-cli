@@ -6,7 +6,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from ga_cli.utils.errors import (
+    ADC_IMPERSONATE_COMMAND,
     ADC_LOGIN_COMMAND,
+    ADC_SCOPE_HINT,
     NotAuthenticatedError,
     classify_error,
     format_api_error,
@@ -371,10 +373,8 @@ class TestAdcScopeHint:
         assert payload["message"] == SCOPE_MESSAGE  # unchanged
         assert payload["category"] == "auth_error"
         assert payload["status_code"] == 403
-        assert payload["hint"] == (
-            "These credentials come from gcloud Application Default Credentials "
-            f"without the Analytics scopes. Run: {ADC_LOGIN_COMMAND}"
-        )
+        assert payload["hint"] == ADC_SCOPE_HINT
+        assert ADC_LOGIN_COMMAND in payload["hint"]
 
     def test_table_appends_hint(self, auth_method, capsys):
         auth_method("adc")
@@ -393,6 +393,14 @@ class TestAdcScopeHint:
     def test_hint_names_the_documented_scopes(self):
         assert "analytics.readonly" in ADC_LOGIN_COMMAND
         assert "cloud-platform" in ADC_LOGIN_COMMAND
+
+    def test_login_command_uses_own_oauth_client(self):
+        """Google blocks gcloud's built-in client from the Analytics scopes."""
+        assert "--client-id-file=" in ADC_LOGIN_COMMAND
+
+    def test_hint_offers_impersonation(self):
+        assert ADC_IMPERSONATE_COMMAND in ADC_SCOPE_HINT
+        assert "--impersonate-service-account=" in ADC_IMPERSONATE_COMMAND
 
     @pytest.mark.parametrize("method", ["oauth", "service-account", None])
     def test_no_hint_for_other_methods(self, auth_method, capsys, method):

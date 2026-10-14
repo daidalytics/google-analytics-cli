@@ -42,7 +42,12 @@ from ..config.constants import (
     is_named_profile,
     profile_exists,
 )
-from ..utils.errors import ADC_LOGIN_COMMAND, NotAuthenticatedError, ProfileNotFoundError
+from ..utils.errors import (
+    ADC_IMPERSONATE_COMMAND,
+    ADC_LOGIN_COMMAND,
+    NotAuthenticatedError,
+    ProfileNotFoundError,
+)
 
 AuthMethod = Literal["service-account", "oauth", "adc"]
 
@@ -136,8 +141,10 @@ def _not_authenticated_message(adc_error: DefaultCredentialsError) -> str:
     message = (
         "Not authenticated. Run 'ga auth login' (OAuth), "
         "'ga auth login --service-account KEY' or export GA_CLI_SERVICE_ACCOUNT=KEY "
-        "(service account), or create gcloud Application Default Credentials:\n"
-        f"  {ADC_LOGIN_COMMAND}"
+        "(service account), or create gcloud Application Default Credentials "
+        "with your own OAuth client or by impersonating a service account:\n"
+        f"  {ADC_LOGIN_COMMAND}\n"
+        f"  {ADC_IMPERSONATE_COMMAND}"
     )
     # With GOOGLE_APPLICATION_CREDENTIALS set, ADC failed on that file
     # (e.g. a broken Workload Identity Federation config): say why.
