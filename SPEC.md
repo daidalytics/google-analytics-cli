@@ -1,6 +1,7 @@
 # Spec: Agent distribution, named profiles, and audience exports
 
-Status: **Draft — awaiting review**
+Status: **Implemented on three local lanes. Live checks and PR/release decisions pending.** See
+Implementation Notes at the end.
 Target version: 0.5.0 (tentative; release is ask-first)
 Date: 2026-10-14
 
@@ -629,13 +630,58 @@ is sequential.
    environment, "Run 'ga upgrade' to update" is wrong, because uvx keeps its cached version until
    `uvx google-analytics-cli@latest`. When `sys.prefix` is under uv's cache dir, the daily notice
    is skipped. Otherwise it is unchanged. Implemented as plan task O1.
-3. **Export name from the create `Operation`.** It's unconfirmed whether `create`'s `Operation`
-   carries the `AudienceExport` name (in `response` or `metadata`) immediately, and `--wait` needs
-   it. Verify against a live create (ask-first). The fallback is `list` filtered to the newest
-   `beginCreatingTime` for that audience.
+3. **Export name from the create `Operation`.** *Partly resolved.* Google's "Audience export
+   basics" guide shows the name in `Operation.response.name`, which is extraction path 1. Its
+   sample is likely copied from v1alpha, so a live `create` (ask-first, because it charges quota)
+   still needs to confirm it for v1beta. The `metadata` and `list` fallbacks stay in place
+   regardless.
 4. **`ga agent guide` vs the skill.** These are two hand-maintained agent references (825 lines of
    Python strings vs SKILL.md + references). Out of scope here. Later options are generating one
    from the other, or retiring `agent guide` in favor of the skill.
 5. **Marketplace name `daidalytics`.** If an org-level marketplace with that name is ever created,
    it should list this plugin and the in-repo `marketplace.json` should be retired, rather than two
    marketplaces sharing a name on users' machines.
+
+## Implementation Notes (2026-10-14)
+
+These are deviations and findings recorded during implementation (`tasks/plan.md`, `tasks/todo.md`).
+Each one is pinned by a test unless marked otherwise.
+
+**A: Distribution**
+- `.claude-plugin/plugin.json` `version` tracks the *current* package version (`0.4.0`) until the
+  release commit bumps both. A4's `0.5.0` example was aspirational; `tests/test_plugin_manifest.py`
+  enforces equality.
+- **SKILL.md frontmatter must be strict YAML.** The draft's unquoted description contained `: `,
+  so `npx skills add` reported "No skills found" for the whole repo. The description is now
+  quoted, and `test_frontmatter_is_valid_for_strict_yaml_parsers` guards against a repeat.
+- **uvx detection is broader than uvx alone.** The update-notice suppression (Q2) matches any env
+  under uv's cache dir, so `uv run --with` / `--isolated` envs skip the notice too. That's
+  harmless for dev use. `uv tool install`, pipx, and pip venvs are unaffected.
+
+**B: Profiles and ADC**
+- An invalid profile name exits **1** (bad input), not Click's 2, which this CLI reserves for auth
+  errors. An explicit `--profile ""` is rejected, so an unset `"$CLIENT"` can't silently run as
+  default. An empty `GA_CLI_PROFILE=` means default.
+- An unknown profile exits 2 with `ProfileNotFoundError` on any command that resolves
+  credentials. Two places degrade instead:
+  - `ga auth status` reports `"authenticated": false` (exit 0) with the same message;
+  - `ga config get/set` treat it as an empty, not-yet-created profile (writes create it).
+
+  Neither can use another identity.
+- Known profiles are listed `default` first, not alphabetically as in the B2 example.
+- In the default profile, a corrupt or unrefreshable OAuth token does **not** fall back to ADC. It
+  keeps today's "Not authenticated" error rather than silently switching Google identity.
+- `ga config path` keeps its existing semantics: it prints the active profile's `config.json`
+  path, not the directory.
+- The ADC scope hint is a separate `"hint"` field in JSON errors. `ADC_LOGIN_COMMAND` requests
+  read-only scopes, so admin writes and chat under ADC need extra scopes. The docs say so.
+- `tests/conftest.py` makes `google.auth.default` raise and clears `GA_CLI_SERVICE_ACCOUNT` /
+  `GOOGLE_APPLICATION_CREDENTIALS` for every test, so no test can reach a developer's real ADC
+  or exported key.
+
+**C: Audience exports**
+- `create` without `--wait` outputs `{exportName, exportId, operation}`. If the `list` fallback
+  for the name fails, it warns and still exits 0. The export exists, and a retry would charge
+  quota again.
+- `query` only looks up the export's state on a 4xx. 401/403 keep exit 2, and 5xx keeps exit 3.
+- `--wait` ends on the first failed `get` (no retry). `--timeout` without `--wait` is ignored.

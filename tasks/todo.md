@@ -30,20 +30,30 @@ Legend: `∥` = runs in parallel with its siblings, each in its own worktree age
 
 ## Wave 2 (after B1 is merged into `feat/profiles`)
 
-- [ ] ∥ **B2** · Credential resolution table + ADC fallback + `ProfileNotFoundError` (M)
+- [x] ∥ **B2** · Credential resolution table + ADC fallback + `ProfileNotFoundError` (M)
+      · guard-removal check: each safety guard removed → 1–10 tests fail; ADC tripwire run → 0 real ADC hits
 - [x] ∥ **B3** · `ga profiles list` / `delete` (S) · `c9629a1` (lane B)
 
 ## Wave 3
 
-- [ ] **B4** · `auth status` profile/adc · `config path` · ADC scope hint (M)
+- [x] **B4** · `auth status` profile/adc · `config path` · ADC scope hint (M)
+      · fixed: status misreported env-var SA under named profiles / non-SA GAC; a missing key file was shown as authenticated
 
 - [ ] **CHECKPOINT B**: merge B1–B4 · live default-profile parity on `250400352` · SA profile · `--profile typo` → exit 2 · ADC (human) · review agent · **human review**
+      - [x] merged; 1213 tests on lane; review agent: no issues ≥80 confidence (invariant, traversal, compat, perms, exit codes, test isolation)
+      - [x] live (real config): `profiles list` offline · `--profile clinet-a` → exit 2 before any API call · `../x` → exit 1 · `auth status` = default/oauth · default-profile parity: `account-summaries list` byte-identical vs pre-profiles code
+      - [ ] live SA profile + ADC: need the human (the stored login 403s on `250400352`; parity was checked on account-summaries instead)
+      - [ ] human review
 - [ ] **CHECKPOINT C**: merge C1–C3 · live list/get/query · live create **ask-first** (resolves Q3) · review agent · **human review**
+      - [x] merged; review agent: clean (no issues ≥80 confidence)
+      - [ ] live list/get/query: blocked, because the stored login has no access to `250400352`; needs a test property/profile from the human
+      - [ ] live create (ask-first) → confirms Q3
+      - [ ] human review
 
-## Wave 4 (after PR A is on `master`; rebase B and C lanes onto it)
+## Wave 4 (B and C lanes rebased onto lane A locally; PR A decision pending)
 
-- [ ] ∥ **D1** · Profiles + ADC in SKILL.md / README; regenerate reference (S)
-- [ ] ∥ **D2** · Audience exports in SKILL.md / recipes / README; regenerate reference (S)
+- [x] ∥ **D1** · Profiles + ADC in SKILL.md / README; regenerate reference (S) · behaviour checked by running the CLI against a scratch config
+- [x] ∥ **D2** · Audience exports in SKILL.md / recipes / README; regenerate reference (S)
 
-- [ ] **FINAL CHECKPOINT**: PRs B + C green on CI · second merge regenerates `commands.md` · Success Criteria 1–15 mapped · SPEC.md living updates · **ask about the 0.5.0 bump** (`pyproject.toml` + `plugin.json`)
+- [ ] **FINAL CHECKPOINT** (trial merge of all three lanes: **no conflicts**, 1343 tests green, drift check clean, ruff clean): PRs B + C green on CI · second merge regenerates `commands.md` · Success Criteria 1–15 mapped · SPEC.md living updates · **ask about the 0.5.0 bump** (`pyproject.toml` + `plugin.json`)
 
