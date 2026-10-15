@@ -470,7 +470,7 @@ uv run ga --help
 uv run pytest
 
 # Lint
-uv run ruff check src/ tests/
+uv run ruff check src/ tests/ scripts/
 ```
 
 ## License
