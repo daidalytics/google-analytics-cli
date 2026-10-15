@@ -71,7 +71,7 @@ Legend: `∥` = runs in parallel with its siblings, each in its own worktree age
 
 - [ ] Live SA-keyed named profile end to end (e.g. `ga --profile personal auth login --service-account KEY`)
 - [ ] Live `audience-exports list/get/query` on a test property, and one live `create` (charges quota, ask first) to settle SPEC Q3 (does the v1beta `Operation.response.name` carry the export name?)
-- [ ] CI doesn't lint `scripts/` (`ruff check src/ tests/` only), so `scripts/gen_skill_reference.py` isn't linted in CI
-- [ ] `~/.claude/skills-dev/ga-cli/SKILL.md` (the author's draft) still has the unquoted-`: ` description that breaks strict YAML
+- [x] CI doesn't lint `scripts/` → fixed in #39 (ci.yml, release.yml and README now run `ruff check src/ tests/ scripts/`)
+- [x] `~/.claude/skills-dev/ga-cli/SKILL.md` (the author's local draft, outside the repo): description quoted; `npx skills add` now finds it
 - [ ] SPEC Q4: `ga agent guide` and the skill are two hand-maintained agent references
 
