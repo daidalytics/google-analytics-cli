@@ -1,8 +1,8 @@
 # Spec: Agent distribution, named profiles, and audience exports
 
-Status: **Implemented on three local lanes. Live checks and PR/release decisions pending.** See
-Implementation Notes at the end.
-Target version: **0.6.0** (0.5.0 shipped upstream on 2026-10-13; release is ask-first)
+Status: **Shipped in 0.6.0** (2026-10-14): #35 (profiles, ADC fallback, agent distribution) and
+#36 (audience exports). #37 corrected the recommended ADC login. See Implementation Notes at the end.
+Released in: **0.6.0** (tag `v0.6.0`, on PyPI)
 Date: 2026-10-14
 
 Previous spec (ResponseMetaData / Data Notes, shipped in 0.4.0) lives in git history at `83d793b`.
@@ -295,8 +295,9 @@ scoped to one shell.
   `validate_service_account_key()` raises `ValueError`. Instead, the CLI skips step 2 and lets
   step 5 handle it through `google.auth.default()`. That enables keyless CI.
 - **ADC scope caveat.** gcloud *user* ADC ignores requested scopes unless it was created with them.
-  On a 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` while the active method is ADC, the error adds:
-  `gcloud auth application-default login --scopes=https://www.googleapis.com/auth/analytics.readonly,https://www.googleapis.com/auth/cloud-platform`.
+  On a 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` while the active method is ADC, the error adds a
+  hint with two logins (see the Implementation Note on #37): `gcloud auth application-default login --client-id-file=CLIENT_SECRET_JSON --scopes=https://www.googleapis.com/auth/analytics.readonly,https://www.googleapis.com/auth/cloud-platform`, or
+  `gcloud auth application-default login --impersonate-service-account=SA_EMAIL`.
 - `auth.credentials.has_scope()` returns `True` for ADC, because the scopes can't be determined
   (this matches the existing service-account rule).
 
@@ -361,7 +362,7 @@ GA_CLI_PROFILE=client-a ga reports run -m sessions -d date
 ga profiles list -o json
 ga profiles delete client-a --yes
 ga auth status -o json                     # now includes "profile"
-gcloud auth application-default login --scopes=https://www.googleapis.com/auth/analytics.readonly,https://www.googleapis.com/auth/cloud-platform
+gcloud auth application-default login --client-id-file=CLIENT_SECRET_JSON --scopes=https://www.googleapis.com/auth/analytics.readonly,https://www.googleapis.com/auth/cloud-platform
 ga reports run -p 123 -m sessions          # default profile, nothing configured → ADC
 
 # C — audience exports
@@ -677,6 +678,13 @@ Each one is pinned by a test unless marked otherwise.
   path, not the directory.
 - The ADC scope hint is a separate `"hint"` field in JSON errors. `ADC_LOGIN_COMMAND` requests
   read-only scopes, so admin writes and chat under ADC need extra scopes. The docs say so.
+- **#37: the originally specified ADC login is blocked by Google.** Plain
+  `gcloud auth application-default login --scopes=…analytics…` uses gcloud's built-in OAuth client,
+  which Google now warns about and then blocks ("This app is blocked"). Live testing caught this;
+  mocked tests couldn't. The hint, README and skill now recommend `--client-id-file=` with the
+  user's own Desktop-app OAuth client (`ADC_LOGIN_COMMAND`), or
+  `--impersonate-service-account=` (`ADC_IMPERSONATE_COMMAND`, which needs
+  `roles/iam.serviceAccountTokenCreator`).
 - `tests/conftest.py` makes `google.auth.default` raise and clears `GA_CLI_SERVICE_ACCOUNT` /
   `GOOGLE_APPLICATION_CREDENTIALS` for every test, so no test can reach a developer's real ADC
   or exported key.
