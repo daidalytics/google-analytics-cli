@@ -1,10 +1,15 @@
 """Account/property allowlist: configuration and resolution.
 
-The allowlist comes from up to two sources: the ``allowed_account_ids`` /
-``allowed_property_ids`` keys in config.json, and the ``GA_CLI_ALLOWED_ACCOUNTS`` /
-``GA_CLI_ALLOWED_PROPERTIES`` env vars. A request must be allowed by every configured
-source, so env can narrow the file allowlist but never widen it. With no source
-configured the guard is off.
+The allowlist comes from up to three sources:
+
+- ``config``: the ``allowed_account_ids`` / ``allowed_property_ids`` keys in the root
+  config.json, which apply to every profile (the global fence);
+- ``profile <name>``: the same keys in a named profile's own config.json;
+- ``env``: the ``GA_CLI_ALLOWED_ACCOUNTS`` / ``GA_CLI_ALLOWED_PROPERTIES`` env vars.
+
+The default profile's config.json is the root file, so it has one file source. A
+request must be allowed by every configured source, so a profile or env can narrow
+the global allowlist but never widen it. With no source configured the guard is off.
 
 This is a client-side guardrail, not a security boundary.
 """
@@ -14,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Iterable, Optional, Union
 
 from ..utils.errors import AllowlistError
@@ -59,7 +65,7 @@ def parse_ids(value: Union[str, Iterable[str]], kind: str, origin: str) -> froze
 
 @dataclass(frozen=True)
 class AllowlistSource:
-    name: str  # "config" | "env"
+    name: str  # "config" | "profile <name>" | "env"
     accounts: Optional[frozenset[str]]  # None = key not set
     properties: Optional[frozenset[str]]
 
@@ -156,47 +162,73 @@ def _source(
     )
 
 
-def load_allowlist() -> Allowlist:
-    """Build the effective allowlist from config.json and the environment.
+def _config_files() -> list[tuple[str, str, Path]]:
+    """(source name, resource, path) of each config.json that can hold allowlist keys.
 
-    Raises AllowlistError if any configured entry is malformed, or if config.json
-    can't be read: it may hold an allowlist, so the guard fails closed.
+    The root file applies to every profile; a named profile adds its own file.
     """
-    from .store import config_error, load_config
+    from .constants import get_active_profile, get_config_path, is_named_profile
+    from .store import get_root_config_path
 
-    config = load_config()
-    reason = config_error()
+    files = [("config", "config.json", get_root_config_path())]
+    if is_named_profile():
+        profile = get_active_profile()
+        files.append(
+            (f"profile {profile}", f"profiles/{profile}/config.json", get_config_path())
+        )
+    return files
+
+
+def _file_source(name: str, resource: str, path: Path) -> Optional[AllowlistSource]:
+    """The allowlist keys in one config.json; raises if the file can't be read."""
+    from .store import config_error, load_config_at
+
+    config = load_config_at(path)
+    reason = config_error(path)
     if reason:
-        raise AllowlistError("config.json", f"{reason}, so the allowlist can't be checked")
-    sources = [
-        _source(
-            "config",
-            config.allowed_account_ids,
-            config.allowed_property_ids,
-            ("config key allowed_account_ids", "config key allowed_property_ids"),
-        ),
+        raise AllowlistError(resource, f"{reason}, so the allowlist can't be checked")
+    origin = "config key" if name == "config" else f"{name} config key"
+    return _source(
+        name,
+        config.allowed_account_ids,
+        config.allowed_property_ids,
+        (f"{origin} allowed_account_ids", f"{origin} allowed_property_ids"),
+    )
+
+
+def load_allowlist() -> Allowlist:
+    """Build the effective allowlist: root config ∩ named profile's config ∩ env.
+
+    Raises AllowlistError if any configured entry is malformed, or if a config.json
+    can't be read: it may hold an allowlist, so the guard fails closed. An unreadable
+    root file blocks every profile; a named profile's blocks only that profile.
+    """
+    sources = [_file_source(*f) for f in _config_files()]
+    sources.append(
         _source(
             "env",
             os.environ.get(ENV_ACCOUNTS),
             os.environ.get(ENV_PROPERTIES),
             (ENV_ACCOUNTS, ENV_PROPERTIES),
-        ),
-    ]
+        )
+    )
     return Allowlist(tuple(s for s in sources if s is not None))
 
 
 def is_allowlist_configured() -> bool:
     """Whether any allowlist source is set, without validating it (no network).
 
-    An unreadable config.json counts as set, since load_allowlist() denies on it.
+    An unreadable root or active profile config.json counts as set, since
+    load_allowlist() denies on it.
     """
-    from .store import config_error, load_config
+    from .store import config_error, load_config_at
 
-    config = load_config()
-    return (
-        config_error() is not None
-        or config.allowed_account_ids is not None
-        or config.allowed_property_ids is not None
-        or ENV_ACCOUNTS in os.environ
-        or ENV_PROPERTIES in os.environ
-    )
+    for _name, _resource, path in _config_files():
+        config = load_config_at(path)
+        if (
+            config_error(path) is not None
+            or config.allowed_account_ids is not None
+            or config.allowed_property_ids is not None
+        ):
+            return True
+    return ENV_ACCOUNTS in os.environ or ENV_PROPERTIES in os.environ

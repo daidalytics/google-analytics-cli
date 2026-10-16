@@ -12,12 +12,22 @@ from ga_cli.config.allowlist import (
     load_allowlist,
     parse_ids,
 )
+from ga_cli.config.constants import get_config_path, set_active_profile
 from ga_cli.utils.errors import AllowlistError
 
 
 def _write_config(tmp_path, data):
     (tmp_path / "config.json").write_text(json.dumps(data))
-    store._cached_config = None
+    store.reset_cache()
+
+
+def _write_profile_config(tmp_path, profile, data):
+    """A named profile's own config.json; ``data`` may be raw text."""
+    path = tmp_path / "profiles" / profile / "config.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(data if isinstance(data, str) else json.dumps(data))
+    store.reset_cache()
+    return path
 
 
 def _no_lookup():
@@ -128,7 +138,7 @@ class TestLoadAllowlist:
     )
     def test_unreadable_config_fails_closed(self, tmp_path, text):
         (tmp_path / "config.json").write_text(text)
-        store._cached_config = None
+        store.reset_cache()
         assert is_allowlist_configured()
         with pytest.raises(AllowlistError) as exc:
             load_allowlist()
@@ -140,6 +150,222 @@ class TestLoadAllowlist:
         cfg = store.load_config()
         assert cfg.allowed_account_ids is None
         assert cfg.allowed_property_ids is None
+
+
+class TestProfileSources:
+    """The root config.json is the fence for every profile; a named profile's own
+    config.json only narrows it (SPEC D1)."""
+
+    def test_root_profile_and_env_intersect(self, tmp_path, monkeypatch):
+        _write_config(tmp_path, {"allowed_account_ids": ["1", "2", "3"]})
+        _write_profile_config(tmp_path, "client-a", {"allowed_account_ids": ["1", "2"]})
+        monkeypatch.setenv("GA_CLI_ALLOWED_ACCOUNTS", "1,3")
+        set_active_profile("client-a")
+        al = load_allowlist()
+        assert [s.name for s in al.sources] == ["config", "profile client-a", "env"]
+        assert al.allows_account("1")
+        assert not al.allows_account("2")  # not in env
+        assert not al.allows_account("3")  # not in the profile
+        assert al.allowed_accounts() == {"1"}
+        assert al.describe() == (
+            "config: accounts 1, 2, 3 | profile client-a: accounts 1, 2 | env: accounts 1, 3"
+        )
+
+    def test_default_profile_has_one_file_source(self, tmp_path):
+        _write_config(tmp_path, {"allowed_account_ids": ["1"]})
+        _write_profile_config(tmp_path, "client-a", {"allowed_account_ids": ["2"]})
+        al = load_allowlist()
+        assert [s.name for s in al.sources] == ["config"]
+        assert al.allows_account("1")
+
+    def test_named_profile_inherits_root_fence(self, tmp_path):
+        _write_config(tmp_path, {"allowed_account_ids": ["1"]})
+        _write_profile_config(tmp_path, "client-a", {"default_property_id": "9"})
+        set_active_profile("client-a")
+        assert is_allowlist_configured()
+        al = load_allowlist()
+        assert al.enabled
+        assert [s.name for s in al.sources] == ["config"]
+        assert al.allows_account("1")
+        assert not al.allows_account("2")
+        assert not al.allows_property("9", lambda: "2")
+
+    def test_profile_cannot_widen_root(self, tmp_path):
+        _write_config(tmp_path, {"allowed_account_ids": ["1"]})
+        _write_profile_config(tmp_path, "client-a", {"allowed_account_ids": ["1", "2"]})
+        set_active_profile("client-a")
+        al = load_allowlist()
+        assert not al.allows_account("2")
+        assert not al.allows_property("9", lambda: "2")
+
+    def test_profile_narrows_only_itself(self, tmp_path):
+        _write_config(tmp_path, {"allowed_account_ids": ["1", "2"]})
+        _write_profile_config(tmp_path, "client-a", {"allowed_account_ids": ["1"]})
+        _write_profile_config(tmp_path, "client-b", {})
+        set_active_profile("client-a")
+        assert not load_allowlist().allows_account("2")
+        set_active_profile("client-b")
+        assert load_allowlist().allows_account("2")
+        set_active_profile(None)
+        assert load_allowlist().allows_account("2")
+
+    def test_profile_only_allowlist(self, tmp_path):
+        _write_profile_config(tmp_path, "client-a", {"allowed_property_ids": ["7"]})
+        set_active_profile("client-a")
+        assert is_allowlist_configured()
+        al = load_allowlist()
+        assert [s.name for s in al.sources] == ["profile client-a"]
+        assert al.allows_property("7", _no_lookup)
+        assert not al.allows_property("8", lambda: "1")
+        set_active_profile(None)
+        assert not is_allowlist_configured()
+        assert not load_allowlist().enabled
+
+    def test_unknown_profile_has_no_profile_source(self, tmp_path):
+        _write_config(tmp_path, {"allowed_account_ids": ["1"]})
+        set_active_profile("nope")
+        assert [s.name for s in load_allowlist().sources] == ["config"]
+        assert not (tmp_path / "profiles" / "nope").exists()
+
+    def test_invalid_profile_id_names_the_source(self, tmp_path):
+        _write_profile_config(tmp_path, "client-a", {"allowed_account_ids": ["oops"]})
+        set_active_profile("client-a")
+        with pytest.raises(AllowlistError) as exc:
+            load_allowlist()
+        assert exc.value.resource == "profile client-a config key allowed_account_ids"
+
+    def test_invalid_root_id_fails_every_profile(self, tmp_path):
+        _write_config(tmp_path, {"allowed_property_ids": ["x"]})
+        _write_profile_config(tmp_path, "client-a", {})
+        set_active_profile("client-a")
+        with pytest.raises(AllowlistError) as exc:
+            load_allowlist()
+        assert exc.value.resource == "config key allowed_property_ids"
+
+    def test_unreadable_root_fails_closed_in_named_profile(self, tmp_path):
+        (tmp_path / "config.json").write_text('{"allowed_account_ids": ["1"],}')
+        _write_profile_config(tmp_path, "client-a", {"allowed_account_ids": ["1"]})
+        set_active_profile("client-a")
+        assert is_allowlist_configured()
+        with pytest.raises(AllowlistError) as exc:
+            load_allowlist()
+        assert exc.value.resource == "config.json"
+        assert "the allowlist can't be checked" in str(exc.value)
+
+    def test_unreadable_root_counts_as_set_without_profile_dir(self, tmp_path):
+        (tmp_path / "config.json").write_text("[]")
+        set_active_profile("client-a")
+        assert is_allowlist_configured()
+        with pytest.raises(AllowlistError):
+            load_allowlist()
+
+    def test_unreadable_profile_fails_only_that_profile(self, tmp_path):
+        path = _write_profile_config(tmp_path, "client-a", '{"allowed_account_ids": ["1"],}')
+        _write_profile_config(tmp_path, "client-b", {})
+        set_active_profile("client-a")
+        assert is_allowlist_configured()
+        with pytest.raises(AllowlistError) as exc:
+            load_allowlist()
+        assert exc.value.resource == "profiles/client-a/config.json"
+        assert str(path) in str(exc.value)
+        for other in (None, "client-b"):
+            set_active_profile(other)
+            assert not is_allowlist_configured()
+            assert not load_allowlist().enabled
+
+
+class TestStorePerPath:
+    """store.py reads the root config.json next to the active profile's (SPEC D1)."""
+
+    def test_root_config_path(self, tmp_path):
+        assert store.get_root_config_path() == tmp_path / "config.json"
+        assert store.get_root_config_path() == get_config_path()
+        set_active_profile("client-a")
+        assert store.get_root_config_path() == tmp_path / "config.json"
+        assert get_config_path() == tmp_path / "profiles" / "client-a" / "config.json"
+
+    def test_load_config_at_reads_that_file(self, tmp_path):
+        _write_config(tmp_path, {"allowed_account_ids": ["1"], "default_property_id": "5"})
+        path = _write_profile_config(tmp_path, "client-a", {"allowed_account_ids": ["2"]})
+        assert store.load_config_at(tmp_path / "config.json").allowed_account_ids == ["1"]
+        assert store.load_config_at(path).allowed_account_ids == ["2"]
+        assert store.load_config_at(path).default_property_id is None
+
+    def test_load_config_is_the_active_file(self, tmp_path):
+        path = _write_profile_config(tmp_path, "client-a", {"default_property_id": "5"})
+        set_active_profile("client-a")
+        assert store.load_config() is store.load_config_at(path)
+
+    def test_missing_file_loads_defaults(self, tmp_path):
+        missing = tmp_path / "profiles" / "nope" / "config.json"
+        assert store.load_config_at(missing) == store.UserConfig()
+        assert store.config_error(missing) is None
+        assert not missing.parent.exists()
+
+    def test_reading_root_keeps_active_profile_cache(self, tmp_path):
+        _write_config(tmp_path, {"default_property_id": "1"})
+        _write_profile_config(tmp_path, "client-a", {"default_property_id": "2"})
+        set_active_profile("client-a")
+        active = store.load_config()
+        root = store.load_config_at(store.get_root_config_path())
+        assert root.default_property_id == "1"
+        assert store.load_config() is active
+        assert store.get_config_value("default_property_id") == "2"
+
+    def test_config_error_is_per_path(self, tmp_path):
+        (tmp_path / "config.json").write_text("{oops")
+        path = _write_profile_config(tmp_path, "client-a", {})
+        set_active_profile("client-a")
+        assert store.config_error() is None
+        assert store.config_error(path) is None
+        reason = store.config_error(tmp_path / "config.json")
+        assert reason.startswith(f"Can't read {tmp_path / 'config.json'}")
+        # Reading the broken root left the active profile's state alone
+        assert store.config_error() is None
+
+    def test_config_error_defaults_to_active_profile(self, tmp_path):
+        _write_profile_config(tmp_path, "client-a", "[]")
+        assert store.config_error() is None
+        set_active_profile("client-a")
+        assert "Can't read" in store.config_error()
+
+    def test_named_profile_saves_past_unreadable_root(self, tmp_path):
+        """Only the unreadable file itself is protected from being overwritten."""
+        (tmp_path / "config.json").write_text("{oops")
+        set_active_profile("client-a")
+        store.save_config(store.UserConfig(default_property_id="5"))
+        saved = json.loads((tmp_path / "profiles" / "client-a" / "config.json").read_text())
+        assert saved == {"default_property_id": "5"}
+        assert (tmp_path / "config.json").read_text() == "{oops"
+        set_active_profile(None)
+        with pytest.raises(store.ConfigFileError):
+            store.save_config(store.UserConfig())
+
+    def test_save_updates_only_its_own_cache_entry(self, tmp_path):
+        _write_config(tmp_path, {"default_property_id": "1"})
+        root = store.load_config_at(tmp_path / "config.json")
+        set_active_profile("client-a")
+        store.save_config(store.UserConfig(default_property_id="2"))
+        assert store.load_config_at(tmp_path / "config.json") is root
+        assert store.load_config().default_property_id == "2"
+
+    def test_reset_cache_forgets_every_path(self, tmp_path):
+        _write_config(tmp_path, {"default_property_id": "1"})
+        path = _write_profile_config(tmp_path, "client-a", "{oops")
+        root_path = tmp_path / "config.json"
+        assert store.load_config_at(root_path).default_property_id == "1"
+        assert store.config_error(path) is not None
+
+        root_path.write_text(json.dumps({"default_property_id": "3"}))
+        path.write_text(json.dumps({"default_property_id": "4"}))
+        # Still cached until reset
+        assert store.load_config_at(root_path).default_property_id == "1"
+        assert store.config_error(path) is not None
+
+        store.reset_cache()
+        assert store.load_config_at(root_path).default_property_id == "3"
+        assert store.load_config_at(path).default_property_id == "4"
+        assert store.config_error(path) is None
 
 
 class TestResolution:
