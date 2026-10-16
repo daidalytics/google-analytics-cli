@@ -83,9 +83,10 @@ def _select_profile(name: Optional[str]) -> None:
 
     Exits 1 (client_error) on an invalid or explicitly empty name. When the
     profile differs from the one active earlier in this process (several
-    invocations share a process under CliRunner), cached API clients are
-    dropped so they can never serve another profile's identity. The config
-    cache needs no reset: it is keyed by the profile's config path.
+    invocations share a process under CliRunner), cached API clients and
+    allowlist maps are dropped so they can never serve another profile's
+    identity. The config cache needs no reset: it is keyed by the profile's
+    config path.
     """
     from .config.constants import get_active_profile, set_active_profile
     from .utils.output import error
@@ -104,9 +105,11 @@ def _select_profile(name: Optional[str]) -> None:
         raise typer.Exit(1)
 
     if get_active_profile() != previous:
+        from .api.allowlist_guard import reset_caches
         from .api.client import clear_client_cache
 
         clear_client_cache()
+        reset_caches()
 
 
 @app.callback(invoke_without_command=True)

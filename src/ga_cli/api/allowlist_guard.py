@@ -331,26 +331,29 @@ class AllowlistCache:
         return self.prop_map((pid,)).get(pid)
 
 
-_caches: dict[Optional[str], AllowlistCache] = {}
+_caches: dict[tuple[Path, Optional[str]], AllowlistCache] = {}
 
 
 def cache_for(credentials: Any, http: Any) -> AllowlistCache:
-    """The process-wide cache for these credentials' principal."""
+    """The process-wide cache for the active profile and these credentials' principal."""
+    path = get_allowlist_cache_path()
     principal = principal_of(credentials)
-    if principal not in _caches:
-        _caches[principal] = AllowlistCache(
-            principal, lambda: fetch_account_summaries(credentials, http)
+    key = (path, principal)
+    if key not in _caches:
+        # path= freezes the file: a later profile switch must not redirect this cache
+        _caches[key] = AllowlistCache(
+            principal, lambda: fetch_account_summaries(credentials, http), path=path
         )
-    return _caches[principal]
+    return _caches[key]
 
 
 def reset_caches() -> None:
-    """Forget in-process cache state (tests, re-authentication)."""
+    """Forget in-process cache state (tests, re-authentication, profile switch)."""
     _caches.clear()
 
 
 def delete_cache_file() -> None:
-    """Remove the on-disk cache (``ga auth login`` / ``logout``)."""
+    """Remove the active profile's on-disk cache (``ga auth login`` / ``logout``)."""
     reset_caches()
     try:
         get_allowlist_cache_path().unlink(missing_ok=True)

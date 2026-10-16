@@ -3,7 +3,8 @@
 Paths come in two scopes:
 
 - **Per profile** (``get_profile_dir()``): credentials, config, auth method,
-  chat sessions. Identity and target property switch together.
+  chat sessions, the allowlist cache. Identity and target property switch
+  together.
 - **Global** (``get_config_dir()``): the OAuth client secret and the
   update-check timestamp, which belong to the installed app, not a client.
 
@@ -193,17 +194,17 @@ def get_chat_sessions_path() -> Path:
     return get_profile_dir() / "chat-sessions.json"
 
 
+def get_allowlist_cache_path() -> Path:
+    """Path to the allowlist's property → account cache. Per profile."""
+    return get_profile_dir() / "allowlist-cache.json"
+
+
 # Global paths (resolved through get_config_dir(), shared by all profiles)
 
 
 def get_client_secret_path() -> Path:
     """Path to the OAuth client secret. Global: one app identity for all profiles."""
     return get_config_dir() / "client_secret.json"
-
-
-def get_allowlist_cache_path() -> Path:
-    """Path to the allowlist's property → account cache."""
-    return get_config_dir() / "allowlist-cache.json"
 
 
 def get_update_check_path() -> Path:
