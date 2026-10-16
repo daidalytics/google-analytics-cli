@@ -22,6 +22,7 @@ ALLOWLIST_HINT = (
 class AllowlistError(Exception):
     """A request blocked by the account/property allowlist, or a malformed allowlist.
 
+    The message is ``reason`` alone; ``error_hint()`` supplies ``ALLOWLIST_HINT``.
     Deliberately not a RuntimeError or OSError: googleapiclient retries the OSError
     family, and classify_error maps RuntimeErrors mentioning auth to auth_error.
     """
@@ -29,7 +30,7 @@ class AllowlistError(Exception):
     def __init__(self, resource: str, reason: str):
         self.resource = resource
         self.reason = reason
-        super().__init__(f"{reason}. {ALLOWLIST_HINT}")
+        super().__init__(reason)
 
 
 # Creates gcloud Application Default Credentials that carry the scopes GA needs.
@@ -210,12 +211,15 @@ def _error_reasons(err: Exception) -> set[str]:
 def error_hint(err: Exception) -> str | None:
     """Advice to show alongside an error, or None.
 
-    Only case today: a 403 ``ACCESS_TOKEN_SCOPE_INSUFFICIENT`` while the
-    credentials came from gcloud ADC. User ADC ignores the scopes a client asks
-    for unless it was created with them (SPEC B4), so the fix is a re-login.
+    - ``AllowlistError``: ``ALLOWLIST_HINT``.
+    - A 403 ``ACCESS_TOKEN_SCOPE_INSUFFICIENT`` while the credentials came from
+      gcloud ADC: ``ADC_SCOPE_HINT``. User ADC ignores the scopes a client asks
+      for unless it was created with them (SPEC B4), so the fix is a re-login.
     """
     from googleapiclient.errors import HttpError
 
+    if isinstance(err, AllowlistError):
+        return ALLOWLIST_HINT
     if not isinstance(err, HttpError) or err.resp.status != 403:
         return None
     if SCOPE_INSUFFICIENT_REASON not in _error_reasons(err):
