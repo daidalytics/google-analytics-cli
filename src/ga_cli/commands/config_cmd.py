@@ -9,6 +9,7 @@ from typing import Optional
 import typer
 
 from ..config.allowlist import parse_ids
+from ..config.constants import get_active_profile, profile_exists
 from ..config.store import (
     ALLOWLIST_CONFIG_KEYS,
     VALID_CONFIG_KEYS,
@@ -21,10 +22,21 @@ from ..config.store import (
     unset_config_value,
     update_config,
 )
-from ..utils import error, info, output, success
-from ..utils.errors import AllowlistError
+from ..utils import error, handle_error, info, output, success
+from ..utils.errors import AllowlistError, ProfileNotFoundError
 
 config_app = typer.Typer(name="config", help="Manage CLI configuration", no_args_is_help=True)
+
+
+def _require_existing_profile() -> None:
+    """Exit 2 if the active named profile doesn't exist.
+
+    Only `set` and `setup` create a profile. A typo in --profile must not read
+    as an empty config, or be created by `unset`/`reset`.
+    """
+    profile = get_active_profile()
+    if not profile_exists(profile):
+        handle_error(ProfileNotFoundError.for_profile(profile))
 
 
 def _stdin_is_tty() -> bool:
@@ -101,6 +113,7 @@ def setup():
 @config_app.command("get")
 def get_cmd(key: Optional[str] = typer.Argument(None, help="Config key to retrieve")):
     """Get configuration values."""
+    _require_existing_profile()
     if key:
         if key not in VALID_CONFIG_KEYS:
             error(f"Unknown config key: {key}. Valid keys: {', '.join(VALID_CONFIG_KEYS)}")
@@ -157,6 +170,7 @@ def unset(key: str = typer.Argument(help="Config key to remove")):
     if key not in VALID_CONFIG_KEYS:
         error(f"Unknown config key: {key}. Valid keys: {', '.join(VALID_CONFIG_KEYS)}")
         raise typer.Exit(1)
+    _require_existing_profile()
     _require_readable_config()
     # Unsetting a key that isn't set changes nothing, so it needs no terminal
     if key in ALLOWLIST_CONFIG_KEYS and get_config_value(key) is not None:
@@ -169,7 +183,11 @@ def unset(key: str = typer.Argument(help="Config key to remove")):
 
 @config_app.command("path")
 def path():
-    """Show configuration file path."""
+    """Show the active profile's configuration file path.
+
+    The default profile's file sits in the config root; a named profile's in
+    profiles/NAME/. Printing it does not create the profile.
+    """
     print(get_config_path())
 
 
@@ -177,7 +195,7 @@ def path():
 def reset():
     """Reset all configuration to defaults."""
     import questionary
-
+    _require_existing_profile()
     _require_readable_config()
     config = load_config()
     allowlist = {

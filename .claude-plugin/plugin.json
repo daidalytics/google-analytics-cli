@@ -1,0 +1,10 @@
+{
+  "name": "google-analytics-cli",
+  "version": "0.6.0",
+  "description": "Google Analytics 4 skill for AI agents: reports, realtime, and GA4 admin via the ga CLI",
+  "author": { "name": "Gunnar Griese", "url": "https://gunnargriese.com" },
+  "homepage": "https://github.com/daidalytics/google-analytics-cli",
+  "repository": "https://github.com/daidalytics/google-analytics-cli",
+  "license": "MIT",
+  "keywords": ["google-analytics", "ga4", "analytics", "cli"]
+}

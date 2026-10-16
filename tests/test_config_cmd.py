@@ -1,6 +1,7 @@
 """Tests for config commands (setup, get, set, unset, path, reset)."""
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -134,6 +135,48 @@ class TestPathCommand:
 
         assert result.exit_code == 0
         assert "config.json" in result.output
+
+    def test_default_profile_path_is_unchanged(self, isolated_config_dir):
+        """The default profile is the config root: same output as before profiles."""
+        result = runner.invoke(app, ["config", "path"])
+
+        assert result.exit_code == 0
+        assert result.stdout == f"{isolated_config_dir / 'config.json'}\n"
+
+    def test_named_profile_path(self, isolated_config_dir):
+        result = runner.invoke(app, ["--profile", "client-a", "config", "path"])
+
+        assert result.exit_code == 0
+        expected = isolated_config_dir / "profiles" / "client-a" / "config.json"
+        assert result.stdout == f"{expected}\n"
+
+    def test_profile_from_env_var(self, isolated_config_dir, monkeypatch):
+        monkeypatch.setenv("GA_CLI_PROFILE", "client-b")
+
+        result = runner.invoke(app, ["config", "path"])
+
+        assert result.exit_code == 0
+        expected = isolated_config_dir / "profiles" / "client-b" / "config.json"
+        assert result.stdout == f"{expected}\n"
+
+    def test_path_does_not_create_the_profile(self, isolated_config_dir):
+        """It shows where `config set` would write; only a write creates the profile."""
+        result = runner.invoke(app, ["--profile", "client-a", "config", "path"])
+
+        assert result.exit_code == 0
+        assert not (isolated_config_dir / "profiles" / "client-a").exists()
+
+    def test_path_matches_where_config_set_writes(self, isolated_config_dir):
+        printed = runner.invoke(app, ["--profile", "client-a", "config", "path"]).stdout.strip()
+
+        result = runner.invoke(
+            app, ["--profile", "client-a", "config", "set", "default_property_id", "123"]
+        )
+
+        assert result.exit_code == 0
+        assert Path(printed).is_file()
+        assert '"default_property_id": "123"' in Path(printed).read_text()
+        assert not (isolated_config_dir / "config.json").exists()
 
 
 class TestResetCommand:
@@ -390,3 +433,78 @@ class TestSaveConfigAtomic:
         save_config(UserConfig(default_property_id="1"))
         assert (tmp_path / "config.json").is_symlink()
         assert json.loads(real.read_text()) == {"default_property_id": "1"}
+
+
+class TestUnknownNamedProfile:
+    """get/unset/reset on a typo'd profile error instead of reading as empty
+    or creating it; only `set` and `setup` create a profile."""
+
+    def _assert_profile_not_found(self, result, isolated_config_dir):
+        assert result.exit_code == 2
+        assert "Profile 'clinet-a' does not exist" in result.output
+        assert "Known profiles: default, client-a" in result.output
+        assert not (isolated_config_dir / "profiles" / "clinet-a").exists()
+
+    def _create_client_a(self):
+        runner.invoke(app, ["--profile", "client-a", "config", "set", "default_property_id", "1"])
+
+    def test_get_all(self, isolated_config_dir):
+        self._create_client_a()
+
+        result = runner.invoke(app, ["--profile", "clinet-a", "config", "get"])
+
+        self._assert_profile_not_found(result, isolated_config_dir)
+
+    def test_get_key(self, isolated_config_dir):
+        self._create_client_a()
+
+        result = runner.invoke(
+            app, ["--profile", "clinet-a", "config", "get", "default_property_id"]
+        )
+
+        self._assert_profile_not_found(result, isolated_config_dir)
+
+    def test_get_via_env_var(self, isolated_config_dir, monkeypatch):
+        self._create_client_a()
+        monkeypatch.setenv("GA_CLI_PROFILE", "clinet-a")
+
+        result = runner.invoke(app, ["config", "get"])
+
+        self._assert_profile_not_found(result, isolated_config_dir)
+
+    def test_unset_does_not_create_the_profile(self, isolated_config_dir):
+        self._create_client_a()
+
+        result = runner.invoke(
+            app, ["--profile", "clinet-a", "config", "unset", "default_property_id"]
+        )
+
+        self._assert_profile_not_found(result, isolated_config_dir)
+
+    def test_reset_does_not_prompt_or_create_the_profile(self, isolated_config_dir):
+        self._create_client_a()
+        mock_confirm = MagicMock()
+
+        with patch("questionary.confirm", mock_confirm):
+            result = runner.invoke(app, ["--profile", "clinet-a", "config", "reset"])
+
+        self._assert_profile_not_found(result, isolated_config_dir)
+        mock_confirm.assert_not_called()
+
+    def test_existing_named_profile_get_works(self):
+        self._create_client_a()
+
+        result = runner.invoke(
+            app, ["--profile", "client-a", "config", "get", "default_property_id"]
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout.strip() == "1"
+
+    def test_set_still_creates_the_profile(self, isolated_config_dir):
+        result = runner.invoke(
+            app, ["--profile", "client-b", "config", "set", "default_property_id", "2"]
+        )
+
+        assert result.exit_code == 0
+        assert (isolated_config_dir / "profiles" / "client-b" / "config.json").is_file()

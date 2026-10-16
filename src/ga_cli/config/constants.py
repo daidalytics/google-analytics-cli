@@ -1,6 +1,18 @@
-"""Application constants and configuration paths."""
+"""Application constants and configuration paths.
+
+Paths come in two scopes:
+
+- **Per profile** (``get_profile_dir()``): credentials, config, auth method,
+  chat sessions. Identity and target property switch together.
+- **Global** (``get_config_dir()``): the OAuth client secret and the
+  update-check timestamp, which belong to the installed app, not a client.
+
+The default profile *is* the config root, so installs that predate profiles
+keep working with no migration.
+"""
 
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -71,29 +83,122 @@ def get_config_dir() -> Path:
     return config_dir
 
 
+# Named profiles
+# Selection is per invocation (--profile) or per shell (GA_CLI_PROFILE), never
+# persisted. Names are a single safe path component: no ".", "..", "/", or
+# hidden names, so a profile can never escape the profiles directory.
+DEFAULT_PROFILE = "default"
+PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+_active_profile: str = DEFAULT_PROFILE
+
+
+def set_active_profile(name: str | None) -> None:
+    """Select the profile for this process. Called from the root callback.
+
+    ``None`` and ``""`` select the default profile.
+
+    Raises:
+        ValueError: If ``name`` could escape the profiles directory. The
+            active profile is left unchanged.
+    """
+    global _active_profile
+    name = name or DEFAULT_PROFILE
+    if not PROFILE_NAME_RE.fullmatch(name):
+        raise ValueError(
+            f"Invalid profile name {name!r}: use letters, digits, '.', '_' or '-', "
+            "starting with a letter or digit."
+        )
+    _active_profile = name
+
+
+def get_active_profile() -> str:
+    """Name of the profile selected for this process."""
+    return _active_profile
+
+
+def is_named_profile() -> bool:
+    """True when a profile other than the default is active."""
+    return _active_profile != DEFAULT_PROFILE
+
+
+def get_profiles_root() -> Path:
+    """Directory that holds every named profile's directory."""
+    return get_config_dir() / "profiles"
+
+
+def get_profile_dir() -> Path:
+    """Directory holding the active profile's auth and config files.
+
+    The default profile *is* the config root. A named profile lives under
+    ``profiles/<name>/`` and is created by the first write into it.
+    """
+    if _active_profile == DEFAULT_PROFILE:
+        return get_config_dir()
+    return get_profiles_root() / _active_profile
+
+
+def profile_exists(name: str) -> bool:
+    """Whether ``name`` is a known profile. The default profile always exists.
+
+    Invalid names are never known, so this cannot probe outside the profiles
+    directory.
+    """
+    if name == DEFAULT_PROFILE:
+        return True
+    if not PROFILE_NAME_RE.fullmatch(name):
+        return False
+    return (get_profiles_root() / name).is_dir()
+
+
+def list_profiles() -> list[str]:
+    """All known profiles: ``"default"`` first, then named profiles sorted.
+
+    Entries under ``profiles/`` that are not directories or whose names are
+    not valid profile names are ignored.
+    """
+    root = get_profiles_root()
+    named: list[str] = []
+    if root.is_dir():
+        named = [
+            entry.name
+            for entry in root.iterdir()
+            if entry.is_dir()
+            and entry.name != DEFAULT_PROFILE
+            and PROFILE_NAME_RE.fullmatch(entry.name)
+        ]
+    return [DEFAULT_PROFILE, *sorted(named)]
+
+
+# Per-profile paths (resolved through get_profile_dir())
+
+
 def get_credentials_path() -> Path:
-    """Path to stored OAuth credentials."""
-    return get_config_dir() / "credentials.json"
+    """Path to the active profile's stored OAuth credentials. Per profile."""
+    return get_profile_dir() / "credentials.json"
 
 
 def get_config_path() -> Path:
-    """Path to user configuration file."""
-    return get_config_dir() / "config.json"
+    """Path to the active profile's user configuration file. Per profile."""
+    return get_profile_dir() / "config.json"
 
 
 def get_auth_method_path() -> Path:
-    """Path to auth method tracking file."""
-    return get_config_dir() / "auth-method.json"
-
-
-def get_client_secret_path() -> Path:
-    """Path to OAuth client secret file (alternative to env vars)."""
-    return get_config_dir() / "client_secret.json"
+    """Path to the active profile's auth method tracking file. Per profile."""
+    return get_profile_dir() / "auth-method.json"
 
 
 def get_chat_sessions_path() -> Path:
-    """Path to the per-property chat session cache used by --continue."""
-    return get_config_dir() / "chat-sessions.json"
+    """Path to the per-property chat session cache used by --continue. Per profile."""
+    return get_profile_dir() / "chat-sessions.json"
+
+
+# Global paths (resolved through get_config_dir(), shared by all profiles)
+
+
+def get_client_secret_path() -> Path:
+    """Path to the OAuth client secret. Global: one app identity for all profiles."""
+    return get_config_dir() / "client_secret.json"
 
 
 def get_allowlist_cache_path() -> Path:
@@ -102,7 +207,7 @@ def get_allowlist_cache_path() -> Path:
 
 
 def get_update_check_path() -> Path:
-    """Path to update-check timestamp file."""
+    """Path to the update-check timestamp file. Global: it's about the installed binary."""
     return get_config_dir() / "update-check.json"
 
 

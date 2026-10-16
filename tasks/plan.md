@@ -1,307 +1,476 @@
-# Implementation Plan: Account and property allowlist
+# Implementation Plan: Port the allowlist (PR #33) to 0.6.0
 
-Companion to [SPEC.md](../SPEC.md). Branch `feat/allowlist`, one PR, one commit per
-task. Targets 0.6.0. Previous plan (output escaping and validation): `git show 225822f:tasks/plan.md`.
+Companion to [SPEC.md](../SPEC.md). Baseline: **1460 tests passing** (8.7 s) on `master` @
+`8877860`. The previous plan (0.6.0: distribution, profiles, audience exports) is in git history
+at `29c1cb0:tasks/plan.md`.
 
 ## Overview
 
-Add an opt-in allowlist of accounts/properties, enforced in one place: a guarded
-`AuthorizedHttp` (`AllowlistHttp`) that all 4 API clients send through. It blocks requests for
-anything not on the allowlist before they're sent, filters the top-level list endpoints, and
-denies anything it can't place. The CLI surface is small: config keys that can only be changed
-interactively, `ga allowlist show`, and exit code 5 / `allowlist_error`.
+The work has two parts.
 
-## Architecture decisions
+1. **One merge, done by the orchestrator.** Merge `origin/master` into the PR head, resolving
+   the 13 conflicts per the spec's merge inventory. This step is strictly sequential, and
+   everything else builds on it.
+2. **Six parallel subagents for SPEC D1–D6.** After the merge, the work fans out to six
+   agents in isolated git worktrees. Each agent owns a disjoint set of files.
 
-- **Pure logic first, HTTP last.** `config/allowlist.py` (resolution) and the reference
-  extraction / route classification in `api/allowlist_guard.py` are pure functions with no I/O, so
-  most of the behaviour is unit-tested without mocks. `AllowlistHttp.request` only wires them
-  together.
-- **One `_build` helper in `api/client.py`.** All 4 getters call
-  `build(service, version, http=AllowlistHttp(creds, http=build_http()), …)`. With no allowlist
-  configured, `AllowlistHttp` delegates straight to `AuthorizedHttp.request`, so 0.5.0 behaviour
-  is unchanged (R1).
-- **The cache lookup uses a separate plain `AuthorizedHttp`.** `accountSummaries.list` for the
-  property → account map goes through `AuthorizedHttp(creds, http=self.http)`. It does not use
-  `super().request`, whose 401 retry calls `self.request` and would re-enter the guard. The
-  cache is lazy. It is only loaded when a check needs `account(P)` (a property listed directly
-  in every source needs no lookup), or when a list response needs filtering.
-- **`AllowlistError` is its own exception class** (not `RuntimeError`, not `OSError`), and
-  `classify_error` checks it first. That keeps the "auth in message → auth_error" heuristic
-  from catching it, and stops googleapiclient's `_retry_request` from retrying it.
-- **Tests use real discovery-built clients** over `googleapiclient.http.HttpMockSequence` as
-  the inner http, with mock credentials. This shows that the URIs googleapiclient actually
-  produces (encoding, `{+name}` expansion, query params) are parsed correctly. v1alpha data
-  discovery is served from `.api-snapshots/`.
+After that come one integration-test agent, a review agent, and the human gate before anything
+is pushed.
 
-## Dependency graph
+The critical path is four steps (`T1 merge → T2a → T2b → T8 integration`), not 11 sequential
+tasks. Peak concurrency is 6 agents (wave 1).
+
+## Architecture Decisions
+
+1. **One branch, task branches off it.** The lane branch is `feat/allowlist` on `origin`
+   (SPEC decision 2). It starts from `pr-33`, and `origin/master` is merged in, never rebased,
+   so David's 5 commits keep their authorship. Each agent works on `task/<ID>-<slug>` cut from
+   `feat/allowlist`, and the orchestrator merges each task branch back.
+2. **The orchestrator does the merge itself (T1).** Merging isn't parallelizable, it carries
+   the most judgment, and the orchestrator already holds the merge inventory. **The merge
+   commit only resolves conflicts and gets the suite green.** No D1–D5 semantics go into it, so
+   a review of it means one thing: did anything from either side get lost?
+3. **One agent per file-ownership set.** T2a→T2b share semantics (the source model), so one
+   agent runs them in sequence, as two commits. Every other wave-1 task gets its own agent. The
+   one shared source file, `api/allowlist_guard.py`, is split **by function** between T3 and T4.
+4. **New behaviour gets new test files.** Wave-1 agents don't append to
+   `tests/test_allowlist_guard.py`, because parallel appends at end-of-file conflict. Each
+   creates its own file and imports the PR's helpers (`guarded`, `_al`, `_resp`, `FakeCreds`,
+   `A`/`AA`/`D`/`DA`) from `tests.test_allowlist_guard`. `tests/` is a package, so that works.
+5. **Contracts before fan-out.** Every function one agent writes and another reads is fixed below
+   in [Interface Contracts](#interface-contracts), so dependent agents can be briefed up front.
+6. **Generated files are never hand-merged.** `skills/ga-cli/references/commands.md` is
+   regenerated with `scripts/gen_skill_reference.py --write` after every merge that changes the
+   CLI schema.
+7. **Subagents never touch live APIs, push, or open PRs.** Live checks, pushes, the new PR and
+   closing #33 are done by the orchestrator, and only after asking.
+8. **`CLAUDE.md` is gitignored.** Agents in worktrees can't see it, so they read it from the
+   main checkout. Editing it is a local orchestrator step (wave 3) and isn't part of the PR.
+
+## Dependency Graph
 
 ```
-T1 AllowlistError / exit 5 ──► T2 config/allowlist.py ─┬─► T3 reference extraction ─┐
-                                                       ├─► T4 account cache ────────┴─► T5 AllowlistHttp ─► T6 list filtering
-                                                       ├─► T7 config_cmd (TTY, setup keeps allowlist)
-                                              T4 ──────┴─► T8 ga allowlist show / auth status / cache clear
-                                                           all ─► T9 docs ─► T10 PR
+ W0  T0 branch setup ── T1 merge origin/master (orchestrator) ── CHECKPOINT M (review agent)
+                                                                        │
+            ┌───────────────┬──────────────┬──────────────┬─────────────┼──────────────┐
+ W1         ▼               ▼              ▼              ▼             ▼              ▼
+     T2a sources ─▶ T2b CLI   T3 cache/profile  T4 ADC principal  T5 hint field  T6 audience-   T7 docs
+     (D1, agent α)            (D2, agent β)     (D3, agent γ)     (D4, agent δ)  exports tests  (D6, agent ζ)
+                                                                                 (D5, agent ε)
+            └───────────────┴──────────────┴──────────────┴─────────────┴──────────────┘
+                                                   │  merge back: T5, T4, T3, T6, T2, T7
+                                                   ▼
+ W2              T8 integration tests (agent)  ∥  review agent  ∥  orchestrator docs-vs-behaviour check
+                                                   │
+                                          CHECKPOINT W (human gate)
+                                                   │
+ W3          orchestrator, ask-first: push origin · new PR · close #33 · local CLAUDE.md
 ```
 
-T7 and T8 don't depend on the guard and can go in any order after their deps. They are
-scheduled after Checkpoint A so the risky part (T3–T6) is proven first.
+## Execution Schedule
 
-## Task list
+| Wave | Runs in parallel | Agents | Blocked on |
+|---|---|---|---|
+| **0** | T0 setup → T1 merge (orchestrator, main checkout) | 0 | plan approval |
+| — | **CHECKPOINT M**: review agent on the merge resolution; orchestrator fixes findings | 1 | T1 |
+| **1** | **T2a→T2b** (one agent) · **T3** · **T4** · **T5** · **T6** · **T7** | 6 | Checkpoint M |
+| — | Orchestrator merges task branches; full suite after each | | all of wave 1 |
+| **2** | **T8** integration tests · **review agent** · orchestrator docs-vs-behaviour check | 2 | wave 1 merged |
+| — | **CHECKPOINT W**: live read-only check (ask first) · **human review** | | wave 2 |
+| **3** | Orchestrator: push · `gh pr create` · close #33 · local `CLAUDE.md` · SPEC status | 0 | human go-ahead |
 
-### Phase 0: Branch
+## File Ownership (wave 1)
 
-#### Task 0: Branch and commit spec + plan
+A task may edit only the files listed for it. If it needs another file, it stops and reports
+instead of editing.
+
+| File | Owner | Notes |
+|---|---|---|
+| `src/ga_cli/config/store.py` | T2a | T1 has already added the profile-dir mkdir and `reset_cache()` |
+| `src/ga_cli/config/allowlist.py`, `tests/test_allowlist.py` | T2a | |
+| `src/ga_cli/commands/config_cmd.py`, `src/ga_cli/commands/allowlist_cmd.py` | T2b | |
+| `tests/test_config_cmd.py`, `tests/test_allowlist_cmd.py`, `tests/test_auth_cmd.py` | T2b | |
+| `src/ga_cli/config/constants.py`, `src/ga_cli/main.py` | T3 | |
+| `src/ga_cli/api/allowlist_guard.py` | **T3**: `_caches`, `cache_for`, `reset_caches`, `delete_cache_file` · **T4**: `principal_of` | split by function; orchestrator merges both |
+| `tests/test_allowlist_cache_profiles.py` (new) | T3 | |
+| `tests/test_allowlist_adc.py` (new) | T4 | |
+| `src/ga_cli/utils/errors.py`, `tests/test_errors.py` | T5 | |
+| `tests/test_allowlist_audience_exports.py` (new) | T6 | test-only; a guard bug gets reported, not fixed |
+| `skills/ga-cli/SKILL.md`, `src/ga_cli/commands/agent_cmd.py`, `tests/test_agent_cmd.py`, `README.md` | T7 | |
+| `tests/conftest.py`, `tests/test_allowlist_guard.py`, `tests/test_api_client.py`, `skills/ga-cli/references/commands.md`, `SPEC.md`, `tasks/*` | **orchestrator only** | |
+
+## Interface Contracts
+
+These are fixed now so all wave-1 agents can be briefed at once:
+
+```python
+# T1 (store.py, conftest.py)
+def reset_cache() -> None: ...            # store: forget all cached config/error state (conftest calls it)
+# conftest autouse also: delenv GA_CLI_ALLOWED_ACCOUNTS / _PROPERTIES; allowlist_guard.reset_caches()
+
+# T2a → T2b, T7, T8   (config/store.py, config/allowlist.py)
+def get_root_config_path() -> Path: ...    # get_config_dir() / "config.json"; == get_config_path() in default
+def load_config_at(path: Path) -> UserConfig: ...       # path-keyed cache, same parsing as load_config()
+def config_error(path: Path | None = None) -> str | None: ...   # None → active profile's config.json
+AllowlistSource.name in {"config", f"profile {name}", "env"}   # "config" = root file, all profiles
+def load_allowlist() -> Allowlist: ...     # config ∩ profile ∩ env; default profile: one file source
+def is_allowlist_configured() -> bool: ... # root, profile or env set; unreadable root/profile counts as set
+
+# T2b → T7, T8   (ga allowlist show -o json)
+{"enabled": bool, "profile": str,
+ "sources": {"config": {...} | None, "profile": {...} | None, "env": {...} | None}, ...}
+# a "profile" key is present only for a named profile; unknown named profile → exit 2
+
+# T3 → T8   (config/constants.py, api/allowlist_guard.py, main.py)
+def get_allowlist_cache_path() -> Path: ...   # get_profile_dir() / "allowlist-cache.json"
+def cache_for(credentials, http) -> AllowlistCache: ...   # keyed by (get_allowlist_cache_path(), principal)
+def reset_caches() -> None: ...               # also called from main._select_profile on a profile change
+
+# T4   (api/allowlist_guard.py)
+def principal_of(credentials) -> str | None: ...   # SPEC D3 table; an "email" without "@" → None
+
+# T5 → T7, T8   (utils/errors.py)
+class AllowlistError(Exception): resource: str; reason: str   # str(err) == reason (no hint appended)
+def error_hint(err) -> str | None: ...     # ALLOWLIST_HINT for AllowlistError; ADC hint unchanged
+```
+
+## Subagent Protocol
+
+Every wave-1 and wave-2 agent is launched with `isolation: "worktree"`, and its brief starts
+with these rules:
+
+1. **Branch:** You are in an isolated git worktree. First run
+   `git switch -c task/<ID>-<slug> feat/allowlist`.
+2. **Read first:**
+   - `/Users/gunnargriese/Desktop/python3/agent-cli/google-analytics-cli/CLAUDE.md` (gitignored,
+     so it isn't in your worktree).
+   - The SPEC sections named in your task.
+   - The contracts in `tasks/plan.md`.
+   - The files you own.
+3. **Ownership:** Edit **only** the files in your task's ownership list. If you need another
+   file, stop and report why instead of editing it.
+4. **Tests:**
+   - Write the failing tests first, then implement.
+   - Never call a live API; mock everything.
+   - `google.auth.default` is already patched to raise by conftest. Tests that need ADC set their
+     own return value.
+5. **Before committing:** run `uv run pytest` (the **full** suite),
+   `uv run ruff check src/ tests/ scripts/` and
+   `uv run python scripts/gen_skill_reference.py --check`. All must pass. Docs agents: if
+   `--check` fails, report it; don't regenerate.
+6. **Commit:** one commit per task ID (T2 makes two), with a conventional message ending in the
+   `Co-Authored-By` trailer. **Don't push, and don't open a PR.**
+7. **Report:**
+   - Branch and commit SHA(s).
+   - Test count.
+   - Every deviation from SPEC or the plan, with the reason.
+   - Any guard bug or contract problem you found but didn't fix.
+
+The orchestrator (main session):
+
+- Launches all wave-1 agents in a single message, so they run concurrently.
+- Checks each task's `git diff --stat feat/allowlist...task/<ID>` against its ownership list
+  before merging it.
+- Merges in the order T5, T4, T3, T6, T2, T7, and runs the full suite after each merge.
+- Regenerates `commands.md` if the drift check fails.
+- Fixes cross-task issues in its own follow-up commits.
+
+---
+
+## Task List
+
+### Wave 0: Orchestrator
+
+#### T0: Branch setup
+
+**Description:** Get the main checkout onto `feat/allowlist` without losing the uncommitted
+SPEC and plan.
+
 **Acceptance criteria:**
-- [ ] `feat/allowlist` created from master
-- [ ] `docs: spec and plan for the allowlist` commit with SPEC.md and tasks/
+- [ ] `SPEC.md`, `tasks/plan.md` and `tasks/todo.md` are copied to the scratchpad, then
+      `git stash push -- SPEC.md tasks/` is run. `pr-33` has its own versions of these files, so
+      `git switch` would refuse otherwise.
+- [ ] `git fetch origin` and `git fetch origin pull/33/head:pr-33` are run, and `pr-33` is still
+      `84aed1e`. If David pushed since, stop and ask.
+- [ ] `git switch -c feat/allowlist pr-33` is run, and `git log -1` shows David's `84aed1e`.
 
-**Scope:** XS · **Deps:** none
+**Verification:** `git status` is clean, and `git stash list` shows the stash.
 
-### Phase 1: Foundations (no network)
+**Dependencies:** plan approval · **Scope:** XS
 
-#### Task 1: `AllowlistError` and exit code 5
+#### T1: Merge `origin/master` into `feat/allowlist`
+
+**Description:** Run `git merge origin/master` and resolve every conflict per the SPEC
+[merge inventory](../SPEC.md#merge-inventory). Then make the **minimum** edits needed for a
+green suite: no D1–D5 semantics. `SPEC.md` and `tasks/*` resolve to the stashed versions.
+
 **Acceptance criteria:**
-- [ ] `utils/errors.py::AllowlistError(resource, reason)`, a plain `Exception` subclass (not
-      `RuntimeError`/`OSError`)
-- [ ] `classify_error(AllowlistError(...)) == (5, "allowlist_error")`, checked before every
-      other branch. The docstring exit-code table lists 5
-- [ ] `handle_error` JSON payload adds `"resource"`. Terminal mode prints the message. The
-      message ends with the "Run 'ga allowlist show' … only the user can change the allowlist"
-      hint
-- [ ] Existing classification tests unchanged
+- [ ] Every conflict is resolved, and every side's behaviour is kept:
+  - master's `resolve_credentials()`, `_require_existing_profile()`, profile-aware
+    `_auth_status()`, the hint machinery, and `profiles` / `audience-exports` registration;
+  - the PR's `_build()` in all 4 getters, `AllowlistError`/exit 5, TTY-only allowlist changes,
+    atomic save, and decision 8.
+- [ ] These enabling edits are in the merge commit:
+  - `save_config` creates `config_path.parent`.
+  - `store.reset_cache()` exists, and conftest calls it, deletes `GA_CLI_ALLOWED_*` from the
+    environment and calls `reset_caches()`.
+  - The master build assertions in `test_api_client.py` change to `http=` with an
+    `AllowlistHttp`.
+  - `"allowlist": {"enabled": …}` is added once, in `_auth_status()`.
+  - `commands.md` is regenerated.
+- [ ] Run `git show --remerge-diff HEAD` and review it. Hunks resolved in favour of one side are
+      listed in the commit message body.
 
-**Verification:** `uv run pytest tests/test_errors.py -q`
+**Verification:**
+- [ ] `git diff --check HEAD~1` passes, and `grep -rn '^<<<<<<<\|^>>>>>>>' src tests` finds
+      nothing.
+- [ ] `uv run pytest`: record the count. It should be ≥ 1460 plus the PR's tests.
+- [ ] `uv run ruff check src/ tests/ scripts/` passes, and `gen_skill_reference.py --check`
+      passes.
 
-**Files:** `src/ga_cli/utils/errors.py`, `tests/test_errors.py` · **Scope:** XS · **Deps:** none
+**Dependencies:** T0 · **Scope:** L (merge; one sitting) · **Commit:**
+`Merge origin/master (0.6.0) into feat/allowlist`
 
-#### Task 2: Allowlist configuration and resolution
+### Checkpoint M: merge review, before the fan-out
+
+- [ ] Launch a `feature-dev:code-reviewer` agent on `git show --remerge-diff HEAD` and the
+      merge inventory. Its question: *was behaviour from either side lost or altered?* Focus
+      areas:
+  - credential resolution order;
+  - unknown-profile exit 2;
+  - all 4 getters guarded;
+  - `classify_error` ordering;
+  - `config setup` keeping the allowlist;
+  - conftest isolation.
+- [ ] The orchestrator fixes confirmed findings in a follow-up commit. The full suite stays
+      green.
+- [ ] Report to the human. **This is not a gate:** wave 1 starts unless you say stop.
+
+### Wave 1: six parallel agents
+
+#### T2a: Profile-aware allowlist sources (SPEC D1, core) · agent α, commit 1
+
+**Description:**
+- Add a third source: the root `config.json` applies to every profile, and a named profile's
+  `config.json` narrows it.
+- The default profile has a single file source.
+- Error state is tracked per path, so an unreadable root file fails every profile closed and an
+  unreadable profile file fails only that profile.
+
 **Acceptance criteria:**
-- [ ] `UserConfig` has `allowed_account_ids` / `allowed_property_ids: Optional[list[str]]`,
-      read by `load_config` and listed in `VALID_CONFIG_KEYS`. Configs without them still load
-- [ ] `config/allowlist.py`: `parse_ids()` accepts `123`, `accounts/123` and `properties/123`
-      (whitespace and trailing commas tolerated) and rejects non-numeric entries with
-      `AllowlistError`
-- [ ] `load_allowlist()` builds `config` and `env` sources (`GA_CLI_ALLOWED_ACCOUNTS`,
-      `GA_CLI_ALLOWED_PROPERTIES`). A source counts as configured if either key is set. An empty
-      key adds nothing, so a source whose keys are all empty denies everything
-- [ ] `allows_property` / `allows_account` require **every** configured source. A
-      property-only source allows no account-level calls. With no sources, the guard is off
-- [ ] A property listed directly in every source resolves **without** an account lookup (the
-      API takes the lookup as a lazy callable, or something similar)
-- [ ] `visible_accounts(prop_map)` returns accounts with an account-level allow or at least one
-      allowed property
-- [ ] `tests/conftest.py` autouse fixture removes `GA_CLI_ALLOWED_ACCOUNTS` / `_PROPERTIES`
+- [ ] `load_allowlist()` with the root file + `--profile X` file + env is the intersection, with
+      source names per the contract. In the default profile, the root file counts once.
+- [ ] An unreadable root `config.json` makes `load_allowlist()` raise `AllowlistError` while a
+      named profile is active. An unreadable profile file affects only that profile.
+- [ ] `get_root_config_path`, `load_config_at` and `config_error(path)` exist per the contract.
+      `reset_cache()` clears all of the new state.
 
-**Verification:** `uv run pytest tests/test_allowlist.py -q`. Cases: file only, env only,
-intersection (env narrows, env can't widen), empty env, invalid ID, prefix normalisation,
-property-only source, direct hit never calls the lookup.
+**Verification:** `uv run pytest tests/test_allowlist.py tests/test_profiles.py -q`, plus the
+full suite and ruff.
 
-**Files:** `src/ga_cli/config/allowlist.py` (new), `src/ga_cli/config/store.py`,
-`tests/test_allowlist.py` (new), `tests/conftest.py` · **Scope:** S · **Deps:** T1
+**Dependencies:** Checkpoint M · **Scope:** M
 
-### Phase 2: The guard
+**Files:** `src/ga_cli/config/store.py`, `src/ga_cli/config/allowlist.py`,
+`tests/test_allowlist.py`
 
-#### Task 3: Reference extraction and route classification
+#### T2b: CLI surface for profile sources (SPEC D1, CLI) · agent α, commit 2
+
+**Description:** The confirmation text names the scope ("all profiles" vs "profile X, narrows
+the global allowlist"). `ga allowlist show` gains `profile` and `sources.profile`. `ga --profile
+typo allowlist show` exits 2. `auth status` reports `enabled: true` in a named profile when only
+the root file is set.
+
 **Acceptance criteria:**
-- [ ] `extract_refs(uri, body) -> set[tuple[kind, id]]` collects references from the
-      percent-decoded path, the URL-decoded query values (`filter=parent:accounts/123`) and,
-      recursively, the JSON body strings that **start with** `accounts/N` or `properties/N`.
-      `bytes`/`str`/`None` bodies are handled, and a non-JSON body adds nothing
-- [ ] A path ID not followed by `/`, `:` or the end (e.g. `properties/123%2F..%2F999`) makes
-      the request unverifiable, so it is denied
-- [ ] `classify_route(method, uri) -> Route` recognises: discovery (`GET`
-      `www.googleapis.com/discovery/v1/apis/…` and `…/$discovery/rest`), `accounts` list,
-      `accountSummaries` list, `properties` list, `searchChangeHistoryEvents`, generic (GA
-      hosts), and unknown host (denied)
-- [ ] Table-driven tests over the URIs the real clients build. Capture them with
-      `HttpMockSequence` for one representative call per command group (property get, data
-      stream create, runReport, batchRunReports, runFunnelReport, chat, access bindings
-      account+property, access report account+property, change history, properties
-      create/list)
+- [ ] TTY `config set allowed_account_ids` in default vs `--profile X` shows the right scope
+      line, and writes the right file. A new profile's directory is created.
+- [ ] `allowlist show -o json` matches the T2b contract in default and named profiles. An
+      unknown profile exits 2 before any network call.
+- [ ] `ga --profile X auth status -o json` shows `allowlist.enabled == true` with only the root
+      allowlist set.
 
-**Verification:** `uv run pytest tests/test_allowlist_guard.py -q -k "Extract or Route"`
+**Verification:**
+`uv run pytest tests/test_config_cmd.py tests/test_allowlist_cmd.py tests/test_auth_cmd.py -q`,
+plus the full suite and ruff.
 
-**Files:** `src/ga_cli/api/allowlist_guard.py` (new), `tests/test_allowlist_guard.py` (new) ·
-**Scope:** S · **Deps:** T2
+**Dependencies:** T2a (same agent) · **Scope:** M
 
-#### Task 4: Property → account cache
+**Files:** `src/ga_cli/commands/config_cmd.py`, `src/ga_cli/commands/allowlist_cmd.py`,
+`tests/test_config_cmd.py`, `tests/test_allowlist_cmd.py`, `tests/test_auth_cmd.py`
+
+#### T3: Per-profile cache (SPEC D2) · agent β
+
+**Description:**
+- `allowlist-cache.json` moves into the profile directory.
+- The in-process caches are keyed by `(path, principal)`.
+- `_select_profile` resets them on a profile change.
+- `auth login` / `logout` clear only the active profile's cache.
+
 **Acceptance criteria:**
-- [ ] `constants.get_allowlist_cache_path()` and `ALLOWLIST_CACHE_TTL_SECONDS = 3600`
-- [ ] `AllowlistCache.lookup(pid)` returns the account ID. It loads from disk when the principal
-      matches and the entry is younger than the TTL. Otherwise it refreshes **once per process**
-      through a separate plain `AuthorizedHttp(creds, http=inner)`, paginating
-      `accountSummaries.list` with pageSize 200
-- [ ] Each property maps to its enclosing `AccountSummary.account`, never to
-      `propertySummaries[].parent`, which is `properties/N` for subproperties
-- [ ] Still unknown after a refresh → `None` (the caller denies). A refresh that fails raises the
-      original error, so `classify_error` gives network/auth
-- [ ] Principal = service-account email, or `sha256(refresh_token)[:16]` for OAuth. A mismatch
-      counts as a miss
-- [ ] Written atomically (temp file + `os.replace`). A corrupt file counts as a miss
-- [ ] Also stores display names, for `ga allowlist show`
+- [ ] `get_allowlist_cache_path()` is `profiles/X/allowlist-cache.json` under `--profile X`, and
+      the root file in default. The constants docstring lists it as per profile.
+- [ ] `ga --profile X auth logout` (CliRunner) deletes X's cache and leaves the root cache file
+      in place.
+- [ ] Two CliRunner invocations in one process under different profiles with the same principal
+      don't share an in-memory map: the second refetches or loads its own file.
 
-**Verification:** `uv run pytest tests/test_allowlist_guard.py -q -k Cache`. Cases: fresh hit,
-stale → refresh, miss → single refresh → None, second miss in the same process makes no second
-call, principal mismatch, corrupt file, refresh failure propagates, subproperty mapped to its
-account.
+**Verification:** `uv run pytest tests/test_allowlist_cache_profiles.py -q`, plus the full suite
+and ruff.
 
-**Files:** `src/ga_cli/api/allowlist_guard.py`, `src/ga_cli/config/constants.py`,
-`tests/test_allowlist_guard.py` · **Scope:** M · **Deps:** T1, T2
+**Dependencies:** Checkpoint M · **Scope:** M
 
-#### Task 5: `AllowlistHttp` enforcement and client wiring
+**Files:** `src/ga_cli/config/constants.py`, `src/ga_cli/api/allowlist_guard.py` (only
+`_caches` / `cache_for` / `reset_caches` / `delete_cache_file`), `src/ga_cli/main.py`,
+`tests/test_allowlist_cache_profiles.py`
+
+#### T4: ADC cache principal (SPEC D3) · agent γ
+
+**Description:** `principal_of()` follows the SPEC D3 table. Unknown principals mean no disk
+cache. ADC credentials are guarded through `_build()`, and their token refresh isn't routed
+through the guard.
+
 **Acceptance criteria:**
-- [ ] `AllowlistHttp(AuthorizedHttp).request` with no allowlist is a pure passthrough: same args to
-      `super().request`, response untouched
-- [ ] With an allowlist: passthrough routes are sent, and every extracted reference is checked. A
-      denial raises `AllowlistError` and **nothing reaches the inner http**
-- [ ] Special routes: `properties` list with `parent:accounts/A` is allowed if
-      `allows_account(A)` or A has an allowed property, so an allowed account with no
-      properties lists as empty. Change history is allowed if the account passes, or the body
-      `property` is allowed and belongs to A
-- [ ] A request with no references that isn't a top-level list route is denied. So is a
-      request to an unknown host
-- [ ] A property listed directly in every source is checked without loading the cache (assert
-      no `accountSummaries` call)
-- [ ] `**kwargs` (`redirections`, `connection_type`, `_credential_refresh_attempt`) are passed
-      through. A 401 → refresh → retry is checked again and still sends nothing that isn't
-      allowed
-- [ ] `api/client.py::_build` is used by all 4 getters. `static_discovery=False` is kept for
-      data v1alpha. `clear_client_cache` is unchanged
-- [ ] `pyproject.toml` declares `google-auth-httplib2` and `httplib2`. `uv.lock` only gains
-      the direct-dependency markers, no version changes
-- [ ] `test_api_client.py` updated for `http=`. The rest of the suite passes unchanged
+- [ ] There is one test per D3 table row. They use real `google.auth` credential classes where
+      they can be built offline (impersonated, external_account), and stubs otherwise.
+- [ ] With `google.auth.default` patched to return impersonated credentials, `get_admin_client()`
+      is built on `AllowlistHttp`. A 401 → refresh → retry calls the inner http for the token,
+      and doesn't raise `AllowlistError`.
+- [ ] A `None` or `"default"` principal writes no cache file, and denials are still enforced.
 
-**Verification:** `uv run pytest tests/test_allowlist_guard.py tests/test_api_client.py -q`, then
-the full suite. Per-client allow/deny tests using real built clients (admin v1beta, admin v1alpha,
-data v1beta, data v1alpha).
+**Verification:** `uv run pytest tests/test_allowlist_adc.py -q`, plus the full suite and ruff.
 
-**Files:** `src/ga_cli/api/allowlist_guard.py`, `src/ga_cli/api/client.py`, `pyproject.toml`,
-`uv.lock`, `tests/test_allowlist_guard.py`, `tests/test_api_client.py` · **Scope:** M ·
-**Deps:** T1, T3, T4
+**Dependencies:** Checkpoint M · **Scope:** S
 
-#### Task 6: List response filtering
+**Files:** `src/ga_cli/api/allowlist_guard.py` (only `principal_of`),
+`tests/test_allowlist_adc.py`
+
+#### T5: Allowlist advice in the `hint` field (SPEC D4) · agent δ
+
+**Description:** `AllowlistError`'s message is the reason only. `error_hint()` returns
+`ALLOWLIST_HINT` for it, so `handle_error` prints it as `"hint"` in JSON and as a second line in
+text output.
+
 **Acceptance criteria:**
-- [ ] On a 2xx JSON response: `accounts` list keeps `visible_accounts`. `accountSummaries`
-      keeps those accounts with `propertySummaries[]` filtered. `properties` list keeps allowed
-      properties
-- [ ] `nextPageToken` and every other top-level key are preserved. Non-2xx responses and non-JSON
-      bodies are returned untouched
-- [ ] Filters are idempotent: filtering an already filtered body changes nothing (the 401
-      retry runs them twice). A property's account comes from the cache map, not `parent`
-- [ ] `paginate_all` over a page that filters to empty still reaches the next page
-- [ ] No filtering (and no cache load) when the guard is off
+- [ ] `str(AllowlistError("properties/9", "x"))` is `"x"`. The JSON payload has `category`,
+      `resource` and `hint`, and the message has no hint appended.
+- [ ] In text mode the hint is on its own line. The ADC scope hint behaviour and its tests are
+      unchanged.
+- [ ] `classify_error` still checks `AllowlistError` first.
 
-**Verification:** `uv run pytest tests/test_allowlist_guard.py -q -k Filter`. A CliRunner test of
-`ga accounts list -o json` with an allowlist and a mocked two-page response.
+**Verification:** `uv run pytest tests/test_errors.py -q`, plus the full suite and ruff. If any
+other test file asserts the hint inside a message, report it; don't edit it.
 
-**Files:** `src/ga_cli/api/allowlist_guard.py`, `tests/test_allowlist_guard.py` · **Scope:** S ·
-**Deps:** T5
+**Dependencies:** Checkpoint M · **Scope:** XS
 
-### Checkpoint A: guard works end to end
-- [ ] `uv run pytest` and `uv run ruff check src/ tests/` pass
-- [ ] Live, read-only, with `GA_CLI_ALLOWED_PROPERTIES=250400352`: `reports run -p 250400352`
-      works. `accounts list` / `account-summaries list` show only its account.
-      `properties get -p <another visible property>` exits 5 with `allowlist_error` on a pipe
-- [ ] Live with `GA_CLI_ALLOWED_ACCOUNTS=<250400352's account>`: `accounts get` works, and the
-      property-only allowlist above denies `accounts get` with exit 5
-- [ ] Live: `reports funnel` (v1alpha, dynamic discovery) works when allowed
-- [ ] Commits T1–T6 on the branch
-- [ ] **Review with the human before Phase 3**
+**Files:** `src/ga_cli/utils/errors.py`, `tests/test_errors.py`
 
-### Phase 3: CLI surface
+#### T6: Audience-exports guard coverage (SPEC D5) · agent ε
 
-#### Task 7: Allowlist keys in `ga config`
+**Description:** Pin every audience-exports endpoint against the guard, using real `D`
+(`analyticsdata` v1beta) clients built with `guarded()` from `tests.test_allowlist_guard`.
+
 **Acceptance criteria:**
-- [ ] `config set allowed_account_ids 123,accounts/456` stores `["123", "456"]`. Invalid IDs exit
-      1, and the file is unchanged
-- [ ] `set`/`unset` on allowlist keys, and `reset` while an allowlist key is set: with no TTY →
-      `error("Allowlist settings can only be changed interactively")`, exit 1, file unchanged.
-      With a TTY → shows old → new, then `questionary.confirm(default=False)`. Declining leaves
-      the file unchanged
-- [ ] `config setup` keeps the existing allowlist keys
-- [ ] `config get` shows the lists (or `null` when unset, the one intended R1 addition).
-      `config get allowed_account_ids` prints them comma-separated
-- [ ] Other keys behave exactly as before
+- [ ] Each row of the SPEC D5 table has an allowed case and a denied case. Denied cases assert
+      `request_sequence == []`.
+- [ ] `create` is denied when its body names `properties/P2/audiences/A` and P2 isn't allowed,
+      even with an allowed `-p`. `create --dry-run` sends nothing (CliRunner).
+- [ ] If any case exposes a guard gap, the passing cases are committed and the gap is reported
+      with a minimal repro. No `xfail`, and no guard edits.
 
-**Verification:** `uv run pytest tests/test_config_cmd.py -q` (monkeypatch `sys.stdin.isatty`
-and `questionary.confirm`)
+**Verification:** `uv run pytest tests/test_allowlist_audience_exports.py -q`, plus the full
+suite and ruff.
 
-**Files:** `src/ga_cli/commands/config_cmd.py`, `src/ga_cli/config/store.py`,
-`tests/test_config_cmd.py` · **Scope:** S · **Deps:** T2
+**Dependencies:** Checkpoint M · **Scope:** S
 
-#### Task 8: `ga allowlist show`, auth status, cache invalidation
+**Files:** `tests/test_allowlist_audience_exports.py`
+
+#### T7: Agent and user docs (SPEC D6) · agent ζ
+
+**Description:** Write from the SPEC and the contracts above, not from the code, which other
+agents are changing at the same time.
+
 **Acceptance criteria:**
-- [ ] `commands/allowlist_cmd.py` with `show`, registered as `allowlist` in `main.py`. Output goes
-      through `resolve_output_format`, in the shape given in SPEC (enabled, sources, effective
-      properties with display names, cache age). With the guard off → `{"enabled": false}` and
-      no API call
-- [ ] A stale cache is refreshed. In table mode, a source/effective summary plus a property table
-- [ ] `ga auth status` output gains `"allowlist": {"enabled": bool}` from config/env only, with no
-      network call
-- [ ] `ga auth login` / `logout` delete `allowlist-cache.json` (missing file is fine)
-- [ ] `ga --describe` (root flag, `main.py`) lists `ga allowlist show`. `test_describe.py`'s
-      group list includes `ga allowlist`
+- [ ] `SKILL.md` gets an "Allowlist" section right after "Profiles". On exit 5, report the
+      `resource` and ask the user. Don't switch `--profile`, unset `GA_CLI_ALLOWED_*`, run
+      `auth login` or try `config set`. Use `ga allowlist show -o json` to see what's allowed.
+- [ ] `ga agent guide` keeps the PR's "Allowlist" and "Errors and exit codes" sections, adds the
+      profile rule, and matches 0.6.0 exit codes: invalid profile name 1, unknown profile 2.
+- [ ] The README describes the global fence + profile narrowing and the per-profile cache path,
+      and adds `--profile` to the "not a security boundary" list. The env table lists both
+      `GA_CLI_ALLOWED_*` vars next to `GA_CLI_PROFILE`.
 
-**Verification:** `uv run pytest tests/test_allowlist_cmd.py tests/test_auth_cmd.py -q`; live
-`ga allowlist show | jq .effective`
+**Verification:** `uv run pytest tests/test_skill.py tests/test_agent_cmd.py -q` (skill
+commands must exist), plus the full suite. Read the rendered README section.
 
-**Files:** `src/ga_cli/commands/allowlist_cmd.py` (new), `src/ga_cli/main.py`,
-`src/ga_cli/commands/auth_cmd.py`, `tests/test_allowlist_cmd.py` (new), `tests/test_auth_cmd.py`,
-`tests/test_describe.py` · **Scope:** S · **Deps:** T2, T4
+**Dependencies:** Checkpoint M · **Scope:** M
 
-### Checkpoint B: feature complete
-- [ ] Full suite and ruff pass
-- [ ] Live: piping `echo y` into `ga config set allowed_account_ids 1` is refused. Setting it
-      interactively in a real terminal works, and `ga allowlist show` reflects it
-- [ ] Commits T7–T8 on the branch
+**Files:** `skills/ga-cli/SKILL.md`, `src/ga_cli/commands/agent_cmd.py`,
+`tests/test_agent_cmd.py`, `README.md`
 
-### Phase 4: Docs and release prep
+### Wave 2: after all wave-1 branches are merged
 
-#### Task 9: Docs and spec status
+#### T8: Cross-slice integration tests · agent
+
+**Description:** Write end-to-end CliRunner tests that cross task boundaries, which no
+single wave-1 agent could write. They cover SPEC success criteria 3, 5, 7 and 8.
+
 **Acceptance criteria:**
-- [ ] Agent guide (`agent_cmd.py`): an Allowlist section covering exit 5 / `allowlist_error`,
-      `ga allowlist show`, that the allowlist can't be changed non-interactively (so the agent
-      asks the user), and that list results may be filtered
-- [ ] Agent guide: a new "Errors and exit codes" section with codes 1–5 and their categories.
-      The guide has none today. Keep it in sync with the `classify_error` docstring
-- [ ] README: setup (config + env), the intersection rule, property-only semantics, the
-      "guardrail, not a security boundary" note (env-only is advisory, TTY can be faked), and
-      the dedicated service-account pattern. Both env vars added to "Environment Variables"
-- [ ] SPEC.md status → "Implemented: pending release". `tasks/todo.md` all checked
-- [ ] `test_agent_cmd.py` still passes (update it if it snapshots the guide)
+- [ ] With a root allowlist, `GA_CLI_PROFILE=X ga reports run -p <outside>` and
+      `ga --profile X reports run …` exit 5. The JSON has `category`, `resource` and `hint`, and
+      nothing is sent.
+- [ ] With a root allowlist and a narrower profile allowlist, a property allowed by the root
+      but not by the profile exits 5 under X and is allowed in default.
+- [ ] A lookup under X writes `profiles/X/allowlist-cache.json` and no root cache. A blocked
+      `audience-exports create` under X exits 5.
 
-**Files:** `src/ga_cli/commands/agent_cmd.py`, `README.md`, `SPEC.md`, `tasks/todo.md` ·
-**Scope:** S · **Deps:** T1–T8
+**Verification:** `uv run pytest tests/test_allowlist_integration.py -q`, plus the full suite and
+ruff.
 
-#### Task 10: Open the PR
-**Acceptance criteria:**
-- [ ] Branch pushed and PR opened against master, each commit mapped to a task
-- [ ] CI green on 3.10, 3.12 and 3.13
-- [ ] **Merge only after the human says so.** No version bump or release in this PR
+**Dependencies:** wave 1 merged · **Scope:** S
 
-**Deps:** T9
+**Files:** `tests/test_allowlist_integration.py`
 
-### Checkpoint: complete
-- [ ] All SPEC success criteria (1–8) met
-- [ ] PR green and ready for review
+### Checkpoint W: final gate before pushing
 
-## Risks and mitigations
+- [ ] All task branches are merged. The full suite, ruff and the drift check pass.
+- [ ] A `feature-dev:code-reviewer` agent reviews `git diff origin/master...feat/allowlist`
+      (focus: SPEC R1′, R6′, R8–R11; fail-closed paths). It runs in parallel with T8.
+- [ ] Orchestrator docs-vs-behaviour check. Run the CLI against a scratch `GA_CLI_CONFIG_DIR`
+      and check what SKILL.md and the README claim, offline:
+  - `allowlist show` with the guard off;
+  - `--profile typo allowlist show` exits 2;
+  - a non-TTY `config set allowed_*` is refused;
+  - `auth status` has the `allowlist` field.
+- [ ] **Live read-only check: ask first, including which property.** The stored login gets 403
+      on 250400352, and other properties belong to real clients. Skip it if there's no suitable
+      property, and record that.
+- [ ] **Human review of the branch.** Ask before any push.
+
+### Wave 3: orchestrator, after the human go-ahead
+
+- [ ] `git push -u origin feat/allowlist`, then `gh pr create`. The description credits
+      @davidher-mann and #33 and states the 0.6.0 deltas (SPEC D1–D6). **Ask first.**
+- [ ] Close #33 with a comment linking the new PR and thanking David. **Ask first.**
+- [ ] Edit the local, gitignored `CLAUDE.md`:
+  - point "SPEC.md B4" at `git show 7594078:SPEC.md`;
+  - add the allowlist convention line;
+  - add the new module to the architecture tree.
+- [ ] Update the SPEC status and `tasks/todo.md` once CI on the PR passes.
+
+---
+
+## Risks and Mitigations
 
 | Risk | Impact | Mitigation |
-|------|--------|------------|
-| `build(http=…)` behaves differently from `build(credentials=…)` (timeouts, discovery fetch for v1alpha data) | High | `build_http()` is what googleapiclient uses internally. T5 runs the full suite, and Checkpoint A exercises `reports funnel` live |
-| googleapiclient encodes the path or query in a form the extractor misses, so a reference is missed | High | T3 tests the URIs real clients build, not hand-written strings. With no extractable reference, a request is denied |
-| False positive: a report filter value starting with `properties/N` is denied | Low | Accepted fail-closed behaviour, documented in SPEC. The message names the resource |
-| An extra `accountSummaries` call slows the first allowlisted command, or users with many properties need several pages | Low | 1 h TTL on disk, pageSize 200, refresh at most once per process |
-| A stale cache maps a moved property to its old account | Low | TTL. `ga allowlist show` displays the cache age. Login/logout clear it |
-| `config setup` / `reset` wipe the allowlist | Med | T7 covers both explicitly |
-| An agent bypasses the guard (edits the file, `GA_CLI_CONFIG_DIR`, direct API calls, a fake TTY via `script`) | Med | Not addressed, by design. Docs state "not a security boundary" and give the service-account pattern. The exit-5 message tells the agent to ask the user |
-| A 401 retry re-enters `AllowlistHttp.request`, or the cache refresh goes through the guard | Med | The refresh uses a separate plain `AuthorizedHttp`. Check and filters are idempotent. T5 has a 401 → retry test |
-| Percent-encoded path segments (`%2F`) hide a second property from the extractor | Low | The path is decoded before extraction, and an ID with an unexpected terminator is denied (T3) |
-| Subproperties have `parent: properties/N`, so a `parent`-based lookup gets the account wrong | Low | The account always comes from the enclosing `AccountSummary` (T4, T6) |
+|---|---|---|
+| The merge silently drops behaviour from one side | High | Merge commit has no new semantics; both suites must pass; review agent on `--remerge-diff` before fan-out |
+| T3 and T4 both edit `allowlist_guard.py` | Med | Function-level ownership, merged back one after the other with the suite after each |
+| T7 docs drift from what T2/T5 implement | Med | T7 writes from fixed contracts; Checkpoint W runs the CLI to check the doc claims |
+| T6 exposes a guard gap mid-wave | Med | T6 reports and doesn't patch; orchestrator fixes in a follow-up commit after T3/T4 merge |
+| In-process caches leak across profiles or tests | Med | T1 conftest resets `store` and `allowlist_guard` state; T3 keys caches by path |
+| David pushes to `pr-33` mid-work | Low | T0 checks the head SHA; work moves to `origin`, so later fork pushes don't affect us |
+| No accessible property for the live check | Low | Ask first; the mocked suite covers the guard; skipping is recorded |
 
-## Open questions
+## Open Questions
 
-- The account ID of test property 250400352, needed for the account-allowlist live checks. Look it
-  up with `ga properties get -p 250400352` at Checkpoint A.
+- **Live check property.** Which property, if any, may be used for the read-only live check at
+  Checkpoint W? This is asked at the checkpoint, not now.

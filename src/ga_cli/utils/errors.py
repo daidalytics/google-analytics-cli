@@ -32,6 +32,59 @@ class AllowlistError(Exception):
         super().__init__(f"{reason}. {ALLOWLIST_HINT}")
 
 
+# Creates gcloud Application Default Credentials that carry the scopes GA needs.
+# gcloud *user* ADC ignores the scopes a client requests unless it was created
+# with them (SPEC B4), so every ADC hint names them explicitly. Google blocks
+# gcloud's built-in OAuth client from the Analytics scopes ("This app is
+# blocked"), so the login must use the user's own Desktop-app OAuth client,
+# e.g. the client_secret.json that `ga auth login` uses.
+ADC_LOGIN_COMMAND = (
+    "gcloud auth application-default login --client-id-file=CLIENT_SECRET_JSON "
+    "--scopes=https://www.googleapis.com/auth/analytics.readonly,"
+    "https://www.googleapis.com/auth/cloud-platform"
+)
+
+# The alternative Google suggests: ADC that impersonates a service account.
+# No consent screen or scopes at login; needs roles/iam.serviceAccountTokenCreator
+# on the service account.
+ADC_IMPERSONATE_COMMAND = (
+    "gcloud auth application-default login --impersonate-service-account=SA_EMAIL"
+)
+
+# Google's ErrorInfo reason for an access token that lacks a required scope.
+SCOPE_INSUFFICIENT_REASON = "ACCESS_TOKEN_SCOPE_INSUFFICIENT"
+
+ADC_SCOPE_HINT = (
+    "These credentials come from gcloud Application Default Credentials "
+    f"without the Analytics scopes. Run: {ADC_LOGIN_COMMAND} "
+    "(CLIENT_SECRET_JSON: your Desktop-app OAuth client file, e.g. the one "
+    f"'ga auth login' uses), or impersonate a service account: {ADC_IMPERSONATE_COMMAND}"
+)
+
+
+class NotAuthenticatedError(RuntimeError):
+    """No usable credentials for the active profile. Exit 2 (``auth_error``)."""
+
+
+class ProfileNotFoundError(RuntimeError):
+    """The selected named profile does not exist. Exit 2 (``auth_error``).
+
+    Raised before any credential source is read or API client is built: a typo
+    in ``--profile`` must never fall back to another identity.
+    """
+
+    @classmethod
+    def for_profile(cls, profile: str) -> ProfileNotFoundError:
+        """Build the error with the known-profiles list and the create hint."""
+        from ..config.constants import list_profiles
+
+        return cls(
+            f"Profile '{profile}' does not exist. "
+            f"Known profiles: {', '.join(list_profiles())}.\n"
+            f"Create it with: ga --profile {profile} auth login"
+        )
+
+
 def format_api_error(err: Exception) -> str:
     """Extract a human-readable message from a Google API error.
 
@@ -75,6 +128,10 @@ def classify_error(err: Exception) -> tuple[int, str]:
             return 2, "auth_error"
         return 3, "api_error"
 
+    # Our own credential-resolution errors
+    if isinstance(err, (NotAuthenticatedError, ProfileNotFoundError)):
+        return 2, "auth_error"
+
     # Auth-specific exceptions
     try:
         from google.auth.exceptions import DefaultCredentialsError, RefreshError
@@ -105,7 +162,8 @@ def classify_error(err: Exception) -> tuple[int, str]:
     if isinstance(err, OSError) and _is_network_os_error(err):
         return 4, "network_error"
 
-    # RuntimeError from our own auth code ("Not authenticated...")
+    # Any other RuntimeError that mentions auth (kept for messages raised
+    # without one of the explicit classes above)
     if isinstance(err, RuntimeError) and "auth" in str(err).lower():
         return 2, "auth_error"
 
@@ -127,16 +185,63 @@ def _is_network_os_error(err: OSError) -> bool:
     return err.errno in network_errnos
 
 
+def _error_reasons(err: Exception) -> set[str]:
+    """The ``reason`` values in a Google API error body's ``error.details``.
+
+    Empty for anything that is not an HttpError with a parseable body.
+    """
+    from googleapiclient.errors import HttpError
+
+    if not isinstance(err, HttpError):
+        return set()
+    try:
+        details = json.loads(err.content.decode()).get("error", {}).get("details")
+    except (ValueError, AttributeError):  # ValueError covers JSON and Unicode errors
+        return set()
+    if not isinstance(details, list):
+        return set()
+    return {
+        detail["reason"]
+        for detail in details
+        if isinstance(detail, dict) and isinstance(detail.get("reason"), str)
+    }
+
+
+def error_hint(err: Exception) -> str | None:
+    """Advice to show alongside an error, or None.
+
+    Only case today: a 403 ``ACCESS_TOKEN_SCOPE_INSUFFICIENT`` while the
+    credentials came from gcloud ADC. User ADC ignores the scopes a client asks
+    for unless it was created with them (SPEC B4), so the fix is a re-login.
+    """
+    from googleapiclient.errors import HttpError
+
+    if not isinstance(err, HttpError) or err.resp.status != 403:
+        return None
+    if SCOPE_INSUFFICIENT_REASON not in _error_reasons(err):
+        return None
+
+    # Imported lazily: api.client imports this module.
+    from ..api.client import get_last_auth_method
+
+    if get_last_auth_method() != "adc":
+        return None
+    return ADC_SCOPE_HINT
+
+
 def handle_error(err: Exception) -> NoReturn:
     """Print error and exit with a classified exit code.
 
     When output format is JSON (explicit or non-TTY), emit structured
-    JSON to stderr. Otherwise, emit human-readable Rich text.
+    JSON to stderr. Otherwise, emit human-readable Rich text. Advice from
+    ``error_hint()`` goes in a separate ``"hint"`` field (JSON) or on its own
+    line after the message (text); the message itself is never altered.
     """
     from .output import get_current_output_format
 
     exit_code, category = classify_error(err)
     message = format_api_error(err)
+    hint = error_hint(err)
     fmt = get_current_output_format()
 
     if fmt == "json":
@@ -152,11 +257,13 @@ def handle_error(err: Exception) -> NoReturn:
             payload["status_code"] = err.resp.status
         if isinstance(err, AllowlistError):
             payload["resource"] = err.resource
+        if hint:
+            payload["hint"] = hint
 
         # Write raw JSON to stderr — avoid Rich Console which may wrap lines
         print(json.dumps(payload, default=str), file=sys.stderr)
     else:
-        print_error(message)
+        print_error(f"{message}\n{hint}" if hint else message)
 
     sys.exit(exit_code)
 

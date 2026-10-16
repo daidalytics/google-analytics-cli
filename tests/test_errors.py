@@ -5,7 +5,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ga_cli.utils.errors import classify_error, format_api_error, handle_error, require_options
+from ga_cli.utils.errors import (
+    ADC_IMPERSONATE_COMMAND,
+    ADC_LOGIN_COMMAND,
+    ADC_SCOPE_HINT,
+    NotAuthenticatedError,
+    classify_error,
+    format_api_error,
+    handle_error,
+    require_options,
+)
 from ga_cli.utils.output import set_output_format
 
 
@@ -304,6 +313,212 @@ class TestHandleErrorJson:
         # Should NOT be valid JSON
         with pytest.raises(json.JSONDecodeError):
             json.loads(captured.err)
+
+
+# ---------------------------------------------------------------------------
+# ADC scope hint: 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT while using gcloud ADC
+# ---------------------------------------------------------------------------
+SCOPE_MESSAGE = "Request had insufficient authentication scopes."
+
+
+def _google_error(status: int = 403, reason: str | None = "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
+                  body: bytes | None = None):
+    """An HttpError with the body Google sends for this failure."""
+    from googleapiclient.errors import HttpError
+
+    if body is None:
+        error: dict = {
+            "code": status,
+            "message": SCOPE_MESSAGE,
+            "status": "PERMISSION_DENIED",
+        }
+        if reason is not None:
+            error["details"] = [
+                {
+                    "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                    "reason": reason,
+                    "domain": "googleapis.com",
+                    "metadata": {
+                        "service": "analyticsdata.googleapis.com",
+                        "method": "google.analytics.data.v1beta.BetaAnalyticsData.RunReport",
+                    },
+                }
+            ]
+        body = json.dumps({"error": error}).encode()
+    resp = MagicMock()
+    resp.status = status
+    resp.reason = "Forbidden"
+    return HttpError(resp, body)
+
+
+@pytest.fixture
+def auth_method(monkeypatch):
+    """Set the method get_last_auth_method() reports."""
+    def _set(method):
+        monkeypatch.setattr("ga_cli.api.client._last_auth_method", method)
+
+    return _set
+
+
+class TestAdcScopeHint:
+    def test_json_adds_hint_field(self, auth_method, capsys):
+        auth_method("adc")
+        set_output_format("json")
+
+        with pytest.raises(SystemExit) as exc_info:
+            handle_error(_google_error())
+
+        assert exc_info.value.code == 2
+        payload = json.loads(capsys.readouterr().err)
+        assert payload["message"] == SCOPE_MESSAGE  # unchanged
+        assert payload["category"] == "auth_error"
+        assert payload["status_code"] == 403
+        assert payload["hint"] == ADC_SCOPE_HINT
+        assert ADC_LOGIN_COMMAND in payload["hint"]
+
+    def test_table_appends_hint(self, auth_method, capsys):
+        auth_method("adc")
+        set_output_format("table")
+
+        with pytest.raises(SystemExit) as exc_info:
+            handle_error(_google_error())
+
+        assert exc_info.value.code == 2
+        err = " ".join(capsys.readouterr().err.split())
+        assert SCOPE_MESSAGE in err
+        assert "gcloud Application Default Credentials without the Analytics scopes" in err
+        assert "gcloud auth application-default login" in err
+        assert err.index(SCOPE_MESSAGE) < err.index("Application Default Credentials")
+
+    def test_hint_names_the_documented_scopes(self):
+        assert "analytics.readonly" in ADC_LOGIN_COMMAND
+        assert "cloud-platform" in ADC_LOGIN_COMMAND
+
+    def test_login_command_uses_own_oauth_client(self):
+        """Google blocks gcloud's built-in client from the Analytics scopes."""
+        assert "--client-id-file=" in ADC_LOGIN_COMMAND
+
+    def test_hint_offers_impersonation(self):
+        assert ADC_IMPERSONATE_COMMAND in ADC_SCOPE_HINT
+        assert "--impersonate-service-account=" in ADC_IMPERSONATE_COMMAND
+
+    @pytest.mark.parametrize("method", ["oauth", "service-account", None])
+    def test_no_hint_for_other_methods(self, auth_method, capsys, method):
+        auth_method(method)
+        set_output_format("json")
+
+        with pytest.raises(SystemExit):
+            handle_error(_google_error())
+
+        payload = json.loads(capsys.readouterr().err)
+        assert "hint" not in payload
+        assert payload["message"] == SCOPE_MESSAGE
+
+    @pytest.mark.parametrize("method", ["oauth", "service-account", None])
+    def test_no_hint_in_table_for_other_methods(self, auth_method, capsys, method):
+        auth_method(method)
+        set_output_format("table")
+
+        with pytest.raises(SystemExit):
+            handle_error(_google_error())
+
+        assert "Application Default Credentials" not in capsys.readouterr().err
+
+    @pytest.mark.parametrize(
+        "err",
+        [
+            pytest.param(_google_error(reason="IAM_PERMISSION_DENIED"), id="other-reason"),
+            pytest.param(_google_error(reason=None), id="no-details"),
+            pytest.param(
+                _google_error(body=b'{"error": {"message": "Forbidden"}}'), id="bare-403"
+            ),
+            pytest.param(_google_error(body=b"not json"), id="non-json-body"),
+            pytest.param(
+                _google_error(body=b'{"error": {"details": "oops"}}'), id="malformed-details"
+            ),
+            pytest.param(_google_error(status=401), id="401-same-reason"),
+            pytest.param(_google_error(status=400), id="400-same-reason"),
+            pytest.param(RuntimeError("Not authenticated"), id="not-an-http-error"),
+        ],
+    )
+    def test_no_hint_for_other_errors_under_adc(self, auth_method, capsys, err):
+        auth_method("adc")
+        set_output_format("json")
+
+        with pytest.raises(SystemExit):
+            handle_error(err)
+
+        payload = json.loads(capsys.readouterr().err)
+        assert "hint" not in payload
+
+
+class TestLastAuthMethod:
+    """api.client records how the credentials in use were resolved."""
+
+    def test_none_before_resolution(self):
+        from ga_cli.api.client import get_last_auth_method
+
+        assert get_last_auth_method() is None
+
+    def test_records_adc(self, no_gcloud_adc):
+        from ga_cli.api.client import get_last_auth_method, resolve_credentials
+
+        no_gcloud_adc.side_effect = None
+        no_gcloud_adc.return_value = (object(), "proj")
+
+        _creds, method = resolve_credentials()
+
+        assert method == "adc"
+        assert get_last_auth_method() == "adc"
+
+    def test_records_oauth(self, monkeypatch):
+        from ga_cli.api import client
+
+        monkeypatch.setattr(client, "get_valid_credentials", lambda: object())
+
+        client.resolve_credentials()
+
+        assert client.get_last_auth_method() == "oauth"
+
+    def test_records_service_account(self, monkeypatch):
+        from ga_cli.api import client
+
+        sa = MagicMock(expired=False)
+        monkeypatch.setattr(client, "get_service_account_credentials", lambda: sa)
+
+        client.resolve_credentials()
+
+        assert client.get_last_auth_method() == "service-account"
+
+    def test_failed_resolution_forgets_previous_method(self, no_gcloud_adc):
+        from google.auth.exceptions import DefaultCredentialsError
+
+        from ga_cli.api.client import get_last_auth_method, resolve_credentials
+
+        no_gcloud_adc.side_effect = None
+        no_gcloud_adc.return_value = (object(), "proj")
+        resolve_credentials()
+        no_gcloud_adc.side_effect = DefaultCredentialsError("gone")
+
+        with pytest.raises(NotAuthenticatedError):
+            resolve_credentials()
+
+        assert get_last_auth_method() is None
+
+    def test_cleared_with_client_cache(self, no_gcloud_adc):
+        from ga_cli.api.client import (
+            clear_client_cache,
+            get_last_auth_method,
+            resolve_credentials,
+        )
+
+        no_gcloud_adc.side_effect = None
+        no_gcloud_adc.return_value = (object(), "proj")
+        resolve_credentials()
+
+        clear_client_cache()
+
+        assert get_last_auth_method() is None
 
 
 # ---------------------------------------------------------------------------

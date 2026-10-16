@@ -1,8 +1,9 @@
 """User configuration persistence.
 
 Implements the same pattern as GTM CLI:
-- JSON file at ~/.config/ga-cli/config.json
-- In-memory cache for performance
+- JSON file at ~/.config/ga-cli/config.json (the default profile), or
+  ~/.config/ga-cli/profiles/<name>/config.json for a named profile
+- In-memory cache for performance, keyed by the file it was read from
 - CLI flag > config file > None resolution via get_effective_value()
 """
 
@@ -15,7 +16,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from .constants import get_config_dir, get_config_path
+from .constants import get_config_path
 
 OutputFormat = Literal["json", "table", "compact"]
 
@@ -37,10 +38,21 @@ class ConfigFileError(Exception):
     """config.json exists but couldn't be read, so it won't be overwritten."""
 
 
-# In-memory cache (same pattern as GTM CLI)
+# In-memory cache (same pattern as GTM CLI). It remembers which file it came
+# from, so switching profiles (which changes get_config_path()) can never serve
+# another profile's config.
 _cached_config: Optional[UserConfig] = None
-# Why config.json couldn't be read; None when it was read or doesn't exist
+_cached_config_path: Optional[Path] = None
+# Why the cached file couldn't be read; None when it was read or doesn't exist
 _config_error: Optional[str] = None
+
+
+def reset_cache() -> None:
+    """Forget everything cached in memory (tests, and anything that edits the file directly)."""
+    global _cached_config, _cached_config_path, _config_error
+    _cached_config = None
+    _cached_config_path = None
+    _config_error = None
 
 
 def load_config() -> UserConfig:
@@ -50,11 +62,12 @@ def load_config() -> UserConfig:
     keep working, but config_error() reports it: the allowlist fails closed on it and
     save_config won't overwrite it.
     """
-    global _cached_config, _config_error
-    if _cached_config is not None:
+    global _cached_config, _cached_config_path, _config_error
+    config_path = get_config_path()
+    if _cached_config is not None and _cached_config_path == config_path:
         return _cached_config
 
-    config_path = get_config_path()
+    _cached_config_path = config_path
     _config_error = None
     try:
         data = json.loads(config_path.read_text())
@@ -85,21 +98,22 @@ def config_error() -> Optional[str]:
 def save_config(config: UserConfig) -> None:
     """Write config to disk atomically and update cache.
 
-    Raises ConfigFileError instead of overwriting a config.json that couldn't be read,
-    which would silently drop any allowlist in it.
+    Creates the active profile's directory on first write. Raises ConfigFileError
+    instead of overwriting a config.json that couldn't be read, which would silently
+    drop any allowlist in it.
     """
-    global _cached_config
+    global _cached_config, _cached_config_path
     reason = config_error()
     if reason:
         raise ConfigFileError(reason)
-    config_dir = get_config_dir()
-    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = get_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Only write non-None values
     data = {k: v for k, v in asdict(config).items() if v is not None}
     # Temp file + rename, so a crash can't leave a truncated file. resolve() writes
     # through a symlinked config.json instead of replacing the link.
-    path = get_config_path().resolve()
+    path = config_path.resolve()
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".config.")
     try:
         with os.fdopen(fd, "w") as f:
@@ -109,6 +123,7 @@ def save_config(config: UserConfig) -> None:
         Path(tmp).unlink(missing_ok=True)
         raise
     _cached_config = config
+    _cached_config_path = config_path
 
 
 def update_config(**updates: object) -> UserConfig:

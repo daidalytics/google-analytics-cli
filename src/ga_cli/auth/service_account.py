@@ -1,9 +1,12 @@
 """Service account authentication.
 
-Supports:
+Supports, for the default profile:
 1. GA_CLI_SERVICE_ACCOUNT env var (path to key file)
-2. GOOGLE_APPLICATION_CREDENTIALS env var (standard Google convention)
+2. GOOGLE_APPLICATION_CREDENTIALS env var (standard Google convention), when
+   it points to a service account key
 3. Saved auth method from a previous ``ga auth login --service-account`` call
+
+A named profile supports only (3), from its own directory.
 
 Equivalent to GTM CLI's auth/service-account.ts.
 """
@@ -19,7 +22,7 @@ from typing import Optional
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 
-from ..config.constants import OAUTH_SCOPES, get_auth_method_path, get_config_dir
+from ..config.constants import OAUTH_SCOPES, get_auth_method_path, is_named_profile
 
 logger = logging.getLogger(__name__)
 
@@ -94,44 +97,67 @@ def login_with_service_account(key_path: str) -> str:
 
 
 def get_service_account_credentials() -> Optional[service_account.Credentials]:
-    """Get service account credentials if configured.
+    """Get the active profile's service account credentials, if configured.
 
-    Check order:
-    1. GA_CLI_SERVICE_ACCOUNT env var
-    2. GOOGLE_APPLICATION_CREDENTIALS env var
-    3. Saved auth method from previous login
+    Default profile, in order:
+    1. ``GA_CLI_SERVICE_ACCOUNT``: must be a service account key, else
+       ``ValueError``.
+    2. ``GOOGLE_APPLICATION_CREDENTIALS``, only when it is a service account
+       key. A file of any other type (``external_account`` from Workload
+       Identity Federation, ``authorized_user``, ...) is skipped and left to
+       ``google.auth.default()``. A missing or malformed file still raises.
+    3. Saved auth method from a previous ``ga auth login --service-account``.
+
+    A named profile uses only (3), read from its own directory. It ignores both
+    env vars: an exported key must never override an explicitly chosen client.
 
     Returns None if no service account is configured (OAuth should be used).
     """
-    # Check env vars first
-    for env_var in ("GA_CLI_SERVICE_ACCOUNT", "GOOGLE_APPLICATION_CREDENTIALS"):
-        key_path = os.environ.get(env_var)
+    if not is_named_profile():
+        key_path = os.environ.get("GA_CLI_SERVICE_ACCOUNT")
         if key_path:
-            validate_service_account_key(key_path)
-            return service_account.Credentials.from_service_account_file(
-                key_path,
-                scopes=OAUTH_SCOPES,
-            )
+            return _credentials_from_key(key_path)
 
-    # Check saved auth method
+        key_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if key_path and not _is_other_credential_type(key_path):
+            return _credentials_from_key(key_path)
+
     auth_method = _load_auth_method()
     if auth_method and auth_method.get("method") == "service-account":
         key_path = auth_method.get("service_account_path")
         if key_path:
-            validate_service_account_key(key_path)
-            return service_account.Credentials.from_service_account_file(
-                key_path,
-                scopes=OAUTH_SCOPES,
-            )
+            return _credentials_from_key(key_path)
 
     return None
 
 
+def _credentials_from_key(key_path: str) -> service_account.Credentials:
+    """Validate a service account key file and build credentials from it."""
+    validate_service_account_key(key_path)
+    return service_account.Credentials.from_service_account_file(
+        key_path,
+        scopes=OAUTH_SCOPES,
+    )
+
+
+def _is_other_credential_type(key_path: str) -> bool:
+    """True when ``key_path`` is a credential file that is not a service account key.
+
+    Missing, unreadable, or malformed files return False, so
+    ``validate_service_account_key()`` raises its usual error for them.
+    """
+    try:
+        data = json.loads(Path(key_path).read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("type") != "service_account"
+
+
 def _save_auth_method(config: dict) -> None:
-    """Save auth method configuration."""
-    config_dir = get_config_dir()
-    config_dir.mkdir(parents=True, exist_ok=True)
-    get_auth_method_path().write_text(json.dumps(config, indent=2))
+    """Save auth method configuration, creating the active profile's dir."""
+    path = get_auth_method_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2))
 
 
 def _load_auth_method() -> Optional[dict]:

@@ -5,6 +5,7 @@ import json
 from typer.testing import CliRunner
 
 from ga_cli.main import app
+from ga_cli.utils.describe import build_cli_schema
 
 runner = CliRunner()
 
@@ -219,3 +220,22 @@ class TestDescribeNoAuth:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["cli"] == "ga-cli"
+
+
+class TestBuildCliSchema:
+    """build_cli_schema() is the pure, in-process form of --describe."""
+
+    def test_equals_describe_output(self):
+        assert build_cli_schema(app) == _get_describe_output()
+
+    def test_returns_dict_without_printing(self, capsys):
+        schema = build_cli_schema(app)
+        assert isinstance(schema, dict)
+        assert schema["cli"] == "ga-cli"
+        assert capsys.readouterr().out == ""
+
+    def test_describe_output_is_schema_serialized(self):
+        """--describe prints exactly json.dumps(build_cli_schema(app), indent=2)."""
+        result = runner.invoke(app, ["--describe"])
+        assert result.exit_code == 0
+        assert result.output == json.dumps(build_cli_schema(app), indent=2) + "\n"

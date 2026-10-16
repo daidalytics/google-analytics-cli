@@ -1,33 +1,39 @@
-# TODO: Account and property allowlist
+# TODO: Port the allowlist (PR #33) to 0.6.0
 
-Task detail in [plan.md](plan.md) · design in [SPEC.md](../SPEC.md) · branch `feat/allowlist`
+Task detail in [plan.md](plan.md) · design in [SPEC.md](../SPEC.md) · baseline 1460 tests green
+on `master` @ `8877860`. Previous checklist (0.6.0): `git show 29c1cb0:tasks/todo.md`.
 
-## Phase 0: Branch
-- [x] T0 Create `feat/allowlist`; commit SPEC.md + tasks/
+Legend: `∥` = runs in parallel with its siblings, each in its own worktree agent.
 
-## Phase 1: Foundations (no network)
-- [x] T1 `AllowlistError`, exit code 5 / `allowlist_error`, `resource` in the JSON payload, "ask the user" hint
-- [x] T2 Allowlist config keys + `config/allowlist.py` (parse, sources, intersection, property-only rules, direct hit without lookup); conftest clears `GA_CLI_ALLOWED_*`
+## Wave 0 (orchestrator)
 
-## Phase 2: The guard
-- [x] T3 Reference extraction (decoded path, query, body) + route classification (discovery only; unknown host denied), tested against real-client URIs
-- [x] T4 Property → account cache (TTL, principal, refresh once via a separate plain `AuthorizedHttp`, account from enclosing summary, atomic write)
-- [x] T5 `AllowlistHttp` enforcement + `_build` helper for all 4 clients; 401 retry stays guarded; declare httplib2 deps
-- [x] T6 Response filtering for accounts / accountSummaries / properties list (idempotent)
-- [x] **Checkpoint A:** suite + ruff green · live allow/deny on 250400352 (property and account allowlist, funnel) · **review with the human**
-  - [x] suite (1239) + ruff green
-  - [x] live, read-only, on 487271032 / accounts/353535768 instead (250400352 isn't visible to the current login): property + account allowlist, funnel, change history, access bindings
-  - [x] review with the human
+- [ ] **T0** · Stash SPEC/tasks, refresh `pr-33` (still `84aed1e`?), `git switch -c feat/allowlist pr-33` (XS)
+- [ ] **T1** · `git merge origin/master`: resolve per the merge inventory, minimum edits to go green, no D1–D5 semantics (L)
 
-## Phase 3: CLI surface
-- [x] T7 `ga config` allowlist keys: list parsing, TTY + confirm, `setup`/`reset` keep the allowlist
-- [x] T8 `ga allowlist show`, `auth status` allowlist field, login/logout clear the cache, `ga --describe` lists it
-- [x] **Checkpoint B:** suite + ruff green · live non-TTY refusal + interactive set
-  - [x] suite + ruff green
-  - [x] live non-TTY refusal (`echo y | ga config set allowed_account_ids 1` → exit 1, file untouched)
-  - [x] interactive set in a real terminal: set → `ga allowlist show` reflects it → unset → disabled
+- [ ] **CHECKPOINT M** · review agent on `git show --remerge-diff HEAD` · fix findings · report to human (not a gate)
 
-## Phase 4: Docs and release prep
-- [x] T9 Agent guide Allowlist section + new "Errors and exit codes" section (1–5); README section + env vars; SPEC status → implemented
-- [ ] T10 Push, open PR, CI green. **Merge only on the human's go**
-- [ ] **Checkpoint: complete**
+## Wave 1 (6 agents in parallel)
+
+- [ ] ∥ **T2a → T2b** · Profile-aware sources (M) → CLI surface: scope text, `allowlist show` profile, status (M) (one agent, two commits)
+- [ ] ∥ **T3** · Per-profile cache file + in-process cache keyed by path + reset on profile switch (M)
+- [ ] ∥ **T4** · `principal_of()` for ADC credentials; ADC through `_build()`; refresh not guarded (S)
+- [ ] ∥ **T5** · Allowlist advice moves into the `hint` field (XS)
+- [ ] ∥ **T6** · Audience-exports guard tests (S, test-only)
+- [ ] ∥ **T7** · SKILL.md, `ga agent guide`, README (M)
+
+- [ ] Merge back in order T5 → T4 → T3 → T6 → T2 → T7, full suite after each, regenerate `commands.md` if drifted
+
+## Wave 2
+
+- [ ] ∥ **T8** · Cross-slice integration tests (S)
+- [ ] ∥ Review agent on `origin/master...feat/allowlist`
+- [ ] ∥ Orchestrator docs-vs-behaviour check against a scratch config dir
+
+- [ ] **CHECKPOINT W** · suite + ruff + drift green · live read-only check (**ask first**, which property) · **human review**
+
+## Wave 3 (orchestrator, ask first)
+
+- [ ] Push `feat/allowlist` to `origin`; open the new PR crediting @davidher-mann and #33
+- [ ] Close #33 with a link and thanks
+- [ ] Local `CLAUDE.md`: SPEC B4 pointer, allowlist convention, architecture tree
+- [ ] SPEC status + this checklist updated once PR CI passes
