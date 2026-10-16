@@ -7,10 +7,16 @@ Legend: `∥` = runs in parallel with its siblings, each in its own worktree age
 
 ## Wave 0 (orchestrator)
 
-- [ ] **T0** · Stash SPEC/tasks, refresh `pr-33` (still `84aed1e`?), `git switch -c feat/allowlist pr-33` (XS)
-- [ ] **T1** · `git merge origin/master`: resolve per the merge inventory, minimum edits to go green, no D1–D5 semantics (L)
+- [x] **T0** · Stash SPEC/tasks, refresh `pr-33` (still `84aed1e`?), `git switch -c feat/allowlist pr-33` (XS)
+      · `pr-33` unchanged at `84aed1e`; SPEC + plan stashed and copied to the scratchpad
+- [x] **T1** · `git merge origin/master`: resolve per the merge inventory, minimum edits to go green, no D1–D5 semantics (L) · `70fe947`
+      · 13 conflicts; 1660 tests green (1460 master + 200 PR); ruff and drift check clean
+      · enabling edits: `save_config` creates the profile dir; `store.reset_cache()`; conftest resets store + allowlist caches; `allowlist` field added once in `_auth_status()`; 4 exact-dict status asserts gain it; `commands.md` regenerated
+      · `commands.md` ends with a blank line (already on master); `git diff --check` flags it only because the file is new relative to the PR branch
 
-- [ ] **CHECKPOINT M** · review agent on `git show --remerge-diff HEAD` · fix findings · report to human (not a gate)
+- [x] **CHECKPOINT M** · review agent on `git show --remerge-diff HEAD` · fix findings · report to human (not a gate)
+      · review agent: no regression ≥80 confidence (it had no shell, so it checked the merged files against the inventory)
+      · orchestrator read the remerge diff itself: both sides kept in every hunk; the PR's "Run 'ga auth login'" status hint dropped on purpose (master had already removed it)
 
 ## Wave 1 (6 agents in parallel)
 
