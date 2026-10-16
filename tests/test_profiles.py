@@ -15,6 +15,7 @@ from ga_cli.config.constants import (
     DEFAULT_PROFILE,
     PROFILE_NAME_RE,
     get_active_profile,
+    get_allowlist_cache_path,
     get_auth_method_path,
     get_chat_sessions_path,
     get_client_secret_path,
@@ -39,6 +40,7 @@ PER_PROFILE_GETTERS = {
     "config.json": get_config_path,
     "auth-method.json": get_auth_method_path,
     "chat-sessions.json": get_chat_sessions_path,
+    "allowlist-cache.json": get_allowlist_cache_path,
 }
 
 GLOBAL_GETTERS = {
