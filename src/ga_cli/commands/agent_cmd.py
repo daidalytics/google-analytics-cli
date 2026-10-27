@@ -88,9 +88,10 @@ With JSON output (`-o json` or piped), errors go to stderr as
 | 4 | `network_error` | Timeout, DNS failure, unreachable |
 | 5 | `allowlist_error` | Resource not on the allowlist, a malformed allowlist, or an unreadable `config.json` |
 
-Branch on `category`, not only on the exit code. Two errors print plain text instead of a JSON
-payload: argument-parsing errors (unknown flag, bad option value) exit 2 with a usage message, and
-an invalid `--profile` name exits 1.
+Branch on `category`, not only on the exit code. Some errors print plain text instead of a JSON
+payload: argument-parsing errors (unknown flag, bad option value) exit 2 with a usage message; an
+invalid `--profile` name and `ga config` refusals (unknown key, an allowlist change without a
+terminal, an unreadable `config.json`) exit 1 with an `Error:` line.
 
 ## Command Reference
 

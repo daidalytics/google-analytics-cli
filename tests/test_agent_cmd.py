@@ -217,6 +217,13 @@ class TestAgentGuideAllowlist:
         assert '"resource"' in section
         assert '"hint"' in section
 
+    def test_plain_text_errors_include_config_refusals(self):
+        """`ga config` refusals print a plain `Error:` line and exit 1, not a JSON payload."""
+        section = " ".join(_guide_section("Errors and exit codes").split())
+
+        assert "Two errors print plain text" not in section
+        assert "`ga config` refusals" in section
+
     def test_exit_codes_cover_profile_errors(self):
         rows = {
             line.split("|")[1].strip(): line
