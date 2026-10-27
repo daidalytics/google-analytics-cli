@@ -776,6 +776,19 @@ class TestFilter:
         assert isinstance(once, bytes)
         assert http._filter(Route.ACCOUNTS_LIST, once, self.URI) == once
 
+    @pytest.mark.parametrize(
+        "content",
+        [b"\xff\xfe not utf-8", b"<html>", b'[{"name": "accounts/20"}]', "not json"],
+        ids=["not-utf8", "html", "json-array", "str"],
+    )
+    def test_unreadable_list_response_fails_closed(self, content):
+        """A list response the filter can't read is never passed through unfiltered (#46)."""
+        http = AllowlistHttp(FakeCreds(), http=HttpMockSequence([]),
+                             allowlist=_al(accounts={"10"}))
+        with pytest.raises(AllowlistError) as exc:
+            http._filter(Route.ACCOUNTS_LIST, content, self.URI)
+        assert exc.value.resource == "/v1beta/accounts"
+
     def test_non_2xx_untouched(self):
         from googleapiclient.errors import HttpError
 
@@ -783,11 +796,6 @@ class TestFilter:
         with pytest.raises(HttpError) as exc:
             c.accounts().list().execute()
         assert b"accounts/20" in exc.value.content
-
-    def test_non_json_untouched(self):
-        http = AllowlistHttp(FakeCreds(), http=HttpMockSequence([]),
-                             allowlist=_al(accounts={"10"}))
-        assert http._filter(Route.ACCOUNTS_LIST, b"<html>", self.URI) == b"<html>"
 
     def test_paginate_all_crosses_empty_page(self):
         from ga_cli.utils.pagination import paginate_all

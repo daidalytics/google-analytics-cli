@@ -492,14 +492,17 @@ class AllowlistHttp(AuthorizedHttp):
     # -- response filters -----------------------------------------------------
 
     def _filter(self, route: Route, content: Any, uri: str) -> Any:
-        """Drop disallowed items from a list response. Idempotent; keeps other keys."""
-        raw = content.decode("utf-8") if isinstance(content, bytes) else content
+        """Drop disallowed items from a list response. Idempotent; keeps other keys.
+
+        A response it can't read is denied, never passed through unfiltered.
+        """
         try:
+            raw = content.decode("utf-8") if isinstance(content, bytes) else content
             data = json.loads(raw)
-        except (ValueError, TypeError, UnicodeDecodeError):
-            return content
+        except (ValueError, TypeError):  # ValueError includes UnicodeDecodeError
+            data = None
         if not isinstance(data, dict):
-            return content
+            self._deny(urlsplit(uri).path, "can't read the list response to filter it")
 
         if route is Route.PROPERTIES_LIST:
             account = _filter_account(uri)
