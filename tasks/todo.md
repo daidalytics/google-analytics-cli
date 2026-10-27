@@ -46,16 +46,16 @@ Legend: `∥` = runs in parallel with its siblings, each in its own worktree age
       · nit: for an unreadable `config.json` the exit-5 `hint` said to run `ga allowlist show`, which exits 5 in that state too · fixed in `3f762af` (user's go-ahead): `AllowlistConfigError` + `ALLOWLIST_CONFIG_HINT` for unreadable files and malformed entries, SPEC D4 updated; 1792 green
       · the first run's proxy-only sandbox leaked ~5 token requests for the fake service account to `oauth2.googleapis.com` (httplib2 ignores proxies without PySocks); all rejected, no GA API call; fixed before the rerun
 
-- [ ] **CHECKPOINT W** · suite + ruff + drift green · live read-only check (**ask first**, which property) · **human review**
+- [x] **CHECKPOINT W** · suite + ruff + drift green · live read-only check (**ask first**, which property) · **human review**
       · [x] suite (1786), ruff, drift green
       · [x] live read-only check on 250400352 (user re-authenticated as gunnar.griese.gg@gmail.com, OAuth, default profile), env-only allowlist so `config.json` stayed untouched:
         allowed `reports run` returns rows · `-p 123456789` exits 5 with `resource` + `hint` · `allowlist show` resolves 250400352 → account 143775840 via a live `accountSummaries` · property-only allowlist denies `accounts get -a 143775840` · `GA_CLI_ALLOWED_ACCOUNTS=143775840` filters `accounts list` 35 → 1 and allows the report
-      · [ ] human review
+      · [x] human review: user gave the go-ahead for the PR after a manual-check command list
       · task worktrees and their branches removed after the merges (user's go-ahead)
 
 ## Wave 3 (orchestrator, ask first)
 
-- [ ] Push `feat/allowlist` to `origin`; open the new PR crediting @davidher-mann and #33
+- [x] Push `feat/allowlist` to `origin`; open the new PR crediting @davidher-mann and #33 · #43; CI green on 3.10, 3.12, 3.13
 - [ ] Close #33 with a link and thanks
-- [ ] Local `CLAUDE.md`: SPEC B4 pointer, allowlist convention, architecture tree
-- [ ] SPEC status + this checklist updated once PR CI passes
+- [x] Local `CLAUDE.md`: SPEC B4 pointer, allowlist convention, architecture tree
+- [x] SPEC status + this checklist updated once PR CI passes

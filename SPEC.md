@@ -1,6 +1,6 @@
 # Spec: Port the account/property allowlist (PR #33) to 0.6.0
 
-Status: **Draft: for review**
+Status: **In review: #43** (CI green 2026-10-27)
 Target version: 0.7.0
 Date: 2026-10-15
 Owner: @GunnarGriese, who is finalizing the work. @davidher-mann proposed it in #33 and won't
