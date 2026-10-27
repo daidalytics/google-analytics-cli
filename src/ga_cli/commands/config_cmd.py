@@ -15,6 +15,7 @@ from ..config.store import (
     VALID_CONFIG_KEYS,
     ConfigFileError,
     clear_config,
+    config_error,
     get_config_path,
     get_config_value,
     load_config,
@@ -124,6 +125,11 @@ def setup():
 def get_cmd(key: Optional[str] = typer.Argument(None, help="Config key to retrieve")):
     """Get configuration values."""
     _require_existing_profile()
+    # The defaults an unreadable file loads as would read as "no allowlist"
+    reason = config_error()
+    if reason:
+        error(f"{reason}. Fix the file by hand")
+        raise typer.Exit(1)
     if key:
         if key not in VALID_CONFIG_KEYS:
             error(f"Unknown config key: {key}. Valid keys: {', '.join(VALID_CONFIG_KEYS)}")

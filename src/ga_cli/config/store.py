@@ -61,7 +61,8 @@ def load_config_at(path: Path) -> UserConfig:
 
     An unreadable file also loads as the defaults, so commands that only use defaults
     keep working, but config_error(path) reports it: the allowlist fails closed on it
-    and save_config won't overwrite it.
+    and save_config won't overwrite it. An empty file can't hold an allowlist, so it is
+    an empty config, not an unreadable one.
     """
     cached = _cache.get(path)
     if cached is not None:
@@ -69,7 +70,8 @@ def load_config_at(path: Path) -> UserConfig:
 
     reason = None
     try:
-        data = json.loads(path.read_text())
+        text = path.read_text()
+        data = json.loads(text) if text.strip() else {}
         if not isinstance(data, dict):
             raise ValueError("expected a JSON object")
         config = UserConfig(
