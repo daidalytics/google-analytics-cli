@@ -9,8 +9,13 @@ from ga_cli.utils.errors import (
     ADC_IMPERSONATE_COMMAND,
     ADC_LOGIN_COMMAND,
     ADC_SCOPE_HINT,
+    ALLOWLIST_CONFIG_HINT,
+    ALLOWLIST_HINT,
+    AllowlistConfigError,
+    AllowlistError,
     NotAuthenticatedError,
     classify_error,
+    error_hint,
     format_api_error,
     handle_error,
     require_options,
@@ -551,3 +556,90 @@ class TestRequireOptions:
         options = {"account_id": "123", "property_id": None}
         with pytest.raises(typer.BadParameter):
             require_options(options, ["account_id", "property_id"])
+
+
+# ---------------------------------------------------------------------------
+# AllowlistError
+# ---------------------------------------------------------------------------
+ALLOWLIST_REASON = "properties/999 is not on the allowlist (config: accounts 123)"
+
+
+class TestAllowlistError:
+    def _err(self):
+        return AllowlistError("properties/999", ALLOWLIST_REASON)
+
+    def test_not_runtime_or_os_error(self):
+        err = self._err()
+        assert not isinstance(err, (RuntimeError, OSError))
+
+    def test_classified_as_allowlist_error(self):
+        assert classify_error(self._err()) == (5, "allowlist_error")
+
+    def test_classified_first_even_when_message_mentions_auth(self):
+        err = AllowlistError("properties/1", "auth-related reason")
+        assert classify_error(err) == (5, "allowlist_error")
+
+    def test_message_is_reason_only(self):
+        err = AllowlistError("properties/9", "x")
+        assert str(err) == "x"
+        assert err.resource == "properties/9"
+        assert err.reason == "x"
+
+    def test_error_hint_is_allowlist_hint(self):
+        assert error_hint(self._err()) == ALLOWLIST_HINT
+
+    def test_hint_tells_agent_to_ask_user(self):
+        assert "ga allowlist show" in ALLOWLIST_HINT
+        assert "only the user can change the allowlist" in ALLOWLIST_HINT
+
+    def test_config_error_is_an_allowlist_error(self):
+        err = AllowlistConfigError("config.json", "x")
+        assert isinstance(err, AllowlistError)
+        assert err.resource == "config.json"
+        assert classify_error(err) == (5, "allowlist_error")
+
+    def test_config_error_hint_does_not_point_at_allowlist_show(self):
+        """`ga allowlist show` exits 5 as well while the allowlist can't be loaded."""
+        assert error_hint(AllowlistConfigError("config.json", "x")) == ALLOWLIST_CONFIG_HINT
+        assert "ga allowlist show" not in ALLOWLIST_CONFIG_HINT
+        assert "only the user can change the allowlist" in ALLOWLIST_CONFIG_HINT
+
+    def test_json_payload_has_resource_and_hint(self, capsys):
+        set_output_format("json")
+        with pytest.raises(SystemExit) as exc_info:
+            handle_error(self._err())
+        assert exc_info.value.code == 5
+        payload = json.loads(capsys.readouterr().err)
+        assert payload["category"] == "allowlist_error"
+        assert payload["exit_code"] == 5
+        assert payload["resource"] == "properties/999"
+        assert payload["message"] == ALLOWLIST_REASON
+        assert payload["hint"] == ALLOWLIST_HINT
+        assert "status_code" not in payload
+
+    def test_table_mode_prints_message_then_hint_line(self, capsys):
+        set_output_format("table")
+        with pytest.raises(SystemExit) as exc_info:
+            handle_error(self._err())
+        assert exc_info.value.code == 5
+        lines = [line.rstrip() for line in capsys.readouterr().err.splitlines()]
+        assert lines[0] == f"Error: {ALLOWLIST_REASON}"
+        assert lines[1].startswith("Run 'ga allowlist show'")
+        # Rich may wrap the hint at the terminal width
+        assert " ".join(" ".join(lines[1:]).split()) == ALLOWLIST_HINT
+
+    @pytest.mark.parametrize("fmt", ["json", "table"])
+    def test_never_gets_adc_hint(self, auth_method, capsys, fmt):
+        auth_method("adc")
+        assert error_hint(self._err()) == ALLOWLIST_HINT
+
+        set_output_format(fmt)
+        with pytest.raises(SystemExit):
+            handle_error(self._err())
+        assert "Application Default Credentials" not in capsys.readouterr().err
+
+    def test_other_errors_have_no_resource(self, capsys):
+        set_output_format("json")
+        with pytest.raises(SystemExit):
+            handle_error(ValueError("x"))
+        assert "resource" not in json.loads(capsys.readouterr().err)

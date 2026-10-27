@@ -73,6 +73,10 @@ Each of these was hit by an agent driving this CLI and cost a wasted round-trip:
 - `ga agent guide`
   - opts: -s
 
+### ga allowlist
+
+- `ga allowlist show`
+
 ### ga annotations
 
 - `ga annotations create` --title X --annotation-date X [-p]  _MUTATES, --dry-run_

@@ -13,6 +13,38 @@ from typing import NoReturn
 
 from .output import error as print_error
 
+ALLOWLIST_HINT = (
+    "Run 'ga allowlist show' for the allowed properties; "
+    "only the user can change the allowlist."
+)
+# Not ALLOWLIST_HINT: `ga allowlist show` fails the same way until this is fixed
+ALLOWLIST_CONFIG_HINT = (
+    "Requests stay blocked until the user fixes the file or setting named in the message; "
+    "only the user can change the allowlist."
+)
+
+
+class AllowlistError(Exception):
+    """A request blocked by the account/property allowlist, or a malformed allowlist.
+
+    The message is ``reason`` alone; ``error_hint()`` supplies ``ALLOWLIST_HINT``.
+    Deliberately not a RuntimeError or OSError: googleapiclient retries the OSError
+    family, and classify_error maps RuntimeErrors mentioning auth to auth_error.
+    """
+
+    def __init__(self, resource: str, reason: str):
+        self.resource = resource
+        self.reason = reason
+        super().__init__(reason)
+
+
+class AllowlistConfigError(AllowlistError):
+    """The allowlist itself can't be loaded: a malformed entry or an unreadable config.json.
+
+    ``error_hint()`` supplies ``ALLOWLIST_CONFIG_HINT`` instead of ``ALLOWLIST_HINT``.
+    """
+
+
 # Creates gcloud Application Default Credentials that carry the scopes GA needs.
 # gcloud *user* ADC ignores the scopes a client requests unless it was created
 # with them (SPEC B4), so every ADC hint names them explicitly. Google blocks
@@ -93,11 +125,15 @@ def classify_error(err: Exception) -> tuple[int, str]:
         2 — auth_error: not authenticated, token expired, permission denied (401/403)
         3 — api_error: Google returned 4xx (not auth) or 5xx
         4 — network_error: connection timeout, DNS failure, unreachable
+        5 — allowlist_error: resource not on the allowlist, or a malformed allowlist
 
     Returns:
         (exit_code, category)
     """
     from googleapiclient.errors import HttpError
+
+    if isinstance(err, AllowlistError):
+        return 5, "allowlist_error"
 
     if isinstance(err, HttpError):
         status = err.resp.status
@@ -187,12 +223,18 @@ def _error_reasons(err: Exception) -> set[str]:
 def error_hint(err: Exception) -> str | None:
     """Advice to show alongside an error, or None.
 
-    Only case today: a 403 ``ACCESS_TOKEN_SCOPE_INSUFFICIENT`` while the
-    credentials came from gcloud ADC. User ADC ignores the scopes a client asks
-    for unless it was created with them (SPEC B4), so the fix is a re-login.
+    - ``AllowlistConfigError``: ``ALLOWLIST_CONFIG_HINT``.
+    - Any other ``AllowlistError``: ``ALLOWLIST_HINT``.
+    - A 403 ``ACCESS_TOKEN_SCOPE_INSUFFICIENT`` while the credentials came from
+      gcloud ADC: ``ADC_SCOPE_HINT``. User ADC ignores the scopes a client asks
+      for unless it was created with them (SPEC B4), so the fix is a re-login.
     """
     from googleapiclient.errors import HttpError
 
+    if isinstance(err, AllowlistConfigError):
+        return ALLOWLIST_CONFIG_HINT
+    if isinstance(err, AllowlistError):
+        return ALLOWLIST_HINT
     if not isinstance(err, HttpError) or err.resp.status != 403:
         return None
     if SCOPE_INSUFFICIENT_REASON not in _error_reasons(err):
@@ -232,6 +274,8 @@ def handle_error(err: Exception) -> NoReturn:
 
         if isinstance(err, HttpError):
             payload["status_code"] = err.resp.status
+        if isinstance(err, AllowlistError):
+            payload["resource"] = err.resource
         if hint:
             payload["hint"] = hint
 

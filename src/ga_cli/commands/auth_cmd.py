@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 import typer
 
+from ..api.allowlist_guard import delete_cache_file
 from ..api.client import clear_client_cache, resolve_credentials
 from ..auth.credentials import has_credentials
 from ..auth.oauth import get_auth_status, login, logout
@@ -117,6 +118,7 @@ def login_cmd(
         if service_account:
             info(f"Authenticating with service account: {service_account}")
             email = login_with_service_account(service_account)
+            delete_cache_file()
             success(f"Authenticated as {email}")
             info("Service account credentials are now active.")
             return
@@ -131,6 +133,7 @@ def login_cmd(
         info("Opening browser for authentication...")
         login()
         clear_client_cache()
+        delete_cache_file()
 
         # Fetch user info to display
         status = get_auth_status()
@@ -147,6 +150,7 @@ def logout_cmd():
     try:
         auth_method = load_auth_method()
         status = get_auth_status()
+        delete_cache_file()
 
         if not auth_method and not status.get("authenticated"):
             info("Not currently authenticated.")
@@ -189,7 +193,15 @@ def status_cmd(
 
 
 def _auth_status() -> dict[str, Any]:
-    """Status of the active profile, via the same resolution API calls use."""
+    """Status of the active profile, plus whether an allowlist is on."""
+    from ..config.allowlist import is_allowlist_configured
+
+    # Config/env only: no validation, no network
+    return {**_credential_status(), "allowlist": {"enabled": is_allowlist_configured()}}
+
+
+def _credential_status() -> dict[str, Any]:
+    """Credentials of the active profile, via the same resolution API calls use."""
     profile = get_active_profile()
     try:
         creds, method = resolve_credentials()

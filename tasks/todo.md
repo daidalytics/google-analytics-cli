@@ -1,77 +1,61 @@
-# TODO: Agent distribution, named profiles, and audience exports
+# TODO: Port the allowlist (PR #33) to 0.6.0
 
-> **Shipped in 0.6.0 (2026-10-14)** via #35 (lanes A + B) and #36 (lane C). #37 then corrected the ADC login that B/D1 had specified. Remaining items are under [Follow-ups](#follow-ups).
->
-> **2026-10-14:** all lanes rebased onto `origin/master` v0.5.0 (`225822f`). They had been cut from a stale local `master` (0.4.0). Pre-rebase state is kept in `backup/pre-rebase-0.5.0/*`.
-
-Task detail in [plan.md](plan.md) · design in [SPEC.md](../SPEC.md) · baseline 997 tests green
+Task detail in [plan.md](plan.md) · design in [SPEC.md](../SPEC.md) · baseline 1460 tests green
+on `master` @ `8877860`. Previous checklist (0.6.0): `git show 29c1cb0:tasks/todo.md`.
 
 Legend: `∥` = runs in parallel with its siblings, each in its own worktree agent.
 
 ## Wave 0 (orchestrator)
 
-- [x] Resolve Q1 → root-only `--profile`; Q2 → suppress the notice under uvx (O1 runs in wave 1)
-- [x] Commit SPEC.md + `tasks/`; cut `feat/agent-distribution`, `feat/profiles`, `feat/audience-exports`
-- [x] Edit `CLAUDE.md` (local, gitignored): fix the auth-priority line; add `plugin.json` to the release steps
+- [x] **T0** · Stash SPEC/tasks, refresh `pr-33` (still `84aed1e`?), `git switch -c feat/allowlist pr-33` (XS)
+      · `pr-33` unchanged at `84aed1e`; SPEC + plan stashed and copied to the scratchpad
+- [x] **T1** · `git merge origin/master`: resolve per the merge inventory, minimum edits to go green, no D1–D5 semantics (L) · `70fe947`
+      · 13 conflicts; 1660 tests green (1460 master + 200 PR); ruff and drift check clean
+      · enabling edits: `save_config` creates the profile dir; `store.reset_cache()`; conftest resets store + allowlist caches; `allowlist` field added once in `_auth_status()`; 4 exact-dict status asserts gain it; `commands.md` regenerated
+      · `commands.md` ends with a blank line (already on master); `git diff --check` flags it only because the file is new relative to the PR branch
+
+- [x] **CHECKPOINT M** · review agent on `git show --remerge-diff HEAD` · fix findings · report to human (not a gate)
+      · review agent: no regression ≥80 confidence (it had no shell, so it checked the merged files against the inventory)
+      · orchestrator read the remerge diff itself: both sides kept in every hunk; the PR's "Run 'ga auth login'" status hint dropped on purpose (master had already removed it)
 
 ## Wave 1 (6 agents in parallel)
 
-- [x] ∥ **A1** · Console-script alias + plugin manifests + version-sync test (S) · `58a8324`
-- [x] ∥ **A2 → A3** · `build_cli_schema()` (XS) → skill in repo + generator + guard tests (M) (one agent) · `bb3a7b8` `46caed5`
-      · the draft's 35 commands all exist; short-flag table had 4 corrections
-- [x] ∥ **A4** · README "Use with AI agents" section (XS) · `f73928d`
-- [x] ∥ **B1** · Profile foundation: selection, paths, implicit creation, conftest (M) · `25eb01b` (lane B)
-      · invalid name → exit 1 (not Click's 2); explicit `--profile ""` rejected; config cache keyed by path
-- [x] ∥ **C1 → C2 → C3** · audience-exports list/get (S) → query (S) → create + `--dry-run` + `--wait` (M) (one long-running agent) · `3eaf1f2` `0087858` `e46a16a` (lane C)
-- [x] ∥ **O1** · Suppress the update notice under an ephemeral uvx env (XS) (approved; lane A) · `07129e8`
+- [x] ∥ **T2a → T2b** · Profile-aware sources (M) → CLI surface: scope text, `allowlist show` profile, status (M) (one agent, two commits) · `22d57a6`, `dde0a95`
+      · the agent stopped before committing T2b; the orchestrator checked the staged work against the T2b contract, ran the full suite in the worktree and committed it
+- [x] ∥ **T3** · Per-profile cache file + in-process cache keyed by path + reset on profile switch (M) · `3413b52`
+      · orchestrator follow-up `7333211`: `test_profiles.py` lists the cache among the per-profile paths
+- [x] ∥ **T4** · `principal_of()` for ADC credentials; ADC through `_build()`; refresh not guarded (S) · `888922d`
+- [x] ∥ **T5** · Allowlist advice moves into the `hint` field (XS) · `6461630`
+- [x] ∥ **T6** · Audience-exports guard tests (S, test-only) · `82f9429`; no guard gap reported
+- [x] ∥ **T7** · SKILL.md, `ga agent guide`, README (M) · `8a3dc56`
+      · the agent stopped before committing; the orchestrator read the diff, spot-checked its claims against the merged CLI (invalid profile name exits 1 as plain text, unknown profile exits 2, hint text, root allowlist enabled under a named profile) and committed it
 
-- [x] **CHECKPOINT A**: merge A1–A4 · `uv build` + uvx wheel smoke test · `claude plugin validate .` · `npx skills add ./ --list` · review agent · **human review → PR A, decide on 0.4.1**
-      - [x] merged; 1070 tests green; ruff clean; drift check clean
-      - [x] uvx from the built wheel → `ga-cli 0.4.0`; `claude plugin validate` passes (only warning: local gitignored CLAUDE.md)
-      - [x] `npx skills add ./ --list` initially found **no skills**: the unquoted `: ` in the SKILL.md description broke strict YAML → fixed + regression test (`f5e9cd4`); now lists `ga-cli`
-      - [x] review agent: no correctness issues; one README duplication finding judged acceptable (one uvx form, shown in agents section + install list); CI doesn't lint `scripts/` (follow-up, ask-first)
-      - [x] human review → no separate PR A or 0.4.1; lane A shipped with lane B in #35 (0.6.0)
+- [x] Merge back, full suite after each, `commands.md` never drifted · 1771 tests green, ruff clean
+      · actual order T5 → T3 → T6 → T4 → T2 → T7 (T4 committed after T3 had merged; their `allowlist_guard.py` functions don't overlap and the merge was clean)
+      · merges `ae46c0c`, `07aa973`, `f779520`, `f6f438f`, `0d62a5b`, `23a3f36`
 
-## Wave 2 (after B1 is merged into `feat/profiles`)
+## Wave 2
 
-- [x] ∥ **B2** · Credential resolution table + ADC fallback + `ProfileNotFoundError` (M)
-      · guard-removal check: each safety guard removed → 1–10 tests fail; ADC tripwire run → 0 real ADC hits
-- [x] ∥ **B3** · `ga profiles list` / `delete` (S) · `c9629a1` (lane B)
+- [x] ∥ **T8** · Cross-slice integration tests (S) · `cba7573`, merge `6febb6e`; 15 tests, 1786 green
+      · four injected bugs (no reset on profile switch, root cache, root fence ignored in a named profile, hint in the message) each fail their tests; no bug found
+      · "nothing sent" uses property allowlists: an account allowlist makes one `accountSummaries` lookup before denying, so that test asserts the lookup is the only request
+- [x] ∥ Review agent on `origin/master...feat/allowlist` · no finding ≥ 80 confidence (R6′/R8 widening routes, fail-closed paths, D2 cache, D3 principal, R1′ passthrough, merge damage)
+- [x] ∥ Orchestrator docs-vs-behaviour check against a scratch config dir · every README / SKILL.md / `agent guide` claim checked holds
+      · offline run: a throwaway service-account key whose `token_uri` points at a dead local port, so a request that passes the guard fails locally
+      · root fence under `--profile` and `GA_CLI_PROFILE`; a profile and env only narrow; empty env allows nothing; unreadable root blocks every profile, an unreadable profile file only that one; non-TTY `config set/unset/reset` refused; `auth logout` clears only its profile's cache; audience-exports create blocked (also via `--audience-id properties/P/…`), `--dry-run` sends nothing; `allowlist show` JSON and table match the T2b contract; `profiles delete` needs no TTY
+      · nit: for an unreadable `config.json` the exit-5 `hint` said to run `ga allowlist show`, which exits 5 in that state too · fixed in `3f762af` (user's go-ahead): `AllowlistConfigError` + `ALLOWLIST_CONFIG_HINT` for unreadable files and malformed entries, SPEC D4 updated; 1792 green
+      · the first run's proxy-only sandbox leaked ~5 token requests for the fake service account to `oauth2.googleapis.com` (httplib2 ignores proxies without PySocks); all rejected, no GA API call; fixed before the rerun
 
-## Wave 3
+- [x] **CHECKPOINT W** · suite + ruff + drift green · live read-only check (**ask first**, which property) · **human review**
+      · [x] suite (1786), ruff, drift green
+      · [x] live read-only check on 250400352 (user re-authenticated as gunnar.griese.gg@gmail.com, OAuth, default profile), env-only allowlist so `config.json` stayed untouched:
+        allowed `reports run` returns rows · `-p 123456789` exits 5 with `resource` + `hint` · `allowlist show` resolves 250400352 → account 143775840 via a live `accountSummaries` · property-only allowlist denies `accounts get -a 143775840` · `GA_CLI_ALLOWED_ACCOUNTS=143775840` filters `accounts list` 35 → 1 and allows the report
+      · [x] human review: user gave the go-ahead for the PR after a manual-check command list
+      · task worktrees and their branches removed after the merges (user's go-ahead)
 
-- [x] **B4** · `auth status` profile/adc · `config path` · ADC scope hint (M)
-      · fixed: status misreported env-var SA under named profiles / non-SA GAC; a missing key file was shown as authenticated
+## Wave 3 (orchestrator, ask first)
 
-- [x] **CHECKPOINT B**: merge B1–B4 · live default-profile parity on `250400352` · SA profile · `--profile typo` → exit 2 · ADC (human) · review agent · **human review**
-      - [x] merged; 1213 tests on lane; review agent: no issues ≥80 confidence (invariant, traversal, compat, perms, exit codes, test isolation)
-      - [x] live (real config): `profiles list` offline · `--profile clinet-a` → exit 2 before any API call · `../x` → exit 1 · `auth status` = default/oauth · default-profile parity: `account-summaries list` byte-identical vs pre-profiles code
-      - [x] live ADC: tested by the human. It found that Google blocks gcloud's built-in client for the Analytics scopes, which was fixed in #37
-      - [ ] live SA-keyed named profile: not recorded (see Follow-ups)
-      - [x] human review → #35 merged
-- [x] **CHECKPOINT C**: merge C1–C3 · live list/get/query · live create **ask-first** (resolves Q3) · review agent · **human review**
-      - [x] merged; review agent: clean (no issues ≥80 confidence)
-      - [ ] live list/get/query: not recorded (the stored login has no access to `250400352`; see Follow-ups)
-      - [ ] live create (ask-first) → would confirm SPEC Q3 (see Follow-ups)
-      - [x] human review → #36 merged
-
-## Wave 4
-
-- [x] ∥ **D1** · Profiles + ADC in SKILL.md / README; regenerate reference (S) · behaviour checked by running the CLI against a scratch config
-- [x] ∥ **D2** · Audience exports in SKILL.md / recipes / README; regenerate reference (S)
-
-- [x] **FINAL CHECKPOINT**
-      - [x] trial merge of all three lanes on 0.5.0: no conflicts, 1445 tests, drift check clean, ruff clean
-      - [x] #35 and #36 green on CI and merged; v0.6.0 released (release workflow success; PyPI 0.6.0)
-      - [x] published artifacts checked live: `uvx google-analytics-cli --version` → `ga-cli 0.6.0` from PyPI; `npx skills add daidalytics/google-analytics-cli --list` → `ga-cli`
-      - [x] SPEC.md living updates: status shipped; ADC login corrected per #37
-      - [ ] Success Criteria 1–15 not formally mapped to tests (each workstream's tasks cover them; not tabulated)
-
-## Follow-ups
-
-- [ ] Live SA-keyed named profile end to end (e.g. `ga --profile personal auth login --service-account KEY`)
-- [ ] Live `audience-exports list/get/query` on a test property, and one live `create` (charges quota, ask first) to settle SPEC Q3 (does the v1beta `Operation.response.name` carry the export name?)
-- [x] CI doesn't lint `scripts/` → fixed in #39 (ci.yml, release.yml and README now run `ruff check src/ tests/ scripts/`)
-- [x] `~/.claude/skills-dev/ga-cli/SKILL.md` (the author's local draft, outside the repo): description quoted; `npx skills add` now finds it
-- [ ] SPEC Q4: `ga agent guide` and the skill are two hand-maintained agent references
-
+- [x] Push `feat/allowlist` to `origin`; open the new PR crediting @davidher-mann and #33 · #43; CI green on 3.10, 3.12, 3.13
+- [x] Close #33 with a link and thanks
+- [x] Local `CLAUDE.md`: SPEC B4 pointer, allowlist convention, architecture tree
+- [x] SPEC status + this checklist updated once PR CI passes

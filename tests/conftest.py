@@ -34,6 +34,9 @@ def no_gcloud_adc(monkeypatch):
 def isolated_config_dir(tmp_path, monkeypatch):
     """Point GA_CLI_CONFIG_DIR to a temp dir so tests never touch real config."""
     monkeypatch.setenv("GA_CLI_CONFIG_DIR", str(tmp_path))
+    # Keep a developer's own allowlist from leaking into the suite
+    monkeypatch.delenv("GA_CLI_ALLOWED_ACCOUNTS", raising=False)
+    monkeypatch.delenv("GA_CLI_ALLOWED_PROPERTIES", raising=False)
 
     # A developer may have a profile exported; every test starts on default.
     monkeypatch.delenv("GA_CLI_PROFILE", raising=False)
@@ -44,12 +47,15 @@ def isolated_config_dir(tmp_path, monkeypatch):
     # Also clear the in-memory config cache between tests
     from ga_cli.config import store
 
-    store._cached_config = None
+    store.reset_cache()
 
-    # Drop API clients cached by a previous test (possibly under another profile)
+    # Drop API clients and allowlist maps cached by a previous test (possibly
+    # under another profile)
+    from ga_cli.api.allowlist_guard import reset_caches
     from ga_cli.api.client import clear_client_cache
 
     clear_client_cache()
+    reset_caches()
 
     # Reset global output flags between tests
     from ga_cli.utils.output import set_no_color, set_output_format, set_quiet

@@ -1,524 +1,460 @@
-# Implementation Plan: Agent distribution, named profiles, and audience exports
+# Implementation Plan: Port the allowlist (PR #33) to 0.6.0
 
-Companion to [SPEC.md](../SPEC.md). Baseline: **997 tests passing** (7.85 s) on `master` @ `3be1a9a`.
+Companion to [SPEC.md](../SPEC.md). Baseline: **1460 tests passing** (8.7 s) on `master` @
+`8877860`. The previous plan (0.6.0: distribution, profiles, audience exports) is in git history
+at `29c1cb0:tasks/plan.md`.
 
 ## Overview
 
-There are three workstreams from the spec: **A** (distribution), **B** (profiles + ADC), and
-**C** (audience exports). This plan splits them into 14 tasks and arranges them for **parallel
-execution by subagents in isolated git worktrees**. A, B, and C share almost no files, so each
-becomes a *lane* on its own branch. Inside a lane, tasks run in parallel wherever file ownership
-doesn't overlap. A fourth lane, **D**, adds skill and README docs for B and C once A's skill is in
-the repo.
+The work has two parts.
 
-The critical path is four agent-steps long (`B1 → B2 → B4 → D1`), instead of 14 sequential tasks.
+1. **One merge, done by the orchestrator.** Merge `origin/master` into the PR head, resolving
+   the 13 conflicts per the spec's merge inventory. This step is strictly sequential, and
+   everything else builds on it.
+2. **Six parallel subagents for SPEC D1–D6.** After the merge, the work fans out to six
+   agents in isolated git worktrees. Each agent owns a disjoint set of files.
+
+After that come one integration-test agent, a review agent, and the human gate before anything
+is pushed.
+
+The critical path is four steps (`T1 merge → T2a → T2b → T8 integration`), not 11 sequential
+tasks. Peak concurrency is 6 agents (wave 1).
 
 ## Architecture Decisions
 
-1. **Lanes = branches = PRs.** These are `feat/agent-distribution` (A), `feat/profiles` (B), and
-   `feat/audience-exports` (C). Each is reviewable and revertable on its own. A merges first: it
-   carries the skill that D needs, and it could ship alone as 0.4.1 so the `uvx` line goes live
-   sooner.
-2. **One agent per file-ownership set.** Tasks that edit the same file run in sequence inside a
-   single agent (C1→C2→C3 all edit `audience_exports.py`). Tasks with disjoint files run as
-   separate agents at the same time.
-3. **Contracts before fan-out.** Wherever a downstream task consumes an upstream function, that
-   signature is fixed in this plan (see [Interface contracts](#interface-contracts)). A downstream
-   agent can then be briefed before the upstream code exists.
-4. **Generated files are never hand-merged.** `skills/ga-cli/references/commands.md` (generated
-   block) is resolved by re-running `scripts/gen_skill_reference.py --write` after every merge.
-5. **`plugin.json` version tracks the *current* `pyproject.toml` version (`0.4.0`) until release.**
-   SPEC A4's example shows `0.5.0`, but the version-sync test requires equality, so both are bumped
-   together in the release commit.
-6. **Subagents never touch live APIs.** All tests are mocked. Live checks (real property, `uvx`
-   from PyPI, `claude plugin validate`, `npx skills add`, gcloud ADC) happen at checkpoints, run by
-   the orchestrator or the human.
+1. **One branch, task branches off it.** The lane branch is `feat/allowlist` on `origin`
+   (SPEC decision 2). It starts from `pr-33`, and `origin/master` is merged in, never rebased,
+   so David's 5 commits keep their authorship. Each agent works on `task/<ID>-<slug>` cut from
+   `feat/allowlist`, and the orchestrator merges each task branch back.
+2. **The orchestrator does the merge itself (T1).** Merging isn't parallelizable, it carries
+   the most judgment, and the orchestrator already holds the merge inventory. **The merge
+   commit only resolves conflicts and gets the suite green.** No D1–D5 semantics go into it, so
+   a review of it means one thing: did anything from either side get lost?
+3. **One agent per file-ownership set.** T2a→T2b share semantics (the source model), so one
+   agent runs them in sequence, as two commits. Every other wave-1 task gets its own agent. The
+   one shared source file, `api/allowlist_guard.py`, is split **by function** between T3 and T4.
+4. **New behaviour gets new test files.** Wave-1 agents don't append to
+   `tests/test_allowlist_guard.py`, because parallel appends at end-of-file conflict. Each
+   creates its own file and imports the PR's helpers (`guarded`, `_al`, `_resp`, `FakeCreds`,
+   `A`/`AA`/`D`/`DA`) from `tests.test_allowlist_guard`. `tests/` is a package, so that works.
+5. **Contracts before fan-out.** Every function one agent writes and another reads is fixed below
+   in [Interface Contracts](#interface-contracts), so dependent agents can be briefed up front.
+6. **Generated files are never hand-merged.** `skills/ga-cli/references/commands.md` is
+   regenerated with `scripts/gen_skill_reference.py --write` after every merge that changes the
+   CLI schema.
+7. **Subagents never touch live APIs, push, or open PRs.** Live checks, pushes, the new PR and
+   closing #33 are done by the orchestrator, and only after asking.
+8. **`CLAUDE.md` is gitignored.** Agents in worktrees can't see it, so they read it from the
+   main checkout. Editing it is a local orchestrator step (wave 3) and isn't part of the PR.
 
 ## Dependency Graph
 
 ```
-                      ┌─ A1  alias + plugin manifests ─────────────────┐
-                      ├─ A2  build_cli_schema() ── A3  skill in repo ──┼─▶ CHECKPOINT A ─▶ PR A ─┐
-                      ├─ A4  README "Use with AI agents" ──────────────┘                         │
- Wave 0 (orchestr.) ──┤                                                                          │
- spec commit,         ├─ B1  profile foundation ─┬─ B2  credential resolution + ADC ─ B4  status/path/hint ─┐
- lane branches        │                          └─ B3  ga profiles list/delete ─────────────────────────────┤
-                      │                                                                ─▶ CHECKPOINT B ─────┤
-                      └─ C1  list+get ─ C2  query ─ C3  create+--wait ─▶ CHECKPOINT C ─────────────────────┤
-                                                                                                            ▼
-                                                                          D1 profiles docs  ∥  D2 exports docs
-                                                                          (both need A3 on master)
-                                                                                  │
-                                                                           FINAL CHECKPOINT
+ W0  T0 branch setup ── T1 merge origin/master (orchestrator) ── CHECKPOINT M (review agent)
+                                                                        │
+            ┌───────────────┬──────────────┬──────────────┬─────────────┼──────────────┐
+ W1         ▼               ▼              ▼              ▼             ▼              ▼
+     T2a sources ─▶ T2b CLI   T3 cache/profile  T4 ADC principal  T5 hint field  T6 audience-   T7 docs
+     (D1, agent α)            (D2, agent β)     (D3, agent γ)     (D4, agent δ)  exports tests  (D6, agent ζ)
+                                                                                 (D5, agent ε)
+            └───────────────┴──────────────┴──────────────┴─────────────┴──────────────┘
+                                                   │  merge back: T5, T4, T3, T6, T2, T7
+                                                   ▼
+ W2              T8 integration tests (agent)  ∥  review agent  ∥  orchestrator docs-vs-behaviour check
+                                                   │
+                                          CHECKPOINT W (human gate)
+                                                   │
+ W3          orchestrator, ask-first: push origin · new PR · close #33 · local CLAUDE.md
 ```
 
 ## Execution Schedule
 
 | Wave | Runs in parallel | Agents | Blocked on |
 |---|---|---|---|
-| **0** | Orchestrator: commit SPEC + plan, cut 3 lane branches, resolve Q1/Q2 | 0 | human go-ahead |
-| **1** | **A1** · **A2→A3** (one agent) · **A4** · **O1** · **B1** · **C1→C2→C3** (one agent, long-running) | 6 | Wave 0 |
-| — | Merge A → **CHECKPOINT A** (+ review agent); merge B1 into `feat/profiles` | | Wave 1 A tasks, B1 |
-| **2** | **B2** · **B3** (C lane still running) | 2 | B1 merged |
-| **3** | **B4** | 1 | B2 merged |
-| — | **CHECKPOINT B** · **CHECKPOINT C** (+ review agent each) | | |
-| **4** | **D1** · **D2** | 2 | PR A on `master`; B/C lanes rebased onto it |
-| — | **FINAL CHECKPOINT**, then ask about 0.5.0 release | | |
+| **0** | T0 setup → T1 merge (orchestrator, main checkout) | 0 | plan approval |
+| — | **CHECKPOINT M**: review agent on the merge resolution; orchestrator fixes findings | 1 | T1 |
+| **1** | **T2a→T2b** (one agent) · **T3** · **T4** · **T5** · **T6** · **T7** | 6 | Checkpoint M |
+| — | Orchestrator merges task branches; full suite after each | | all of wave 1 |
+| **2** | **T8** integration tests · **review agent** · orchestrator docs-vs-behaviour check | 2 | wave 1 merged |
+| — | **CHECKPOINT W**: live read-only check (ask first) · **human review** | | wave 2 |
+| **3** | Orchestrator: push · `gh pr create` · close #33 · local `CLAUDE.md` · SPEC status | 0 | human go-ahead |
 
-Peak concurrency is 6 agents (wave 1). **O1** (spec Q2, the uvx update notice) was approved and
-runs in wave 1, because it owns `upgrade_cmd.py` exclusively.
+## File Ownership (wave 1)
 
-## File Ownership
+A task may edit only the files listed for it. If it needs another file, it stops and reports
+instead of editing.
 
-A task may edit only the files listed for it. Shared hotspots and how merges resolve them:
-
-| File | Edited by | Merge rule |
+| File | Owner | Notes |
 |---|---|---|
-| `src/ga_cli/main.py` | B1 (root callback), B3 (+1 import, +1 `add_typer`), C1 (+1 import, +1 `add_typer`) | separate hunks; keep both registrations |
-| `README.md` | A4 (new top section), D1 (auth/profiles/env vars), D2 (features + command table) | distinct sections |
-| `skills/ga-cli/SKILL.md` | A3 (creates), D1 (after "Orient before you query"), D2 (after "Mutations") | fixed insertion anchors |
-| `skills/ga-cli/references/commands.md` | A3, D1, D2 | **regenerate, never hand-merge** |
-| `src/ga_cli/utils/errors.py` | B2 (`ProfileNotFoundError` classification), B4 (ADC scope hint) | sequential (B4 after B2) |
-| `src/ga_cli/auth/{credentials,service_account}.py` | B1 (mkdir target only), B2 (resolution logic) | sequential |
-| `tests/conftest.py` | **B1 only** | other agents must not edit; report the need instead |
-| `pyproject.toml` | **A1 only** | |
-| `tests/test_describe.py` | **A2 only** | C3 puts its `--describe` assertions in `test_audience_exports.py` |
-| `CLAUDE.md` | **orchestrator only**, in the main checkout | it is gitignored, so it doesn't exist in worktrees |
+| `src/ga_cli/config/store.py` | T2a | T1 has already added the profile-dir mkdir and `reset_cache()` |
+| `src/ga_cli/config/allowlist.py`, `tests/test_allowlist.py` | T2a | |
+| `src/ga_cli/commands/config_cmd.py`, `src/ga_cli/commands/allowlist_cmd.py` | T2b | |
+| `tests/test_config_cmd.py`, `tests/test_allowlist_cmd.py`, `tests/test_auth_cmd.py` | T2b | |
+| `src/ga_cli/config/constants.py`, `src/ga_cli/main.py` | T3 | |
+| `src/ga_cli/api/allowlist_guard.py` | **T3**: `_caches`, `cache_for`, `reset_caches`, `delete_cache_file` · **T4**: `principal_of` | split by function; orchestrator merges both |
+| `tests/test_allowlist_cache_profiles.py` (new) | T3 | |
+| `tests/test_allowlist_adc.py` (new) | T4 | |
+| `src/ga_cli/utils/errors.py`, `tests/test_errors.py` | T5 | |
+| `tests/test_allowlist_audience_exports.py` (new) | T6 | test-only; a guard bug gets reported, not fixed |
+| `skills/ga-cli/SKILL.md`, `src/ga_cli/commands/agent_cmd.py`, `tests/test_agent_cmd.py`, `README.md` | T7 | |
+| `tests/conftest.py`, `tests/test_allowlist_guard.py`, `tests/test_api_client.py`, `skills/ga-cli/references/commands.md`, `SPEC.md`, `tasks/*` | **orchestrator only** | |
 
 ## Interface Contracts
 
-These are fixed now so dependent agents can be briefed in parallel:
+These are fixed now so all wave-1 agents can be briefed at once:
 
 ```python
-# B1 → B2, B3, B4   (src/ga_cli/config/constants.py)
-DEFAULT_PROFILE = "default"
-def set_active_profile(name: str | None) -> None: ...   # ValueError on invalid name
-def get_active_profile() -> str: ...
-def is_named_profile() -> bool: ...                     # active != "default"
-def get_profile_dir() -> Path: ...                      # root for default, root/profiles/<n> otherwise
-def get_profiles_root() -> Path: ...                    # root/profiles
-def list_profiles() -> list[str]: ...                   # ["default", *sorted existing dirs]
-def profile_exists(name: str) -> bool: ...              # "default" always True
+# T1 (store.py, conftest.py)
+def reset_cache() -> None: ...            # store: forget all cached config/error state (conftest calls it)
+# conftest autouse also: delenv GA_CLI_ALLOWED_ACCOUNTS / _PROPERTIES; allowlist_guard.reset_caches()
 
-# B2 → B4   (src/ga_cli/api/client.py, src/ga_cli/utils/errors.py)
-AuthMethod = Literal["service-account", "oauth", "adc"]
-def resolve_credentials() -> tuple[Credentials, AuthMethod]: ...  # _get_credentials() wraps this
-class ProfileNotFoundError(RuntimeError): ...           # classify_error → (2, "auth_error")
+# T2a → T2b, T7, T8   (config/store.py, config/allowlist.py)
+def get_root_config_path() -> Path: ...    # get_config_dir() / "config.json"; == get_config_path() in default
+def load_config_at(path: Path) -> UserConfig: ...       # path-keyed cache, same parsing as load_config()
+def config_error(path: Path | None = None) -> str | None: ...   # None → active profile's config.json
+AllowlistSource.name in {"config", f"profile {name}", "env"}   # "config" = root file, all profiles
+def load_allowlist() -> Allowlist: ...     # config ∩ profile ∩ env; default profile: one file source
+def is_allowlist_configured() -> bool: ... # root, profile or env set; unreadable root/profile counts as set
 
-# A2 → A3   (src/ga_cli/utils/describe.py)
-def build_cli_schema(typer_app: typer.Typer) -> dict: ...  # == json.loads(`ga --describe`)
+# T2b → T7, T8   (ga allowlist show -o json)
+{"enabled": bool, "profile": str,
+ "sources": {"config": {...} | None, "profile": {...} | None, "env": {...} | None}, ...}
+# a "profile" key is present only for a named profile; unknown named profile → exit 2
 
-# A3 → D1, D2   (scripts/gen_skill_reference.py)
-#   python scripts/gen_skill_reference.py            # print generated block
-#   python scripts/gen_skill_reference.py --write    # rewrite span between markers
-#   python scripts/gen_skill_reference.py --check    # exit 1 on drift
-#   markers: <!-- BEGIN GENERATED: ga --describe --> … <!-- END GENERATED -->
+# T3 → T8   (config/constants.py, api/allowlist_guard.py, main.py)
+def get_allowlist_cache_path() -> Path: ...   # get_profile_dir() / "allowlist-cache.json"
+def cache_for(credentials, http) -> AllowlistCache: ...   # keyed by (get_allowlist_cache_path(), principal)
+def reset_caches() -> None: ...               # also called from main._select_profile on a profile change
+
+# T4   (api/allowlist_guard.py)
+def principal_of(credentials) -> str | None: ...   # SPEC D3 table; an "email" without "@" → None
+
+# T5 → T7, T8   (utils/errors.py)
+class AllowlistError(Exception): resource: str; reason: str   # str(err) == reason (no hint appended)
+def error_hint(err) -> str | None: ...     # ALLOWLIST_HINT for AllowlistError; ADC hint unchanged
 ```
 
 ## Subagent Protocol
 
-Every task agent gets this preamble in its brief:
+Every wave-1 and wave-2 agent is launched with `isolation: "worktree"`, and its brief starts
+with these rules:
 
-1. You are in an isolated git worktree. First run
-   `git switch -c task/<ID>-<slug> <lane-branch>`.
-2. The worktree has **no `CLAUDE.md`** (it is gitignored). Read
-   `/Users/gunnargriese/Desktop/python3/agent-cli/google-analytics-cli/CLAUDE.md` for project
-   conventions. Then read the SPEC sections named in your task and the files you own.
-3. Edit **only** the files in your task's ownership list. If you must touch another file, stop
-   and report why rather than editing it.
-4. Write the failing tests first, then implement. Never hit a live API; mock every call. Patch
-   `google.auth.default` in any test that could reach it.
-5. Before committing, run `uv run pytest` (the **full** suite) and
-   `uv run ruff check src/ tests/ scripts/`. Both must be green.
-6. Commit once per task with a conventional message ending in the `Co-Authored-By` trailer. **Do
-   not push and do not open a PR.**
-7. Report: branch, commit SHA(s), test count, any deviation from SPEC/plan with the reason, and
-   any finding that bears on an Open Question.
+1. **Branch:** You are in an isolated git worktree. First run
+   `git switch -c task/<ID>-<slug> feat/allowlist`.
+2. **Read first:**
+   - `/Users/gunnargriese/Desktop/python3/agent-cli/google-analytics-cli/CLAUDE.md` (gitignored,
+     so it isn't in your worktree).
+   - The SPEC sections named in your task.
+   - The contracts in `tasks/plan.md`.
+   - The files you own.
+3. **Ownership:** Edit **only** the files in your task's ownership list. If you need another
+   file, stop and report why instead of editing it.
+4. **Tests:**
+   - Write the failing tests first, then implement.
+   - Never call a live API; mock everything.
+   - `google.auth.default` is already patched to raise by conftest. Tests that need ADC set their
+     own return value.
+5. **Before committing:** run `uv run pytest` (the **full** suite),
+   `uv run ruff check src/ tests/ scripts/` and
+   `uv run python scripts/gen_skill_reference.py --check`. All must pass. Docs agents: if
+   `--check` fails, report it; don't regenerate.
+6. **Commit:** one commit per task ID (T2 makes two), with a conventional message ending in the
+   `Co-Authored-By` trailer. **Don't push, and don't open a PR.**
+7. **Report:**
+   - Branch and commit SHA(s).
+   - Test count.
+   - Every deviation from SPEC or the plan, with the reason.
+   - Any guard bug or contract problem you found but didn't fix.
 
 The orchestrator (main session):
 
-- Merges task branches into the lane branch.
-- Regenerates `commands.md` on conflict.
-- Checks each task's `git diff --stat` against its ownership list before merging.
-- Runs the full suite after every merge.
-- Runs the checkpoints.
+- Launches all wave-1 agents in a single message, so they run concurrently.
+- Checks each task's `git diff --stat feat/allowlist...task/<ID>` against its ownership list
+  before merging it.
+- Merges in the order T5, T4, T3, T6, T2, T7, and runs the full suite after each merge.
+- Regenerates `commands.md` if the drift check fails.
+- Fixes cross-task issues in its own follow-up commits.
 
 ---
 
 ## Task List
 
-### Lane A: Distribution (`feat/agent-distribution`)
+### Wave 0: Orchestrator
 
-#### A1: Packaging metadata (console-script alias + Claude Code plugin manifests)
+#### T0: Branch setup
 
-**Description:** Add the `google-analytics-cli` entry point so `uvx google-analytics-cli` works
-(SPEC A1). Add `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` (SPEC A4) with a
-test that keeps `plugin.json`'s version equal to the package version.
+**Description:** Get the main checkout onto `feat/allowlist` without losing the uncommitted
+SPEC and plan.
 
 **Acceptance criteria:**
-- [ ] `console_scripts` entry points include both `ga` and `google-analytics-cli` → `ga_cli.main:run`.
-- [ ] Both manifests parse and carry the SPEC A4 fields. Plugin `name == "google-analytics-cli"`,
-      marketplace `name == "daidalytics"`, `source == "./"`.
-- [ ] A test fails if `plugin.json` `version` ≠ `importlib.metadata.version("google-analytics-cli")`.
-      Use metadata rather than a TOML parse, because there is no `tomllib` on 3.10.
+- [ ] `SPEC.md`, `tasks/plan.md` and `tasks/todo.md` are copied to the scratchpad, then
+      `git stash push -- SPEC.md tasks/` is run. `pr-33` has its own versions of these files, so
+      `git switch` would refuse otherwise.
+- [ ] `git fetch origin` and `git fetch origin pull/33/head:pr-33` are run, and `pr-33` is still
+      `84aed1e`. If David pushed since, stop and ask.
+- [ ] `git switch -c feat/allowlist pr-33` is run, and `git log -1` shows David's `84aed1e`.
+
+**Verification:** `git status` is clean, and `git stash list` shows the stash.
+
+**Dependencies:** plan approval · **Scope:** XS
+
+#### T1: Merge `origin/master` into `feat/allowlist`
+
+**Description:** Run `git merge origin/master` and resolve every conflict per the SPEC
+[merge inventory](../SPEC.md#merge-inventory). Then make the **minimum** edits needed for a
+green suite: no D1–D5 semantics. `SPEC.md` and `tasks/*` resolve to the stashed versions.
+
+**Acceptance criteria:**
+- [ ] Every conflict is resolved, and every side's behaviour is kept:
+  - master's `resolve_credentials()`, `_require_existing_profile()`, profile-aware
+    `_auth_status()`, the hint machinery, and `profiles` / `audience-exports` registration;
+  - the PR's `_build()` in all 4 getters, `AllowlistError`/exit 5, TTY-only allowlist changes,
+    atomic save, and decision 8.
+- [ ] These enabling edits are in the merge commit:
+  - `save_config` creates `config_path.parent`.
+  - `store.reset_cache()` exists, and conftest calls it, deletes `GA_CLI_ALLOWED_*` from the
+    environment and calls `reset_caches()`.
+  - The master build assertions in `test_api_client.py` change to `http=` with an
+    `AllowlistHttp`.
+  - `"allowlist": {"enabled": …}` is added once, in `_auth_status()`.
+  - `commands.md` is regenerated.
+- [ ] Run `git show --remerge-diff HEAD` and review it. Hunks resolved in favour of one side are
+      listed in the commit message body.
 
 **Verification:**
-- [ ] `uv run pytest tests/test_plugin_manifest.py -v`, plus the full suite and ruff.
-- [ ] `uv build && uvx --from dist/*.whl google-analytics-cli --version` prints `ga-cli 0.4.0`.
+- [ ] `git diff --check HEAD~1` passes, and `grep -rn '^<<<<<<<\|^>>>>>>>' src tests` finds
+      nothing.
+- [ ] `uv run pytest`: record the count. It should be ≥ 1460 plus the PR's tests.
+- [ ] `uv run ruff check src/ tests/ scripts/` passes, and `gen_skill_reference.py --check`
+      passes.
 
-**Dependencies:** None · **Wave:** 1 · **Scope:** S
+**Dependencies:** T0 · **Scope:** L (merge; one sitting) · **Commit:**
+`Merge origin/master (0.6.0) into feat/allowlist`
 
-**Files:** `pyproject.toml`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`,
-`tests/test_plugin_manifest.py`
+### Checkpoint M: merge review, before the fan-out
 
-#### A2: Extract `build_cli_schema()` from `--describe`
+- [ ] Launch a `feature-dev:code-reviewer` agent on `git show --remerge-diff HEAD` and the
+      merge inventory. Its question: *was behaviour from either side lost or altered?* Focus
+      areas:
+  - credential resolution order;
+  - unknown-profile exit 2;
+  - all 4 getters guarded;
+  - `classify_error` ordering;
+  - `config setup` keeping the allowlist;
+  - conftest isolation.
+- [ ] The orchestrator fixes confirmed findings in a follow-up commit. The full suite stays
+      green.
+- [ ] Report to the human. **This is not a gate:** wave 1 starts unless you say stop.
 
-**Description:** Factor a pure `build_cli_schema(app) -> dict` out of `handle_describe_all()`, so
-the skill generator and tests can build the schema in-process (SPEC A3).
-`handle_describe_all()` keeps its exact print-and-exit behavior.
+### Wave 1: six parallel agents
 
-**Acceptance criteria:**
-- [ ] `build_cli_schema(app)` equals `json.loads` of `ga --describe` stdout.
-- [ ] `ga --describe` output is byte-identical to before.
-
-**Verification:** `uv run pytest tests/test_describe.py -v`, plus the full suite and ruff.
-
-**Dependencies:** None · **Wave:** 1 (same agent as A3, runs first) · **Scope:** XS
-
-**Files:** `src/ga_cli/utils/describe.py`, `tests/test_describe.py`
-
-#### A3: Skill in repo, with generated reference and guard tests
+#### T2a: Profile-aware allowlist sources (SPEC D1, core) · agent α, commit 1
 
 **Description:**
-- Copy `~/.claude/skills-dev/ga-cli/{SKILL.md,references/}` to `skills/ga-cli/`. **Leave the
-  source untouched, and skip `evals/` and `.DS_Store`.**
-- Wrap the generated part of `references/commands.md` in markers.
-- Port `~/.claude/skills-dev/ga-cli-workspace/gen_commands_ref.py` to
-  `scripts/gen_skill_reference.py`, implementing the A2→A3 contract.
-- Add the SKILL.md **Invocation** section (SPEC A2: the `ga` → `uvx google-analytics-cli`
-  substitution rule).
-- Add `tests/test_skill.py`.
+- Add a third source: the root `config.json` applies to every profile, and a named profile's
+  `config.json` narrows it.
+- The default profile has a single file source.
+- Error state is tracked per path, so an unreadable root file fails every profile closed and an
+  unreadable profile file fails only that profile.
 
 **Acceptance criteria:**
-- [ ] `test_skill.py` covers three cases:
-  - Frontmatter `name == "ga-cli"` and `description` present.
-  - The generated block in the committed file equals a fresh render (drift).
-  - Every `ga <group> <sub>` in a fenced code block under `skills/ga-cli/` exists in
-    `build_cli_schema()`.
-- [ ] The existence check passes. When it flags stale commands in the draft skill, **fix the skill
-      text, never weaken the test**, and list each fix in the report.
-- [ ] `skills/ga-cli/` contains no secrets, no evals, and no live property data beyond what the
-      draft already documents as an example.
+- [ ] `load_allowlist()` with the root file + `--profile X` file + env is the intersection, with
+      source names per the contract. In the default profile, the root file counts once.
+- [ ] An unreadable root `config.json` makes `load_allowlist()` raise `AllowlistError` while a
+      named profile is active. An unreadable profile file affects only that profile.
+- [ ] `get_root_config_path`, `load_config_at` and `config_error(path)` exist per the contract.
+      `reset_cache()` clears all of the new state.
+
+**Verification:** `uv run pytest tests/test_allowlist.py tests/test_profiles.py -q`, plus the
+full suite and ruff.
+
+**Dependencies:** Checkpoint M · **Scope:** M
+
+**Files:** `src/ga_cli/config/store.py`, `src/ga_cli/config/allowlist.py`,
+`tests/test_allowlist.py`
+
+#### T2b: CLI surface for profile sources (SPEC D1, CLI) · agent α, commit 2
+
+**Description:** The confirmation text names the scope ("all profiles" vs "profile X, narrows
+the global allowlist"). `ga allowlist show` gains `profile` and `sources.profile`. `ga --profile
+typo allowlist show` exits 2. `auth status` reports `enabled: true` in a named profile when only
+the root file is set.
+
+**Acceptance criteria:**
+- [ ] TTY `config set allowed_account_ids` in default vs `--profile X` shows the right scope
+      line, and writes the right file. A new profile's directory is created.
+- [ ] `allowlist show -o json` matches the T2b contract in default and named profiles. An
+      unknown profile exits 2 before any network call.
+- [ ] `ga --profile X auth status -o json` shows `allowlist.enabled == true` with only the root
+      allowlist set.
 
 **Verification:**
-- [ ] `uv run pytest tests/test_skill.py -v`, plus the full suite and `ruff check … scripts/`.
-- [ ] `uv run python scripts/gen_skill_reference.py --check` exits 0.
+`uv run pytest tests/test_config_cmd.py tests/test_allowlist_cmd.py tests/test_auth_cmd.py -q`,
+plus the full suite and ruff.
 
-**Dependencies:** A2 · **Wave:** 1 · **Scope:** M
+**Dependencies:** T2a (same agent) · **Scope:** M
 
-**Files:** `skills/ga-cli/SKILL.md`, `skills/ga-cli/references/{commands,fields,recipes}.md`,
-`scripts/gen_skill_reference.py`, `tests/test_skill.py`
+**Files:** `src/ga_cli/commands/config_cmd.py`, `src/ga_cli/commands/allowlist_cmd.py`,
+`tests/test_config_cmd.py`, `tests/test_allowlist_cmd.py`, `tests/test_auth_cmd.py`
 
-#### A4: README "Use with AI agents" section
-
-**Description:** Add the SPEC A5 section directly under the README intro: the uvx one-liner,
-`npx skills add`, and the two `/plugin` commands. Replace the "One-off execution (no install)"
-block with the uvx line. The orchestrator separately edits `CLAUDE.md`, which agents can't see:
-it adds `.claude-plugin/plugin.json` to release step 1–2 and fixes the auth-priority line.
-
-**Acceptance criteria:**
-- [ ] The section appears before "Features", with commands exactly as in SPEC A5.
-- [ ] The old `uvx --from git+…` block is gone, and there's no duplicate install path.
-
-**Verification:** Read the rendered markdown and check that the commands match the SPEC
-character-for-character. Full suite stays green (docs-only).
-
-**Dependencies:** None (names fixed by SPEC) · **Wave:** 1 · **Scope:** XS
-
-**Files:** `README.md`
-
-### Checkpoint A
-
-- [ ] A1–A4 merged into `feat/agent-distribution`; full suite green; ruff clean.
-- [ ] Orchestrator runs:
-  - `uv build`
-  - `uvx --from dist/*.whl google-analytics-cli --version`
-  - `claude plugin validate .`
-  - `npx skills add ./ --list`, which shows exactly `ga-cli`
-- [ ] A `feature-dev:code-reviewer` agent reviews the lane diff in parallel with the live checks.
-- [ ] **Human review.** Decide: open PR A now, and whether to cut **0.4.1** (ask-first) so the
-      uvx line is live before B and C land.
-
----
-
-### Lane B: Profiles and ADC (`feat/profiles`)
-
-#### B1: Profile foundation (selection, paths, implicit creation)
-
-**Description:** Implement the B1→ contract in `constants.py`. Add the root-callback
-`--profile` option (`envvar="GA_CLI_PROFILE"`; invalid name → `typer.BadParameter`, exit 1).
-Route the four per-profile getters (`credentials`, `config`, `auth-method`, `chat-sessions`)
-through `get_profile_dir()`, keeping `client_secret` and `update-check` global. Change the four
-writers to `mkdir(parents=True)` the *profile* dir, so first write creates the profile. Extend
-`conftest.py` to reset the active profile and call `clear_client_cache()` per test.
-
-**Acceptance criteria:**
-- [ ] Precedence is flag > `GA_CLI_PROFILE` > `default`. Names `..`, `a/b`, `.hidden`, and the
-      empty string are rejected.
-- [ ] The default profile resolves every getter to the root, and **all 997 existing tests pass
-      unchanged**. That proves zero migration.
-- [ ] `ga --profile x config set default_property_id 1` creates
-      `profiles/x/config.json`. Credential files written into a profile are `0o600`.
-
-**Verification:** `uv run pytest tests/test_profiles.py -v`, plus the full suite and ruff.
-
-**Dependencies:** None · **Wave:** 1 · **Scope:** M (8 files, but most edits are one line)
-
-**Files:** `src/ga_cli/config/constants.py`, `src/ga_cli/main.py`, `src/ga_cli/config/store.py`,
-`src/ga_cli/config/chat_session.py`, `src/ga_cli/auth/credentials.py` (mkdir only),
-`src/ga_cli/auth/service_account.py` (mkdir only), `tests/conftest.py`, `tests/test_profiles.py`
-
-#### B2: Credential resolution, ADC fallback, and the missing-profile error
-
-**Description:** Implement the SPEC B4 table behind
-`resolve_credentials() -> (creds, method)`:
-- A named profile uses only its own SA, then its own OAuth, then raises `ProfileNotFoundError` or
-  "no credentials". It ignores env vars and never reaches ADC.
-- The default profile keeps steps 1–4 unchanged, then tries `google.auth.default(scopes=…)`.
-- A non-SA `GOOGLE_APPLICATION_CREDENTIALS` defers to ADC instead of raising.
-- `has_scope()` returns `True` for ADC.
-- `classify_error` maps `ProfileNotFoundError` to exit 2.
-
-**Acceptance criteria:**
-- [ ] Parametrized `TestCredentialResolution` covers every B4 row. A named profile with
-      `GOOGLE_APPLICATION_CREDENTIALS` *and* `GA_CLI_SERVICE_ACCOUNT` exported still uses the
-      profile's credentials.
-- [ ] An unknown named profile exits 2 with the SPEC B2 message (lists known profiles) and builds
-      no API client.
-- [ ] ADC is reached only when nothing else is configured. A configured OAuth still wins.
-      `google.auth.default` is patched in every test.
-
-**Verification:** `uv run pytest tests/test_api_client.py tests/test_service_account.py tests/test_credentials.py -v`, plus the full suite and ruff.
-
-**Dependencies:** B1 · **Wave:** 2 · **Scope:** M
-
-**Files:** `src/ga_cli/api/client.py`, `src/ga_cli/auth/service_account.py`,
-`src/ga_cli/auth/credentials.py`, `src/ga_cli/utils/errors.py`, `tests/test_api_client.py`
-
-#### B3: `ga profiles list` / `ga profiles delete`
-
-**Description:** Add a new `profiles` command group (SPEC B5).
-- `list` works offline. It reads files only and shows name, active marker, method
-  (`service-account`/`oauth`/`none`), SA email when known, and default property. It supports
-  table and JSON.
-- `delete NAME [--yes]` confirms, refuses `default`, removes `profiles/NAME/`, and never touches
-  the SA key the profile points to.
-- Register the group in `main.py`.
-
-**Acceptance criteria:**
-- [ ] `list -o json` makes no API call or credential refresh and marks the active profile (flag
-      or env).
-- [ ] `delete default` exits 1. `delete` without `--yes` prompts. The SA key file still exists
-      after deleting a profile that pointed to it.
-
-**Verification:** `uv run pytest tests/test_profiles_cmd.py -v`, plus the full suite and ruff.
-
-**Dependencies:** B1 (parallel with B2) · **Wave:** 2 · **Scope:** S
-
-**Files:** `src/ga_cli/commands/profiles.py`, `src/ga_cli/main.py` (registration only),
-`tests/test_profiles_cmd.py`
-
-#### B4: Profile- and ADC-aware `auth status`, `config path`, and ADC scope hint
+#### T3: Per-profile cache (SPEC D2) · agent β
 
 **Description:**
-- `ga auth status` (table + JSON) adds `profile` and reports `adc` via `resolve_credentials()`.
-- `ga auth login` / `logout` affect only the active profile. The B1 paths already do this; this
-  task adds tests that prove it.
-- `ga config path` prints the active profile dir.
-- On a 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` while the method is `adc`, the error appends the
-  SPEC B4 `gcloud … --scopes=…` hint.
+- `allowlist-cache.json` moves into the profile directory.
+- The in-process caches are keyed by `(path, principal)`.
+- `_select_profile` resets them on a profile change.
+- `auth login` / `logout` clear only the active profile's cache.
 
 **Acceptance criteria:**
-- [ ] `auth status -o json` includes `"profile"`, and `"method": "adc"` when ADC is active.
-- [ ] `logout` under `--profile x` leaves the root `credentials.json` intact.
-- [ ] The scope hint appears only for `adc` + `ACCESS_TOKEN_SCOPE_INSUFFICIENT`, not for other
-      403s or other methods.
+- [ ] `get_allowlist_cache_path()` is `profiles/X/allowlist-cache.json` under `--profile X`, and
+      the root file in default. The constants docstring lists it as per profile.
+- [ ] `ga --profile X auth logout` (CliRunner) deletes X's cache and leaves the root cache file
+      in place.
+- [ ] Two CliRunner invocations in one process under different profiles with the same principal
+      don't share an in-memory map: the second refetches or loads its own file.
 
-**Verification:** `uv run pytest tests/test_auth_cmd.py tests/test_config_cmd.py tests/test_errors.py -v`, plus the full suite and ruff.
+**Verification:** `uv run pytest tests/test_allowlist_cache_profiles.py -q`, plus the full suite
+and ruff.
 
-**Dependencies:** B2 · **Wave:** 3 · **Scope:** M
+**Dependencies:** Checkpoint M · **Scope:** M
 
-**Files:** `src/ga_cli/commands/auth_cmd.py`, `src/ga_cli/commands/config_cmd.py`,
-`src/ga_cli/utils/errors.py`, `tests/test_auth_cmd.py`, `tests/test_config_cmd.py`
+**Files:** `src/ga_cli/config/constants.py`, `src/ga_cli/api/allowlist_guard.py` (only
+`_caches` / `cache_for` / `reset_caches` / `delete_cache_file`), `src/ga_cli/main.py`,
+`tests/test_allowlist_cache_profiles.py`
 
-### Checkpoint B
+#### T4: ADC cache principal (SPEC D3) · agent γ
 
-- [ ] B1–B4 merged into `feat/profiles`; full suite green; ruff clean.
-- [ ] Live checks (orchestrator, ask-first):
-  - The default OAuth profile on `250400352` (activeUsers/sessions only) gives output identical
-    to `master`.
-  - An SA-keyed named profile works.
-  - `--profile typo` exits 2.
-  - The human checks ADC, which needs `gcloud auth application-default login`.
-- [ ] A review agent reviews the lane diff, focusing on the "named profile never falls back"
-      invariant.
-- [ ] **Human review.**
-
----
-
-### Lane C: Audience exports (`feat/audience-exports`), one agent running C1→C2→C3
-
-#### C1: `ga audience-exports list` / `get`
-
-**Description:** Create `commands/audience_exports.py`, mirroring `audiences.py`'s shape, against
-`get_data_client()` (v1beta), and register it in `main.py`.
-- `list -p P` paginates via `paginate_all`. The table shows export ID (parsed from `name`),
-  audience display name, state, rows, % complete, and created.
-- `get -p P --export-id E` (long-only flag).
+**Description:** `principal_of()` follows the SPEC D3 table. Unknown principals mean no disk
+cache. ADC credentials are guarded through `_build()`, and their token refresh isn't routed
+through the guard.
 
 **Acceptance criteria:**
-- [ ] `list` follows `nextPageToken`. The table extracts the numeric ID from
-      `properties/P/audienceExports/E`.
-- [ ] `get` calls `properties/P/audienceExports/E`. `-o json` is raw passthrough.
+- [ ] There is one test per D3 table row. They use real `google.auth` credential classes where
+      they can be built offline (impersonated, external_account), and stubs otherwise.
+- [ ] With `google.auth.default` patched to return impersonated credentials, `get_admin_client()`
+      is built on `AllowlistHttp`. A 401 → refresh → retry calls the inner http for the token,
+      and doesn't raise `AllowlistError`.
+- [ ] A `None` or `"default"` principal writes no cache file, and denials are still enforced.
 
-**Verification:** `uv run pytest tests/test_audience_exports.py -v`, plus the full suite and ruff.
+**Verification:** `uv run pytest tests/test_allowlist_adc.py -q`, plus the full suite and ruff.
 
-**Dependencies:** None · **Wave:** 1 · **Scope:** S
+**Dependencies:** Checkpoint M · **Scope:** S
 
-**Files:** `src/ga_cli/commands/audience_exports.py`, `src/ga_cli/main.py` (registration only),
-`tests/test_audience_exports.py`
+**Files:** `src/ga_cli/api/allowlist_guard.py` (only `principal_of`),
+`tests/test_allowlist_adc.py`
 
-#### C2: `ga audience-exports query`
+#### T5: Allowlist advice in the `hint` field (SPEC D4) · agent δ
 
-**Description:** `query -p P --export-id E [--limit N] [--offset N]`. JSON output is the raw
-`QueryAudienceExportResponse`. The table has one column per dimension, taken from
-`audienceExport.dimensions`. A 400/FAILED_PRECONDITION on a non-ACTIVE export maps to "export is
-still CREATING (N%) — try again later".
-
-**Acceptance criteria:**
-- [ ] `limit`/`offset` are sent as strings (int64 in the API) only when provided.
-- [ ] Table columns follow the export's dimension order. An empty `audienceRows` renders the
-      standard empty-table output.
-- [ ] A non-ACTIVE export error gives the friendly message with a non-zero exit, not a raw API
-      dump.
-
-**Verification:** Same as C1.
-
-**Dependencies:** C1 · **Wave:** 1 (same agent) · **Scope:** S
-
-**Files:** same as C1 (minus `main.py`)
-
-#### C3: `ga audience-exports create` with `--dry-run` and `--wait`
-
-**Description:** `create -p P --audience-id A --dimensions d1,d2`.
-- `--audience-id` accepts a numeric ID or a full `properties/P/audiences/A` name.
-- `--dry-run` uses `handle_dry_run()`, which makes the command appear as `mutative` in
-  `--describe`.
-- `--wait [--timeout 1800]` polls `get` (10 s backing off to 60 s; progress to stderr) and exits
-  0 on ACTIVE, 3 on FAILED (`errorMessage`), or 3 on timeout.
-- Export name extraction (SPEC Q3) tries `Operation.response.name`, then `Operation.metadata`,
-  then falls back to `list` (newest `beginCreatingTime` for that audience). All three paths are
-  mocked.
+**Description:** `AllowlistError`'s message is the reason only. `error_hint()` returns
+`ALLOWLIST_HINT` for it, so `handle_error` prints it as `"hint"` in JSON and as a second line in
+text output.
 
 **Acceptance criteria:**
-- [ ] `--dry-run` prints the exact body (`audience`, `dimensions:[{dimensionName}]`) and builds no
-      client. `--describe` marks `create` mutative; assert this in `test_audience_exports.py`,
-      not `test_describe.py`.
-- [ ] `--wait` handles ACTIVE, FAILED, and timeout with the exit codes above. `time.sleep` and
-      the clock are patched, so there are no real sleeps.
-- [ ] Every name-extraction path, including the `list` fallback, is covered.
+- [ ] `str(AllowlistError("properties/9", "x"))` is `"x"`. The JSON payload has `category`,
+      `resource` and `hint`, and the message has no hint appended.
+- [ ] In text mode the hint is on its own line. The ADC scope hint behaviour and its tests are
+      unchanged.
+- [ ] `classify_error` still checks `AllowlistError` first.
 
-**Verification:** Same as C1.
+**Verification:** `uv run pytest tests/test_errors.py -q`, plus the full suite and ruff. If any
+other test file asserts the hint inside a message, report it; don't edit it.
 
-**Dependencies:** C2 · **Wave:** 1 (same agent) · **Scope:** M
+**Dependencies:** Checkpoint M · **Scope:** XS
 
-**Files:** same as C2
+**Files:** `src/ga_cli/utils/errors.py`, `tests/test_errors.py`
 
-### Checkpoint C
+#### T6: Audience-exports guard coverage (SPEC D5) · agent ε
 
-- [ ] C1–C3 merged into `feat/audience-exports`; full suite green; ruff clean.
-- [ ] Live: `list`/`get`/`query` against an existing export. A live `create`, which resolves Q3 by
-      showing the real Operation shape, is **ask-first** because it charges quota tokens.
-- [ ] A review agent reviews the lane diff.
-- [ ] **Human review.**
-
----
-
-### Lane D: Skill and README for B and C (after PR A is on `master`)
-
-The orchestrator first rebases `feat/profiles` and `feat/audience-exports` onto `master`, so A3's
-skill, generator, and drift test are present. D1 runs on `feat/profiles` and D2 on
-`feat/audience-exports`, in parallel.
-
-#### D1: Profiles and ADC in the skill and README
-
-**Description:**
-- **SKILL.md:** add a "Profiles" section after "Orient before you query":
-  - Put `--profile` before the group, or use `GA_CLI_PROFILE`.
-  - **Never pick or switch a profile the user didn't name.** Run `ga profiles list -o json` and
-    ask.
-  - An unknown profile exits 2.
-- **README:** profiles and ADC under Setup; add a `GA_CLI_PROFILE` row to the env-var table and
-  `ga profiles` to the command table.
-- Regenerate `commands.md`.
+**Description:** Pin every audience-exports endpoint against the guard, using real `D`
+(`analyticsdata` v1beta) clients built with `guarded()` from `tests.test_allowlist_guard`.
 
 **Acceptance criteria:**
-- [ ] `gen_skill_reference.py --check` passes, and `test_skill.py` passes, including the
-      existence check for every new `ga profiles …` example.
-- [ ] The SKILL.md "Orient before you query" block includes `ga profiles list -o json`.
+- [ ] Each row of the SPEC D5 table has an allowed case and a denied case. Denied cases assert
+      `request_sequence == []`.
+- [ ] `create` is denied when its body names `properties/P2/audiences/A` and P2 isn't allowed,
+      even with an allowed `-p`. `create --dry-run` sends nothing (CliRunner).
+- [ ] If any case exposes a guard gap, the passing cases are committed and the gap is reported
+      with a minimal repro. No `xfail`, and no guard edits.
 
-**Verification:** Full suite (includes `test_skill.py`) and ruff.
+**Verification:** `uv run pytest tests/test_allowlist_audience_exports.py -q`, plus the full
+suite and ruff.
 
-**Dependencies:** A3 on `master`, B3, B4 · **Wave:** 4 · **Scope:** S
+**Dependencies:** Checkpoint M · **Scope:** S
 
-**Files:** `skills/ga-cli/SKILL.md`, `skills/ga-cli/references/commands.md`, `README.md`
+**Files:** `tests/test_allowlist_audience_exports.py`
 
-#### D2: Audience exports in the skill and README
+#### T7: Agent and user docs (SPEC D6) · agent ζ
 
-**Description:**
-- **SKILL.md:** add an "Audience exports" section after "Mutations":
-  - Run `create` with `--dry-run` first.
-  - **Never use `--wait` in an agent session.** It outlives tool timeouts. Report the export ID
-    and `get` later.
-  - Run `query` only once the export is ACTIVE.
-- **`recipes.md`:** one recipe.
-- **README:** a Data API feature bullet and an `audience-exports` command-table row.
-- Regenerate `commands.md`.
+**Description:** Write from the SPEC and the contracts above, not from the code, which other
+agents are changing at the same time.
 
 **Acceptance criteria:**
-- [ ] The drift check and the command-existence test pass.
-- [ ] The skill states the no-`--wait` rule and the dry-run-first rule explicitly.
+- [ ] `SKILL.md` gets an "Allowlist" section right after "Profiles". On exit 5, report the
+      `resource` and ask the user. Don't switch `--profile`, unset `GA_CLI_ALLOWED_*`, run
+      `auth login` or try `config set`. Use `ga allowlist show -o json` to see what's allowed.
+- [ ] `ga agent guide` keeps the PR's "Allowlist" and "Errors and exit codes" sections, adds the
+      profile rule, and matches 0.6.0 exit codes: invalid profile name 1, unknown profile 2.
+- [ ] The README describes the global fence + profile narrowing and the per-profile cache path,
+      and adds `--profile` to the "not a security boundary" list. The env table lists both
+      `GA_CLI_ALLOWED_*` vars next to `GA_CLI_PROFILE`.
 
-**Verification:** Full suite and ruff.
+**Verification:** `uv run pytest tests/test_skill.py tests/test_agent_cmd.py -q` (skill
+commands must exist), plus the full suite. Read the rendered README section.
 
-**Dependencies:** A3 on `master`, C3 · **Wave:** 4 · **Scope:** S
+**Dependencies:** Checkpoint M · **Scope:** M
 
-**Files:** `skills/ga-cli/SKILL.md`, `skills/ga-cli/references/{commands,recipes}.md`, `README.md`
+**Files:** `skills/ga-cli/SKILL.md`, `src/ga_cli/commands/agent_cmd.py`,
+`tests/test_agent_cmd.py`, `README.md`
 
-### Final Checkpoint
+### Wave 2: after all wave-1 branches are merged
 
-- [ ] PRs B and C are each green on CI (3.10 / 3.12 / 3.13).
-- [ ] Whichever merges second regenerates `commands.md` after rebasing.
-- [ ] SPEC Success Criteria 1–15 each map to a named test or a recorded live check.
-- [ ] SPEC.md living updates: status, resolved Q3, and any deviations.
-- [ ] **Ask** about the 0.5.0 bump. The release commit bumps `pyproject.toml` **and**
-      `.claude-plugin/plugin.json`.
+#### T8: Cross-slice integration tests · agent
 
----
-
-### Optional
-
-#### O1: Update notice under uvx (SPEC Q2), approved, runs in wave 1 on `feat/agent-distribution`
-
-**Description:** If `sys.prefix` is inside uv's cache dir (an ephemeral `uvx` env), suppress the
-daily "Run 'ga upgrade'" notice.
+**Description:** Write end-to-end CliRunner tests that cross task boundaries, which no
+single wave-1 agent could write. They cover SPEC success criteria 3, 5, 7 and 8.
 
 **Acceptance criteria:**
-- [ ] The notice is suppressed under a mocked uvx prefix and unchanged otherwise.
+- [ ] With a root allowlist, `GA_CLI_PROFILE=X ga reports run -p <outside>` and
+      `ga --profile X reports run …` exit 5. The JSON has `category`, `resource` and `hint`, and
+      nothing is sent.
+- [ ] With a root allowlist and a narrower profile allowlist, a property allowed by the root
+      but not by the profile exits 5 under X and is allowed in default.
+- [ ] A lookup under X writes `profiles/X/allowlist-cache.json` and no root cache. A blocked
+      `audience-exports create` under X exits 5.
 
-**Dependencies:** None · **Wave:** any (sole owner) · **Scope:** XS
+**Verification:** `uv run pytest tests/test_allowlist_integration.py -q`, plus the full suite and
+ruff.
 
-**Files:** `src/ga_cli/commands/upgrade_cmd.py`, `tests/test_upgrade_cmd.py`
+**Dependencies:** wave 1 merged · **Scope:** S
+
+**Files:** `tests/test_allowlist_integration.py`
+
+### Checkpoint W: final gate before pushing
+
+- [ ] All task branches are merged. The full suite, ruff and the drift check pass.
+- [ ] A `feature-dev:code-reviewer` agent reviews `git diff origin/master...feat/allowlist`
+      (focus: SPEC R1′, R6′, R8–R11; fail-closed paths). It runs in parallel with T8.
+- [ ] Orchestrator docs-vs-behaviour check. Run the CLI against a scratch `GA_CLI_CONFIG_DIR`
+      and check what SKILL.md and the README claim, offline:
+  - `allowlist show` with the guard off;
+  - `--profile typo allowlist show` exits 2;
+  - a non-TTY `config set allowed_*` is refused;
+  - `auth status` has the `allowlist` field.
+- [ ] **Live read-only check: ask first, including which property.** The stored login gets 403
+      on 250400352, and other properties belong to real clients. Skip it if there's no suitable
+      property, and record that.
+- [ ] **Human review of the branch.** Ask before any push.
+
+### Wave 3: orchestrator, after the human go-ahead
+
+- [ ] `git push -u origin feat/allowlist`, then `gh pr create`. The description credits
+      @davidher-mann and #33 and states the 0.6.0 deltas (SPEC D1–D6). **Ask first.**
+- [ ] Close #33 with a comment linking the new PR and thanking David. **Ask first.**
+- [ ] Edit the local, gitignored `CLAUDE.md`:
+  - point "SPEC.md B4" at `git show 7594078:SPEC.md`;
+  - add the allowlist convention line;
+  - add the new module to the architecture tree.
+- [ ] Update the SPEC status and `tasks/todo.md` once CI on the PR passes.
 
 ---
 
@@ -526,22 +462,15 @@ daily "Run 'ga upgrade'" notice.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Worktrees lack gitignored files (`CLAUDE.md`, `.venv`) | Med | The protocol points agents to the absolute `CLAUDE.md` path. `uv run` builds a venv on first use (one-off cost). |
-| An agent edits outside its ownership list and causes surprise conflicts | Med | The orchestrator checks `git diff --stat` against ownership before every merge, and the protocol says "stop and report". |
-| `_active_profile` or cached API clients leak between tests | High | B1 owns the `conftest.py` reset and `clear_client_cache()`. B2's resolution tests also clear explicitly. |
-| A dev machine's real gcloud ADC leaks into tests via `google.auth.default` | High | Protocol rule 4 (always patch it), plus a B2 test asserting it's patched in the resolution suite. |
-| The draft skill references commands or flags that no longer exist | Med | Expected. A3's existence test surfaces them, and A3 fixes the text. |
-| The real `create` Operation shape is unknown (Q3) | Med | C3 implements all three extraction paths. A live create at Checkpoint C (ask-first) confirms which one is real. |
-| `commands.md` conflicts across lanes | Low | Generated span; regenerate, never hand-merge. |
-| `plugin.json` version drifts at release | Med | The version-sync test, plus a CLAUDE.md release-step update. |
-| B1 is the widest task (8 files) and sits on the critical path | Med | Most edits are one-line mkdir and getter changes. It starts in wave 1 with no dependencies, so it finishes while A and C are still running. |
+| The merge silently drops behaviour from one side | High | Merge commit has no new semantics; both suites must pass; review agent on `--remerge-diff` before fan-out |
+| T3 and T4 both edit `allowlist_guard.py` | Med | Function-level ownership, merged back one after the other with the suite after each |
+| T7 docs drift from what T2/T5 implement | Med | T7 writes from fixed contracts; Checkpoint W runs the CLI to check the doc claims |
+| T6 exposes a guard gap mid-wave | Med | T6 reports and doesn't patch; orchestrator fixes in a follow-up commit after T3/T4 merge |
+| In-process caches leak across profiles or tests | Med | T1 conftest resets `store` and `allowlist_guard` state; T3 keys caches by path |
+| David pushes to `pr-33` mid-work | Low | T0 checks the head SHA; work moves to `origin`, so later fork pushes don't affect us |
+| No accessible property for the live check | Low | Ask first; the mocked suite covers the guard; skipping is recorded |
 
 ## Open Questions
 
-All resolved on 2026-10-14:
-
-1. ~~Spec Q1, `--profile` placement~~ → **root-only** (`ga --profile X …`). There is no argv
-   hoisting.
-2. ~~Spec Q2, uvx update notice~~ → **suppress it**. **O1 runs in wave 1.**
-3. ~~Commit permission for wave 0~~ → **granted.** Commits are local only. Nothing is pushed
-   until a PR is approved.
+- **Live check property.** Which property, if any, may be used for the read-only live check at
+  Checkpoint W? This is asked at the checkpoint, not now.

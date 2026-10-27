@@ -307,6 +307,113 @@ class TestStatusCommand:
         assert result.exit_code == 0
         assert not result.stdout.lstrip().startswith("{")
 
+
+class TestAllowlistIntegration:
+    def _status_json(self, monkeypatch):
+        monkeypatch.delenv("GA_CLI_SERVICE_ACCOUNT", raising=False)
+        monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+        with (
+            patch("ga_cli.commands.auth_cmd.load_auth_method", return_value=None),
+            patch(
+                "ga_cli.commands.auth_cmd.get_auth_status",
+                return_value={"authenticated": True, "email": "user@example.com"},
+            ),
+        ):
+            result = runner.invoke(app, ["auth", "status", "-o", "json"])
+        assert result.exit_code == 0
+        return json.loads(result.stdout)
+
+    def test_status_allowlist_disabled(self, monkeypatch):
+        assert self._status_json(monkeypatch)["allowlist"] == {"enabled": False}
+
+    def test_status_allowlist_enabled_from_env_without_network(self, monkeypatch):
+        monkeypatch.setenv("GA_CLI_ALLOWED_PROPERTIES", "1")
+        with patch("ga_cli.api.client._get_credentials") as creds:
+            assert self._status_json(monkeypatch)["allowlist"] == {"enabled": True}
+        creds.assert_not_called()
+
+    def test_status_service_account_env_has_allowlist(self, monkeypatch):
+        monkeypatch.setenv("GA_CLI_SERVICE_ACCOUNT", "/path/to/key.json")
+        result = runner.invoke(app, ["auth", "status", "-o", "json"])
+        assert json.loads(result.stdout)["allowlist"] == {"enabled": False}
+
+    def test_login_clears_allowlist_cache(self, tmp_path):
+        cache = tmp_path / "allowlist-cache.json"
+        cache.write_text("{}")
+        with (
+            patch("ga_cli.commands.auth_cmd.get_auth_status") as mock_status,
+            patch("ga_cli.commands.auth_cmd.login"),
+            patch("ga_cli.commands.auth_cmd.clear_client_cache"),
+        ):
+            mock_status.side_effect = [
+                {"authenticated": False},
+                {"authenticated": True, "email": "user@example.com"},
+            ]
+            result = runner.invoke(app, ["auth", "login"])
+        assert result.exit_code == 0
+        assert not cache.exists()
+
+    def test_service_account_login_clears_allowlist_cache(self, tmp_path):
+        cache = tmp_path / "allowlist-cache.json"
+        cache.write_text("{}")
+        with patch(
+            "ga_cli.commands.auth_cmd.login_with_service_account", return_value="sa@x.iam"
+        ):
+            result = runner.invoke(app, ["auth", "login", "-s", "/k.json"])
+        assert result.exit_code == 0
+        assert not cache.exists()
+
+    def test_logout_clears_allowlist_cache(self, tmp_path):
+        cache = tmp_path / "allowlist-cache.json"
+        cache.write_text("{}")
+        with (
+            patch("ga_cli.commands.auth_cmd.load_auth_method", return_value=None),
+            patch("ga_cli.commands.auth_cmd.get_auth_status",
+                  return_value={"authenticated": True}),
+            patch("ga_cli.commands.auth_cmd.logout"),
+            patch("ga_cli.commands.auth_cmd.clear_client_cache"),
+        ):
+            result = runner.invoke(app, ["auth", "logout"])
+        assert result.exit_code == 0
+        assert not cache.exists()
+
+    def test_logout_without_cache_file_is_fine(self):
+        with (
+            patch("ga_cli.commands.auth_cmd.load_auth_method", return_value=None),
+            patch("ga_cli.commands.auth_cmd.get_auth_status",
+                  return_value={"authenticated": False}),
+        ):
+            result = runner.invoke(app, ["auth", "logout"])
+        assert result.exit_code == 0
+
+
+class TestAllowlistStatusAcrossProfiles:
+    """The root config.json's allowlist applies to every profile (SPEC D1)."""
+
+    def test_named_profile_enabled_by_root_allowlist(self, isolated_config_dir):
+        (isolated_config_dir / "config.json").write_text(json.dumps({"allowed_account_ids": ["1"]}))
+        (isolated_config_dir / "profiles" / "client-a").mkdir(parents=True)
+
+        data = _status_json("--profile", "client-a")
+
+        assert data["profile"] == "client-a"
+        assert data["allowlist"] == {"enabled": True}
+
+    def test_named_profile_own_allowlist_only_there(self, isolated_config_dir):
+        profile_dir = isolated_config_dir / "profiles" / "client-a"
+        profile_dir.mkdir(parents=True)
+        (profile_dir / "config.json").write_text(json.dumps({"allowed_property_ids": ["1"]}))
+
+        assert _status_json("--profile", "client-a")["allowlist"] == {"enabled": True}
+        assert _status_json()["allowlist"] == {"enabled": False}
+
+    def test_named_profile_unreadable_root_counts_as_enabled(self, isolated_config_dir):
+        (isolated_config_dir / "config.json").write_text("{oops")
+        (isolated_config_dir / "profiles" / "client-a").mkdir(parents=True)
+
+        assert _status_json("--profile", "client-a")["allowlist"] == {"enabled": True}
+
+
 class FakeADCCredentials:
     """Stands in for what google.auth.default() returns (gcloud user ADC)."""
 
@@ -351,6 +458,7 @@ class TestStatusProfileAndMethod:
             "method": "service-account",
             "email": SA_EMAIL,
             "key_path": str(key),
+            "allowlist": {"enabled": False},
         }
 
     def test_profile_from_env_var(
@@ -427,6 +535,7 @@ class TestStatusProfileAndMethod:
             "source": "environment variable",
             "email": ENV_SA_EMAIL,
             "key_path": str(key),
+            "allowlist": {"enabled": False},
         }
 
     def test_non_sa_google_application_credentials_is_adc(
@@ -470,6 +579,7 @@ class TestStatusProfileAndMethod:
             "authenticated": True,
             "method": "adc",
             "quota_project": "quota-proj",
+            "allowlist": {"enabled": False},
         }
         # google.auth.default may probe the GCE metadata server: once per run.
         assert no_gcloud_adc.call_count == 1
@@ -555,6 +665,7 @@ class TestStatusNotAuthenticated:
                 "Profile 'clinet-a' does not exist. Known profiles: default, client-a.\n"
                 "Create it with: ga --profile clinet-a auth login"
             ),
+            "allowlist": {"enabled": False},
         }
         no_gcloud_adc.assert_not_called()
         # Status is read-only: it never creates the profile.
