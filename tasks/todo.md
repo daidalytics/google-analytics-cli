@@ -36,9 +36,15 @@ Legend: `∥` = runs in parallel with its siblings, each in its own worktree age
 
 ## Wave 2
 
-- [ ] ∥ **T8** · Cross-slice integration tests (S)
-- [ ] ∥ Review agent on `origin/master...feat/allowlist`
-- [ ] ∥ Orchestrator docs-vs-behaviour check against a scratch config dir
+- [x] ∥ **T8** · Cross-slice integration tests (S) · `cba7573`, merge `6febb6e`; 15 tests, 1786 green
+      · four injected bugs (no reset on profile switch, root cache, root fence ignored in a named profile, hint in the message) each fail their tests; no bug found
+      · "nothing sent" uses property allowlists: an account allowlist makes one `accountSummaries` lookup before denying, so that test asserts the lookup is the only request
+- [x] ∥ Review agent on `origin/master...feat/allowlist` · no finding ≥ 80 confidence (R6′/R8 widening routes, fail-closed paths, D2 cache, D3 principal, R1′ passthrough, merge damage)
+- [x] ∥ Orchestrator docs-vs-behaviour check against a scratch config dir · every README / SKILL.md / `agent guide` claim checked holds
+      · offline run: a throwaway service-account key whose `token_uri` points at a dead local port, so a request that passes the guard fails locally
+      · root fence under `--profile` and `GA_CLI_PROFILE`; a profile and env only narrow; empty env allows nothing; unreadable root blocks every profile, an unreadable profile file only that one; non-TTY `config set/unset/reset` refused; `auth logout` clears only its profile's cache; audience-exports create blocked (also via `--audience-id properties/P/…`), `--dry-run` sends nothing; `allowlist show` JSON and table match the T2b contract; `profiles delete` needs no TTY
+      · nit, not changed: for an unreadable `config.json` the exit-5 `hint` still says to run `ga allowlist show`, which exits 5 in that state too
+      · the first run's proxy-only sandbox leaked ~5 token requests for the fake service account to `oauth2.googleapis.com` (httplib2 ignores proxies without PySocks); all rejected, no GA API call; fixed before the rerun
 
 - [ ] **CHECKPOINT W** · suite + ruff + drift green · live read-only check (**ask first**, which property) · **human review**
 
