@@ -97,12 +97,21 @@ def _path_refs(path: str, where: str) -> set[Ref]:
     return {_check_id(kind, tail, where) for kind, tail in _PATH_REF.findall(path)}
 
 
+# Body fields the API only ever reads as free text: a display name, a description, a
+# filter's match values, a chat question. A value there that starts with "properties/"
+# names no resource, so it is skipped (#46). Every other field, known or not, is checked.
+_FREE_TEXT_KEYS = frozenset(
+    {"displayName", "description", "stringFilter", "inListFilter", "userQuery"}
+)
+
+
 def _body_strings(value: Any):
     if isinstance(value, str):
         yield value
     elif isinstance(value, dict):
-        for v in value.values():
-            yield from _body_strings(v)
+        for k, v in value.items():
+            if k not in _FREE_TEXT_KEYS:
+                yield from _body_strings(v)
     elif isinstance(value, list):
         for v in value:
             yield from _body_strings(v)
@@ -141,7 +150,8 @@ def extract_refs(uri: str, body: Any = None) -> set[Ref]:
     """Collect every account/property the request names.
 
     Sources: the raw and percent-decoded path, the decoded query values, and every JSON
-    body string that starts with ``accounts/`` or ``properties/``. Raises UnverifiableError
+    body string that starts with ``accounts/`` or ``properties/``, outside the free-text
+    fields (``_FREE_TEXT_KEYS``). Raises UnverifiableError
     when a reference can't be read cleanly (e.g. ``properties/123%2F..%2F999``).
     """
     parts = urlsplit(uri)

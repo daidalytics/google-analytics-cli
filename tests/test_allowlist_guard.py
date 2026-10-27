@@ -184,6 +184,30 @@ class TestExtractRefs:
         with pytest.raises(UnverifiableError):
             extract_refs(self.base + "properties/1", '{"property": "properties/1/../2"}')
 
+    @pytest.mark.parametrize("body", [
+        {"displayName": "properties/legacy"},
+        {"displayName": "accounts/42 shop", "description": "properties/999 copy"},
+        {"dimensionFilter": {"filter": {
+            "fieldName": "pagePath", "stringFilter": {"value": "properties/999"}}}},
+        {"dimensionFilter": {"filter": {
+            "fieldName": "pagePath", "inListFilter": {"values": ["accounts/42", "x"]}}}},
+        {"userQuery": "properties/999 sessions last week"},
+    ], ids=["display-name", "description", "string-filter", "in-list-filter", "chat-query"])
+    def test_free_text_fields_are_not_references(self, body):
+        """The API never reads these as resource names, so they can't deny a request (#46)."""
+        assert extract_refs(self.base + "properties/1", json.dumps(body)) == {("properties", "1")}
+
+    @pytest.mark.parametrize("body,ref", [
+        ({"parent": "accounts/2"}, ("accounts", "2")),
+        ({"audience": "properties/2/audiences/5"}, ("properties", "2")),
+        ({"sourceProperties": ["properties/2"]}, ("properties", "2")),
+        ({"title": "properties/2"}, ("properties", "2")),
+        ({"filter": {"value": "properties/2"}}, ("properties", "2")),
+    ], ids=["parent", "audience", "list", "unknown-field", "value-outside-a-filter"])
+    def test_every_other_field_is_still_checked(self, body, ref):
+        """Only the known free-text fields are skipped; anything else stays fail closed."""
+        assert ref in extract_refs(self.base + "properties/1", json.dumps(body))
+
 
 class TestClassifyRoute:
     @pytest.mark.parametrize("method,uri,route", [
