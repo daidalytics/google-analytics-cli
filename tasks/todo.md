@@ -47,6 +47,10 @@ Legend: `∥` = runs in parallel with its siblings, each in its own worktree age
       · the first run's proxy-only sandbox leaked ~5 token requests for the fake service account to `oauth2.googleapis.com` (httplib2 ignores proxies without PySocks); all rejected, no GA API call; fixed before the rerun
 
 - [ ] **CHECKPOINT W** · suite + ruff + drift green · live read-only check (**ask first**, which property) · **human review**
+      · [x] suite (1786), ruff, drift green
+      · [x] live read-only check on 250400352 (user re-authenticated as gunnar.griese.gg@gmail.com, OAuth, default profile), env-only allowlist so `config.json` stayed untouched:
+        allowed `reports run` returns rows · `-p 123456789` exits 5 with `resource` + `hint` · `allowlist show` resolves 250400352 → account 143775840 via a live `accountSummaries` · property-only allowlist denies `accounts get -a 143775840` · `GA_CLI_ALLOWED_ACCOUNTS=143775840` filters `accounts list` 35 → 1 and allows the report
+      · [ ] human review
 
 ## Wave 3 (orchestrator, ask first)
 
