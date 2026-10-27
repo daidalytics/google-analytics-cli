@@ -321,6 +321,36 @@ class TestCache:
         _cache(tmp_path, fetch, principal="p2").lookup("1")
         assert fetch.calls == 1
 
+    def test_property_not_visible_refreshes_once_per_ttl(self, tmp_path):
+        """Not once per process: the fetch remembers what it didn't find (#45)."""
+        first = FakeFetch()
+        assert _cache(tmp_path, first).prop_map({"1", "999"}).get("999") is None
+        assert first.calls == 1
+        fetch = FakeFetch()
+        cache = _cache(tmp_path, fetch)  # the next process, within the hour
+        assert cache.prop_map({"1", "999"}).get("999") is None
+        assert cache.lookup("999") is None
+        assert fetch.calls == 0
+        assert _cache(tmp_path, fetch, now=1_000_000.0 + 3600).prop_map({"999"}) is not None
+        assert fetch.calls == 1  # expired with the map
+
+    def test_newly_expected_property_still_refreshes(self, tmp_path):
+        _cache(tmp_path, FakeFetch()).prop_map({"999"})
+        new = SUMMARIES + [{"account": "accounts/30", "propertySummaries": [
+            {"property": "properties/4"}]}]
+        fetch = FakeFetch(pages=new)
+        assert _cache(tmp_path, fetch).prop_map({"999", "4"})["4"] == "30"
+        assert fetch.calls == 1
+
+    def test_property_that_becomes_visible_leaves_the_unseen_list(self, tmp_path):
+        _cache(tmp_path, FakeFetch()).prop_map({"999"})
+        new = SUMMARIES + [{"account": "accounts/30", "propertySummaries": [
+            {"property": "properties/999"}]}]
+        _cache(tmp_path, FakeFetch(pages=new), now=1_000_000.0 + 3600).prop_map({"999"})
+        entry = json.loads((tmp_path / "allowlist-cache.json").read_text())["entries"]["p1"]
+        assert entry["properties"]["999"] == "30"
+        assert entry["unseen"] == []
+
     def test_two_principals_share_the_file(self, tmp_path):
         """Two identities alternating in one profile keep each other's map (#45)."""
         _cache(tmp_path, FakeFetch(), principal="p1").lookup("1")
@@ -603,6 +633,16 @@ class TestPropertyAllowlist:
         ]
         assert "sa@proj.iam.gserviceaccount.com" in (
             isolated_config_dir / "allowlist-cache.json").read_text()
+
+    def test_listed_property_not_visible_costs_one_lookup_per_hour(self):
+        """A root fence listing another client's property, seen from this login (#45)."""
+        c, inner = guarded(_al(properties={"1", "999"}), [_resp(TestFilter.ACCOUNTS),
+                                                        SUMMARIES_RESP])
+        assert [a["name"] for a in c.accounts().list().execute()["accounts"]] == ["accounts/10"]
+        reset_caches()  # the next process
+        c, inner = guarded(_al(properties={"1", "999"}), [_resp(TestFilter.ACCOUNTS)])
+        assert [a["name"] for a in c.accounts().list().execute()["accounts"]] == ["accounts/10"]
+        assert _sent(inner) == [("GET", "beta/accounts")]
 
     def test_metadata_credentials_read_the_cache_in_the_next_process(self):
         guarded(_al(accounts={"10"}), [SUMMARIES_RESP, _resp()], creds=MetadataCreds())[0] \

@@ -262,6 +262,9 @@ class AllowlistCache:
         self.properties: dict[str, str] = {}
         self.names: dict[str, str] = {}
         self.account_names: dict[str, str] = {}
+        # Expected properties the last fetch didn't find, so later processes don't
+        # refetch for them until the map expires (#45)
+        self.unseen: set[str] = set()
         self.fetched_at: Optional[float] = None
 
     @property
@@ -298,12 +301,14 @@ class AllowlistCache:
             properties = entry["properties"]
             names = entry.get("names") or {}
             account_names = entry.get("account_names") or {}
+            unseen = entry.get("unseen") or []
         except (KeyError, TypeError, AttributeError):
             return False
         if not self._fresh(fetched_at) or not all(
             isinstance(d, dict) for d in (properties, names, account_names)
-        ):
+        ) or not (isinstance(unseen, list) and all(isinstance(u, str) for u in unseen)):
             return False
+        self.unseen = set(unseen)
         self.properties = {str(k): str(v) for k, v in properties.items()}
         self.names = names
         self.account_names = account_names
@@ -323,6 +328,7 @@ class AllowlistCache:
             "properties": self.properties,
             "names": self.names,
             "account_names": self.account_names,
+            "unseen": sorted(self.unseen),
         }
         try:
             write_json_atomic(self.path, {"entries": entries})
@@ -355,6 +361,7 @@ class AllowlistCache:
         self.properties = properties
         self.names = names
         self.account_names = account_names
+        self.unseen -= properties.keys()
         self.fetched_at = self._clock()
         self._loaded = True
         self._refreshed = True
@@ -371,11 +378,19 @@ class AllowlistCache:
         """The whole map, refreshed once per process if it lacks one of ``expected``.
 
         Pass the allowlisted property IDs, so a property created and allowlisted since
-        the cache was written is found without waiting for the TTL.
+        the cache was written is found without waiting for the TTL. One the last fetch
+        already didn't find (no access, or another login's) waits for the TTL instead.
         """
         self.ensure_loaded()
-        if not self._refreshed and any(pid not in self.properties for pid in expected):
+        missing = {pid for pid in expected if pid not in self.properties}
+        if not self._refreshed and missing - self.unseen:
             self.refresh()
+        if self._refreshed:
+            # This process's fetch is current: remember what it didn't find
+            missing -= self.properties.keys()
+            if missing - self.unseen:
+                self.unseen |= missing
+                self._save_disk()
         return self.properties
 
     def lookup(self, pid: str) -> Optional[str]:
