@@ -24,7 +24,7 @@ This matters more than it sounds: probing with `--help` is the main way turns ge
 A report against the wrong property looks exactly like an answer, which is what makes it dangerous:
 
 ```bash
-ga auth status -o json    # authenticated? whose account?
+ga auth status -o json    # authenticated? whose account? allowlist on?
 ga config get             # is there a default_property_id?
 ga profiles list -o json  # which client identities exist, and which is active
 ```
@@ -53,6 +53,21 @@ GA_CLI_PROFILE=client-a ga reports run -m sessions -d date --end-date yesterday 
 **Creating or deleting a profile needs the user.** `ga --profile X auth login` opens a browser, so tell the user to run it. `ga --profile X auth login --service-account KEY` works non-interactively, but only with a key path the user gave you; then `ga --profile X config set default_property_id PROP`. `ga profiles delete NAME` removes that profile's stored credentials and config, which is destructive. Ask first, and pass `--yes` only once they've agreed.
 
 **gcloud ADC is the default profile's last resort**, used only when no service account or `ga auth login` is configured. `ga auth status -o json` then shows `"method": "adc"`. gcloud user ADC carries only the scopes it was created with. If a call fails with insufficient scopes, the JSON error includes a `hint` field with two login commands. Relay them to the user: they're browser logins you can't run. Don't suggest a plain `gcloud auth application-default login --scopes=…`, because Google blocks gcloud's built-in client from the Analytics scopes ("This app is blocked"). The hint's first command adds `--client-id-file=` (the user's own Desktop-app OAuth client); the second impersonates a service account (`--impersonate-service-account=`). Two follow-ups may be needed. If Google asks for a quota project, the user runs `gcloud auth application-default set-quota-project PROJECT`. And since the hinted scopes are read-only, admin writes need `https://www.googleapis.com/auth/analytics.edit` added to the first command's `--scopes`.
+
+## Allowlist
+
+The user can pin `ga` to some accounts and properties. With an allowlist on, a request for anything outside it is refused before it is sent.
+
+```bash
+ga auth status -o json | jq .allowlist.enabled   # true: an allowlist is on
+ga allowlist show -o json | jq .effective        # the accounts and properties you may use
+```
+
+**When it's on, pick the property from `effective.properties`** (`id`, `account`, `displayName`); `accounts list`, `account-summaries list` and `properties list` already hide the rest. Run `allowlist show` with the same `--profile` as your other commands. The default profile's allowlist applies to every profile, and a named profile can narrow it further, so the answer can differ per profile.
+
+**An allowed property doesn't allow its account.** Account-level commands on the parent account (`accounts get`, `access-bindings … -a`, `access-reports run-account`) are refused unless the account itself is allowed.
+
+**Exit 5 (`"category": "allowlist_error"`) means stop and ask.** The JSON error's `resource` names what was blocked, e.g. `properties/999`. Tell the user that resource and ask how to go on. Don't work around it: don't retry under another `--profile` or `GA_CLI_PROFILE`, don't unset or override `GA_CLI_ALLOWED_ACCOUNTS` / `GA_CLI_ALLOWED_PROPERTIES`, don't run `ga auth login`, and don't try `ga config set allowed_…`. Some of these could get past a narrower allowlist, which is why they're off limits. (Changing the allowlist needs a terminal and the user's confirmation, so `config set` fails in your session anyway.) A malformed allowlist or an unreadable `config.json` also exits 5: report it the same way, and leave the file to the user.
 
 ## The working loop
 

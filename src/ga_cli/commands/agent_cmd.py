@@ -32,6 +32,7 @@ Go **before** the command: `ga -q reports run …`
 | `--quiet` / `-q` | Suppress info/warnings (errors still shown) |
 | `--no-color` | Disable colored output |
 | `--describe` | Output full CLI schema as JSON (all commands, parameters, types) |
+| `--profile NAME` | Use a named profile (credentials + config); also `GA_CLI_PROFILE` |
 | `--version` / `-v` | Show version |
 
 Common per-command flags go **after** the command: `ga accounts list -o json`
@@ -51,32 +52,45 @@ Account → Property → Data Stream (Web / Android / iOS)
 ```
 
 ## Allowlist
-The user can pin `ga` to a set of accounts and/or properties (`ga config set allowed_account_ids …`
-in a terminal, or the `GA_CLI_ALLOWED_ACCOUNTS` / `GA_CLI_ALLOWED_PROPERTIES` env vars).
-When it is on (`ga auth status -o json | jq .allowlist.enabled`):
+The user can pin `ga` to a set of accounts and/or properties. A request must pass every source
+that is set:
+| Source | Set with | Applies to |
+|--------|----------|------------|
+| `config` | `ga config set allowed_account_ids …` in the default profile | every profile |
+| `profile NAME` | `ga --profile NAME config set allowed_account_ids …` | only that profile; narrows `config` |
+| `env` | `GA_CLI_ALLOWED_ACCOUNTS` / `GA_CLI_ALLOWED_PROPERTIES` (comma-separated) | every profile; narrows |
+
+So `--profile` and `GA_CLI_PROFILE` can never widen the allowlist, but a named profile may allow
+less than the default profile. When it is on (`ga auth status -o json | jq .allowlist.enabled`):
 - Any request for an account or property that isn't allowed is blocked **before it is sent**:
-  exit code 5, category `allowlist_error`, with the blocked `resource` in the JSON error
+  exit code 5, category `allowlist_error`. The JSON error names the blocked `resource`, and its
+  `hint` says to run `ga allowlist show`
 - `accounts list`, `account-summaries list` and `properties list` only show allowed items
 - An allowed property does not allow account-level commands (`accounts get`, account access
   bindings / access reports) on its parent account
-- Run `ga allowlist show -o json | jq .effective` to see which properties you may use
+- Run `ga allowlist show -o json | jq .effective` to see which properties you may use, with the
+  same `--profile` as your other commands
 - **You can't change the allowlist**: `ga config set/unset allowed_*`, and `ga config reset` while
-  an allowlist is set, refuse to run without a terminal; env vars can only narrow the config file. On exit 5, don't
-  retry with other flags or run `ga auth login`; tell the user which resource was blocked and ask
+  an allowlist is set, need a terminal and a confirmation; env vars can only narrow. On exit 5,
+  don't retry with other flags, another `--profile`, or without the `GA_CLI_ALLOWED_*` vars, and
+  don't run `ga auth login`; tell the user which resource was blocked and ask
 
 ## Errors and exit codes
 With JSON output (`-o json` or piped), errors go to stderr as
-`{"error": true, "exit_code": N, "category": "…", "message": "…"}`.
+`{"error": true, "exit_code": N, "category": "…", "message": "…"}`. Some errors add fields:
+`"resource"` (exit 5: the blocked account or property, e.g. `properties/999`) and `"hint"`
+(advice kept out of `message`, such as what to run next).
 | Exit | Category | Meaning |
 |------|----------|---------|
-| 1 | `client_error` | Bad input, missing flags, validation failure |
-| 2 | `auth_error` | Not authenticated, token expired, permission denied (401/403) |
+| 1 | `client_error` | Bad input, missing flags, validation failure, invalid profile name |
+| 2 | `auth_error` | Not authenticated, token expired, permission denied (401/403), unknown profile |
 | 3 | `api_error` | Google returned another 4xx or a 5xx |
 | 4 | `network_error` | Timeout, DNS failure, unreachable |
-| 5 | `allowlist_error` | Resource not on the allowlist, or a malformed allowlist (`resource` names it) |
+| 5 | `allowlist_error` | Resource not on the allowlist, a malformed allowlist, or an unreadable `config.json` |
 
-Branch on `category`, not only on the exit code: argument-parsing errors (unknown flag, bad option
-value) also exit 2, with a usage message instead of a JSON payload.
+Branch on `category`, not only on the exit code. Two errors print plain text instead of a JSON
+payload: argument-parsing errors (unknown flag, bad option value) exit 2 with a usage message, and
+an invalid `--profile` name exits 1.
 
 ## Command Reference
 
@@ -96,7 +110,7 @@ ga config setup          # Interactive wizard
 ga config reset
 ```
 Keys: `default_account_id`, `default_property_id`, `output_format` (`json`, `table`, `compact`),
-`allowed_account_ids`, `allowed_property_ids` (allowlist: interactive only, see "Allowlist" below)
+`allowed_account_ids`, `allowed_property_ids` (allowlist: interactive only, see "Allowlist" above)
 
 ### Allowlist
 ```bash
@@ -349,9 +363,10 @@ ga completions bash|zsh|fish
 |----------|---------|
 | `GA_CLI_SERVICE_ACCOUNT` | Service account key path (non-interactive auth) |
 | `GOOGLE_APPLICATION_CREDENTIALS` | GCP credential path (fallback) |
+| `GA_CLI_PROFILE` | Named profile to use, like `--profile` (which takes precedence) |
+| `GA_CLI_ALLOWED_ACCOUNTS` | Comma-separated allowed account IDs (only narrows the allowlist, in every profile) |
+| `GA_CLI_ALLOWED_PROPERTIES` | Comma-separated allowed property IDs (only narrows the allowlist, in every profile) |
 | `GA_CLI_CONFIG_DIR` | Override config directory |
-| `GA_CLI_ALLOWED_ACCOUNTS` | Comma-separated allowlisted account IDs (narrows the config allowlist) |
-| `GA_CLI_ALLOWED_PROPERTIES` | Comma-separated allowlisted property IDs (narrows the config allowlist) |
 | `NO_COLOR` | Disable colored output |
 
 ## Parsing Output
@@ -427,7 +442,7 @@ ga data-streams list -o json | jq -r '.[].name' | grep -o '[0-9]*$'
 | Error | Cause | Fix |
 |-------|-------|-----|
 | "Not authenticated" | No valid credentials | `ga auth login` |
-| "… is not on the allowlist" (exit 5) | The user restricted `ga` to other accounts/properties | `ga allowlist show`; ask the user, don't work around it |
+| "… is not on the allowlist" (exit 5) | The user restricted `ga` to other accounts/properties | `ga allowlist show`; report the `resource` and ask the user, don't work around it |
 | "Missing required option: property_id" | No `--property-id` and no default | `ga config set default_property_id ID` |
 | "HttpError 403: …permission" | Account lacks GA4 access | Verify account/property IDs and permissions |
 | "--url is required for WEB_DATA_STREAM" | Missing URL for web stream | Add `--url "https://…"` |
