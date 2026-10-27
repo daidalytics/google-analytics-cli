@@ -151,9 +151,10 @@ class TestPrincipalOf:
 # ADC credentials reach the guard
 # ---------------------------------------------------------------------------
 class TestAdcClient:
-    def test_admin_client_is_built_on_allowlist_http(self, no_gcloud_adc):
+    def test_admin_client_is_built_on_allowlist_http(self, no_gcloud_adc, monkeypatch):
         creds = _impersonated()
         _enable_adc(no_gcloud_adc, creds)
+        monkeypatch.setenv("GA_CLI_ALLOWED_PROPERTIES", "1")  # no allowlist, no guard (#44)
         http = get_admin_client()._http
         assert isinstance(http, AllowlistHttp)
         assert http.credentials is creds
