@@ -52,7 +52,7 @@ from ..utils.errors import (
     NotAuthenticatedError,
     ProfileNotFoundError,
 )
-from .allowlist_guard import AllowlistCache, AllowlistHttp, cache_for
+from .allowlist_guard import AllowlistCache, AllowlistHttp, cache_for, reset_caches
 
 AuthMethod = Literal["service-account", "oauth", "adc"]
 
@@ -253,7 +253,10 @@ def get_allowlist_cache() -> AllowlistCache:
 
 
 def clear_client_cache() -> None:
-    """Clear cached API clients (e.g., after re-authentication)."""
+    """Clear cached API clients (e.g., after re-authentication).
+
+    Also forgets the allowlist caches, which hold the old credentials (#45).
+    """
     global _cached_admin_client, _cached_admin_alpha_client
     global _cached_data_client, _cached_data_alpha_client
     global _last_auth_method
@@ -262,3 +265,4 @@ def clear_client_cache() -> None:
     _cached_data_client = None
     _cached_data_alpha_client = None
     _last_auth_method = None
+    reset_caches()

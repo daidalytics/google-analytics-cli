@@ -433,6 +433,24 @@ class FakeCreds:
         self.token = f"t{self.refreshes + 1}"
 
 
+class MetadataCreds(FakeCreds):
+    """Compute Engine style: the account email is "default" until the first refresh."""
+
+    service_account_email = "default"
+    refresh_token = None
+    valid = False
+
+    def refresh(self, request):
+        super().refresh(request)
+        self.service_account_email = "sa@proj.iam.gserviceaccount.com"
+        self.valid = True
+
+    def before_request(self, request, method, url, headers):
+        if not self.valid:
+            self.refresh(request)
+        super().before_request(request, method, url, headers)
+
+
 def _al(accounts=None, properties=None, env_accounts=None, env_properties=None):
     sources = []
     if accounts is not None or properties is not None:
@@ -464,10 +482,10 @@ def _reset_guard_caches():
     reset_caches()
 
 
-def guarded(allowlist, responses, client=A):
+def guarded(allowlist, responses, client=A, creds=None):
     """A real client over AllowlistHttp over HttpMockSequence; returns (client, inner)."""
     inner = HttpMockSequence(responses)
-    http = AllowlistHttp(FakeCreds(), http=inner, allowlist=allowlist)
+    http = AllowlistHttp(creds or FakeCreds(), http=inner, allowlist=allowlist)
     if client == DA:
         c = build_from_document((SNAPSHOTS / "analyticsdata_v1alpha.json").read_text(), http=http)
     else:
@@ -536,6 +554,42 @@ class TestPropertyAllowlist:
         with pytest.raises(AllowlistError):
             c.properties().get(name="properties/998").execute()
         assert _sent(inner) == [("GET", "beta/accountSummaries")]
+
+    def test_client_derives_its_cache_once(self, monkeypatch):
+        """Not once per property while filtering a list (#45)."""
+        import ga_cli.api.allowlist_guard as guard
+
+        calls = []
+        real = guard.principal_of
+        monkeypatch.setattr(guard, "principal_of", lambda c: calls.append(c) or real(c))
+        listing = {"properties": [{"name": f"properties/{p}"} for p in ("1", "2", "3")]}
+        c, _ = guarded(_al(accounts={"10"}), [_resp(listing), SUMMARIES_RESP])
+        result = c.properties().list(filter="ancestor:accounts/10").execute()
+        assert [p["name"] for p in result["properties"]] == ["properties/1", "properties/3"]
+        assert len(calls) == 1
+
+    def test_metadata_credentials_fetch_once_and_persist(self, isolated_config_dir):
+        """Compute Engine names its account only after a refresh: one fetch, saved (#45)."""
+        c, inner = guarded(
+            _al(accounts={"10"}), [SUMMARIES_RESP, _resp(), _resp()], creds=MetadataCreds()
+        )
+        c.properties().get(name="properties/1").execute()
+        c.properties().get(name="properties/3").execute()
+        assert _sent(inner) == [
+            ("GET", "beta/accountSummaries"),
+            ("GET", "beta/properties/1"),
+            ("GET", "beta/properties/3"),
+        ]
+        assert "sa@proj.iam.gserviceaccount.com" in (
+            isolated_config_dir / "allowlist-cache.json").read_text()
+
+    def test_metadata_credentials_read_the_cache_in_the_next_process(self):
+        guarded(_al(accounts={"10"}), [SUMMARIES_RESP, _resp()], creds=MetadataCreds())[0] \
+            .properties().get(name="properties/1").execute()
+        reset_caches()  # a new process, with fresh credentials that say "default" again
+        c, inner = guarded(_al(accounts={"10"}), [_resp()], creds=MetadataCreds())
+        c.properties().get(name="properties/1").execute()
+        assert _sent(inner) == [("GET", "beta/properties/1")]
 
     def test_denial_of_property_only_allowlist_makes_no_lookup(self):
         c, inner = guarded(_al(properties={"1"}), [])

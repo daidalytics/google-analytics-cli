@@ -195,6 +195,24 @@ def principal_of(credentials: Any) -> Optional[str]:
     return None
 
 
+def identify(credentials: Any, http: Any) -> Optional[str]:
+    """principal_of(), refreshing first if only a refresh names the account.
+
+    Compute Engine credentials report "default" until their first refresh, and every
+    process starts with fresh ones, so without this their map would never be read from
+    disk (#45). The token is needed for the API call anyway.
+    """
+    if (
+        principal_of(credentials) is None
+        and getattr(credentials, "service_account_email", None) == "default"
+        and not getattr(credentials, "valid", True)
+    ):
+        from google_auth_httplib2 import Request
+
+        credentials.refresh(Request(http))
+    return principal_of(credentials)
+
+
 def fetch_account_summaries(credentials: Any, http: Any) -> list[dict]:
     """All account summaries, through a plain AuthorizedHttp that bypasses the guard.
 
@@ -219,6 +237,9 @@ class AllowlistCache:
     Each property maps to the account of the summary it sits in, never to its
     ``parent`` (which is ``properties/N`` for subproperties). An unknown property
     triggers at most one refresh per process.
+
+    ``identify`` tells an unknown principal later: before reading the disk, and after a
+    fetch, which refreshes the credentials.
     """
 
     def __init__(
@@ -228,8 +249,10 @@ class AllowlistCache:
         path: Optional[Path] = None,
         ttl: int = ALLOWLIST_CACHE_TTL_SECONDS,
         clock: Callable[[], float] = time.time,
+        identify: Optional[Callable[[], Optional[str]]] = None,
     ):
         self.principal = principal
+        self._identify = identify
         self._fetch = fetch
         self._path = path
         self._ttl = ttl
@@ -245,7 +268,12 @@ class AllowlistCache:
     def path(self) -> Path:
         return self._path or get_allowlist_cache_path()
 
+    def _learn_principal(self) -> None:
+        if self.principal is None and self._identify is not None:
+            self.principal = self._identify()
+
     def _load_disk(self) -> bool:
+        self._learn_principal()
         if self.principal is None:
             return False
         try:
@@ -291,6 +319,7 @@ class AllowlistCache:
         later call in the same process tries again instead of seeing an empty map.
         """
         summaries = self._fetch()
+        self._learn_principal()
         properties: dict[str, str] = {}
         names: dict[str, str] = {}
         account_names: dict[str, str] = {}
@@ -348,7 +377,10 @@ def cache_for(credentials: Any, http: Any) -> AllowlistCache:
     if key not in _caches:
         # path= freezes the file: a later profile switch must not redirect this cache
         _caches[key] = AllowlistCache(
-            principal, lambda: fetch_account_summaries(credentials, http), path=path
+            principal,
+            lambda: fetch_account_summaries(credentials, http),
+            path=path,
+            identify=lambda: identify(credentials, http),
         )
     return _caches[key]
 
@@ -388,6 +420,7 @@ class AllowlistHttp(AuthorizedHttp):
 
             allowlist = load_allowlist()
         self.allowlist = allowlist
+        self._cache: Optional[AllowlistCache] = None
 
     def request(self, uri, method="GET", body=None, headers=None, *args, **kwargs):
         if not self.allowlist.enabled:
@@ -403,7 +436,10 @@ class AllowlistHttp(AuthorizedHttp):
 
     @property
     def cache(self) -> AllowlistCache:
-        return cache_for(self.credentials, self.http)
+        # Once per client: its profile and credentials don't change (#45)
+        if self._cache is None:
+            self._cache = cache_for(self.credentials, self.http)
+        return self._cache
 
     def _deny(self, resource: str, reason: str):
         from ..utils.errors import AllowlistError

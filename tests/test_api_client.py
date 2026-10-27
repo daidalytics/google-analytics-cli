@@ -330,6 +330,17 @@ class TestClearClientCache:
         get_data_client()
         assert mock_build.call_count == 4  # Rebuilt after cache clear
 
+    def test_also_forgets_allowlist_caches(self):
+        """They hold the old credentials and HTTP connections (#45)."""
+        from types import SimpleNamespace
+
+        from ga_cli.api import allowlist_guard
+
+        allowlist_guard.cache_for(SimpleNamespace(service_account_email="a@b.c"), None)
+        assert allowlist_guard._caches
+        clear_client_cache()
+        assert not allowlist_guard._caches
+
 
 class TestAlphaClients:
     @patch("ga_cli.api.client._get_credentials")
