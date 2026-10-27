@@ -11,9 +11,7 @@ from __future__ import annotations
 import enum
 import hashlib
 import json
-import os
 import re
-import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
@@ -22,6 +20,7 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 from google_auth_httplib2 import AuthorizedHttp
 
 from ..config.constants import ALLOWLIST_CACHE_TTL_SECONDS, get_allowlist_cache_path
+from ..config.store import write_json_atomic
 
 GA_HOSTS = ("analyticsadmin.googleapis.com", "analyticsdata.googleapis.com")
 DISCOVERY_HOST = "www.googleapis.com"
@@ -271,15 +270,7 @@ class AllowlistCache:
             "account_names": self.account_names,
         }
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".allowlist-cache.")
-            try:
-                with os.fdopen(fd, "w") as f:
-                    json.dump(data, f)
-                os.replace(tmp, self.path)
-            except BaseException:
-                Path(tmp).unlink(missing_ok=True)
-                raise
+            write_json_atomic(self.path, data)
         except OSError:
             pass  # best effort: the in-memory map still serves this process
 

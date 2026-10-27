@@ -514,8 +514,10 @@ class TestUnreadableConfig:
 
     def test_save_config_refuses(self, tmp_path):
         path = self._broken(tmp_path)
-        with pytest.raises(ConfigFileError):
+        with pytest.raises(ConfigFileError) as exc:
             save_config(UserConfig(output_format="json"))
+        # The same refusal `ga config` prints before its prompts
+        assert "Fix the file first" in str(exc.value)
         assert path.read_text() == self.BROKEN
 
     def test_set_refused_file_unchanged(self, tmp_path):

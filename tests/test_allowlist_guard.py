@@ -341,6 +341,17 @@ class TestCache:
         assert cache.prop_map({"999"}).get("999") is None
         assert fetch.calls == 1
 
+    def test_writes_through_symlink_without_temp_files(self, tmp_path):
+        """Same atomic write as config.json: a symlinked cache file stays a symlink."""
+        real = tmp_path / "elsewhere" / "allowlist-cache.json"
+        real.parent.mkdir()
+        real.write_text("{}")
+        (tmp_path / "allowlist-cache.json").symlink_to(real)
+        _cache(tmp_path, FakeFetch()).lookup("1")
+        assert (tmp_path / "allowlist-cache.json").is_symlink()
+        assert "1" in real.read_text()
+        assert sorted(p.name for p in real.parent.iterdir()) == ["allowlist-cache.json"]
+
     def test_unknown_principal_skips_disk(self, tmp_path):
         cache = _cache(tmp_path, FakeFetch(), principal=None)
         assert cache.lookup("1") == "10"

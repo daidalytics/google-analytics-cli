@@ -104,32 +104,49 @@ def config_error(path: Optional[Path] = None) -> Optional[str]:
     return _cache[path][1]
 
 
-def save_config(config: UserConfig) -> None:
-    """Write config to disk atomically and update cache.
+def require_writable_config(path: Optional[Path] = None) -> None:
+    """Raise ConfigFileError rather than let a save overwrite a config.json that couldn't
+    be read, which would silently drop any allowlist in it.
 
-    Creates the active profile's directory on first write. Raises ConfigFileError
-    instead of overwriting a config.json that couldn't be read, which would silently
-    drop any allowlist in it.
+    ``path`` defaults to the active profile's config.json.
     """
-    config_path = get_config_path()
-    reason = config_error(config_path)
+    reason = config_error(path)
     if reason:
-        raise ConfigFileError(reason)
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+        raise ConfigFileError(
+            f"{reason}. Fix the file first: saving now would drop any allowlist in it"
+        )
 
-    # Only write non-None values
-    data = {k: v for k, v in asdict(config).items() if v is not None}
-    # Temp file + rename, so a crash can't leave a truncated file. resolve() writes
-    # through a symlinked config.json instead of replacing the link.
-    path = config_path.resolve()
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".config.")
+
+def write_json_atomic(path: Path, data: Any, **dump_kwargs: Any) -> None:
+    """Write JSON through a temp file + rename, so a crash can't leave a truncated file.
+
+    resolve() writes through a symlink instead of replacing the link. Creates the
+    parent directory.
+    """
+    path = path.resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.")
     try:
         with os.fdopen(fd, "w") as f:
-            f.write(json.dumps(data, indent=2))
+            json.dump(data, f, **dump_kwargs)
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+def save_config(config: UserConfig) -> None:
+    """Write config to disk atomically and update cache.
+
+    Creates the active profile's directory on first write. Raises ConfigFileError
+    instead of overwriting a config.json that couldn't be read.
+    """
+    config_path = get_config_path()
+    require_writable_config(config_path)
+    # Only write non-None values
+    write_json_atomic(
+        config_path, {k: v for k, v in asdict(config).items() if v is not None}, indent=2
+    )
     _cache[config_path] = (config, None)
 
 

@@ -13,11 +13,12 @@ from ..config.constants import get_active_profile, is_named_profile, profile_exi
 from ..config.store import (
     ALLOWLIST_CONFIG_KEYS,
     VALID_CONFIG_KEYS,
+    ConfigFileError,
     clear_config,
-    config_error,
     get_config_path,
     get_config_value,
     load_config,
+    require_writable_config,
     set_config_value,
     unset_config_value,
     update_config,
@@ -60,10 +61,11 @@ def _require_interactive() -> None:
 
 
 def _require_readable_config() -> None:
-    """Exit 1 rather than overwrite a config.json that couldn't be read."""
-    reason = config_error()
-    if reason:
-        error(f"{reason}. Fix the file first: saving now would drop any allowlist in it")
+    """Exit 1 before any prompt, rather than reach save_config's refusal afterwards."""
+    try:
+        require_writable_config()
+    except ConfigFileError as e:
+        error(str(e))
         raise typer.Exit(1)
 
 
