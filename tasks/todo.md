@@ -20,14 +20,19 @@ Legend: `∥` = runs in parallel with its siblings, each in its own worktree age
 
 ## Wave 1 (6 agents in parallel)
 
-- [ ] ∥ **T2a → T2b** · Profile-aware sources (M) → CLI surface: scope text, `allowlist show` profile, status (M) (one agent, two commits)
-- [ ] ∥ **T3** · Per-profile cache file + in-process cache keyed by path + reset on profile switch (M)
-- [ ] ∥ **T4** · `principal_of()` for ADC credentials; ADC through `_build()`; refresh not guarded (S)
-- [ ] ∥ **T5** · Allowlist advice moves into the `hint` field (XS)
-- [ ] ∥ **T6** · Audience-exports guard tests (S, test-only)
-- [ ] ∥ **T7** · SKILL.md, `ga agent guide`, README (M)
+- [x] ∥ **T2a → T2b** · Profile-aware sources (M) → CLI surface: scope text, `allowlist show` profile, status (M) (one agent, two commits) · `22d57a6`, `dde0a95`
+      · the agent stopped before committing T2b; the orchestrator checked the staged work against the T2b contract, ran the full suite in the worktree and committed it
+- [x] ∥ **T3** · Per-profile cache file + in-process cache keyed by path + reset on profile switch (M) · `3413b52`
+      · orchestrator follow-up `7333211`: `test_profiles.py` lists the cache among the per-profile paths
+- [x] ∥ **T4** · `principal_of()` for ADC credentials; ADC through `_build()`; refresh not guarded (S) · `888922d`
+- [x] ∥ **T5** · Allowlist advice moves into the `hint` field (XS) · `6461630`
+- [x] ∥ **T6** · Audience-exports guard tests (S, test-only) · `82f9429`; no guard gap reported
+- [x] ∥ **T7** · SKILL.md, `ga agent guide`, README (M) · `8a3dc56`
+      · the agent stopped before committing; the orchestrator read the diff, spot-checked its claims against the merged CLI (invalid profile name exits 1 as plain text, unknown profile exits 2, hint text, root allowlist enabled under a named profile) and committed it
 
-- [ ] Merge back in order T5 → T4 → T3 → T6 → T2 → T7, full suite after each, regenerate `commands.md` if drifted
+- [x] Merge back, full suite after each, `commands.md` never drifted · 1771 tests green, ruff clean
+      · actual order T5 → T3 → T6 → T4 → T2 → T7 (T4 committed after T3 had merged; their `allowlist_guard.py` functions don't overlap and the merge was clean)
+      · merges `ae46c0c`, `07aa973`, `f779520`, `f6f438f`, `0d62a5b`, `23a3f36`
 
 ## Wave 2
 
