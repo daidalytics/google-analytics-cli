@@ -203,9 +203,9 @@ class TestCachePerProfile:
 
         assert result.exit_code == 0, result.output
         assert _sent(inner) == [("GET", "beta/accountSummaries"), ("POST", RUN_REPORT.format(1))]
-        data = json.loads((profile_dir / CACHE).read_text())
-        assert data["principal"] == _principal(PROFILE)
-        assert data["properties"] == {"1": "10", "3": "10", "2": "20"}
+        data = json.loads((profile_dir / CACHE).read_text())["entries"]
+        assert list(data) == [_principal(PROFILE)]
+        assert data[_principal(PROFILE)]["properties"] == {"1": "10", "3": "10", "2": "20"}
         assert not (root / CACHE).exists()
 
     def test_default_profile_keeps_its_own_cache(self, root, profile_dir, invoke):
@@ -220,7 +220,7 @@ class TestCachePerProfile:
         assert result.exit_code == 0, result.output
         assert _sent(inner) == [("GET", "beta/accountSummaries"), ("POST", RUN_REPORT.format(1))]
         assert _auth_header(inner) == "Bearer default-token"
-        assert json.loads((root / CACHE).read_text())["principal"] == _principal("default")
+        assert list(json.loads((root / CACHE).read_text())["entries"]) == [_principal("default")]
         assert (profile_dir / CACHE).read_text() == profile_cache
 
 

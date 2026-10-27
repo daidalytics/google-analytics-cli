@@ -47,7 +47,7 @@ class AllowlistConfigError(AllowlistError):
 
 # Creates gcloud Application Default Credentials that carry the scopes GA needs.
 # gcloud *user* ADC ignores the scopes a client requests unless it was created
-# with them (SPEC B4), so every ADC hint names them explicitly. Google blocks
+# with them (0.6.0 SPEC B4), so every ADC hint names them explicitly. Google blocks
 # gcloud's built-in OAuth client from the Analytics scopes ("This app is
 # blocked"), so the login must use the user's own Desktop-app OAuth client,
 # e.g. the client_secret.json that `ga auth login` uses.
@@ -227,7 +227,7 @@ def error_hint(err: Exception) -> str | None:
     - Any other ``AllowlistError``: ``ALLOWLIST_HINT``.
     - A 403 ``ACCESS_TOKEN_SCOPE_INSUFFICIENT`` while the credentials came from
       gcloud ADC: ``ADC_SCOPE_HINT``. User ADC ignores the scopes a client asks
-      for unless it was created with them (SPEC B4), so the fix is a re-login.
+      for unless it was created with them (0.6.0 SPEC B4), so the fix is a re-login.
     """
     from googleapiclient.errors import HttpError
 

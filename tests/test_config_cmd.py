@@ -512,10 +512,34 @@ class TestUnreadableConfig:
         assert load_config() == UserConfig()
         assert config_error() is None
 
+    @pytest.mark.parametrize("text", ["", " \n"])
+    def test_empty_file_is_an_empty_config(self, tmp_path, text):
+        """It can't hold an allowlist, so it mustn't block every API command (#46)."""
+        from ga_cli.config.allowlist import is_allowlist_configured
+
+        (tmp_path / "config.json").write_text(text)
+        assert load_config() == UserConfig()
+        assert config_error() is None
+        assert not is_allowlist_configured()
+        result = runner.invoke(app, ["config", "set", "output_format", "json"])
+        assert result.exit_code == 0, result.output
+
+    @pytest.mark.parametrize("args", [[], ["default_property_id"]])
+    def test_get_reports_the_unreadable_file(self, tmp_path, args):
+        """Not nulls, which would tell an agent no allowlist is set."""
+        path = self._broken(tmp_path)
+        result = runner.invoke(app, ["config", "get", *args])
+        assert result.exit_code == 1
+        assert "Can't read" in " ".join(result.output.split())
+        assert "null" not in result.output
+        assert path.read_text() == self.BROKEN
+
     def test_save_config_refuses(self, tmp_path):
         path = self._broken(tmp_path)
-        with pytest.raises(ConfigFileError):
+        with pytest.raises(ConfigFileError) as exc:
             save_config(UserConfig(output_format="json"))
+        # The same refusal `ga config` prints before its prompts
+        assert "Fix the file first" in str(exc.value)
         assert path.read_text() == self.BROKEN
 
     def test_set_refused_file_unchanged(self, tmp_path):

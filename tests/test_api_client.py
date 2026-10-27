@@ -22,6 +22,7 @@ from ga_cli.api.client import (
 from ga_cli.config.constants import OAUTH_SCOPES, set_active_profile
 from ga_cli.main import app
 from ga_cli.utils.errors import (
+    AllowlistConfigError,
     AllowlistError,
     NotAuthenticatedError,
     ProfileNotFoundError,
@@ -39,6 +40,13 @@ def _assert_guarded_build(mock_build, mock_creds, service, version, **kwargs):
     assert isinstance(http, AllowlistHttp)
     assert http.credentials is mock_creds.return_value
     assert call_kwargs == kwargs
+
+
+def _assert_plain_build(mock_build, mock_creds, service, version, **kwargs):
+    """The 0.6.0 call: googleapiclient sets up the transport itself (mTLS included)."""
+    mock_build.assert_called_once_with(
+        service, version, credentials=mock_creds.return_value, **kwargs
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -267,7 +275,7 @@ class TestGetAdminClient:
         mock_build.return_value = MagicMock()
 
         result = get_admin_client()
-        _assert_guarded_build(mock_build, mock_creds, "analyticsadmin", "v1beta")
+        _assert_plain_build(mock_build, mock_creds, "analyticsadmin", "v1beta")
         assert result is mock_build.return_value
 
     @patch("ga_cli.api.client._get_credentials")
@@ -290,7 +298,7 @@ class TestGetDataClient:
         mock_build.return_value = MagicMock()
 
         result = get_data_client()
-        _assert_guarded_build(mock_build, mock_creds, "analyticsdata", "v1beta")
+        _assert_plain_build(mock_build, mock_creds, "analyticsdata", "v1beta")
         assert result is mock_build.return_value
 
     @patch("ga_cli.api.client._get_credentials")
@@ -322,21 +330,92 @@ class TestClearClientCache:
         get_data_client()
         assert mock_build.call_count == 4  # Rebuilt after cache clear
 
+    def test_also_forgets_allowlist_caches(self):
+        """They hold the old credentials and HTTP connections (#45)."""
+        from types import SimpleNamespace
+
+        from ga_cli.api import allowlist_guard
+
+        allowlist_guard.cache_for(SimpleNamespace(service_account_email="a@b.c"), None)
+        assert allowlist_guard._caches
+        clear_client_cache()
+        assert not allowlist_guard._caches
+
 
 class TestAlphaClients:
     @patch("ga_cli.api.client._get_credentials")
     @patch("ga_cli.api.client.build")
-    def test_admin_alpha_guarded(self, mock_build, mock_creds):
+    def test_admin_alpha_client(self, mock_build, mock_creds):
         get_admin_alpha_client()
-        _assert_guarded_build(mock_build, mock_creds, "analyticsadmin", "v1alpha")
+        _assert_plain_build(mock_build, mock_creds, "analyticsadmin", "v1alpha")
 
     @patch("ga_cli.api.client._get_credentials")
     @patch("ga_cli.api.client.build")
     def test_data_alpha_keeps_dynamic_discovery(self, mock_build, mock_creds):
         get_data_alpha_client()
-        _assert_guarded_build(
+        _assert_plain_build(
             mock_build, mock_creds, "analyticsdata", "v1alpha", static_discovery=False
         )
+
+
+GETTERS = [
+    (get_admin_client, ("analyticsadmin", "v1beta"), {}),
+    (get_admin_alpha_client, ("analyticsadmin", "v1alpha"), {}),
+    (get_data_client, ("analyticsdata", "v1beta"), {}),
+    (get_data_alpha_client, ("analyticsdata", "v1alpha"), {"static_discovery": False}),
+]
+
+
+class TestGuardedOnlyWithAllowlist:
+    """#44: the guard's http= skips googleapiclient's mTLS setup, so it's used only when needed."""
+
+    @pytest.mark.parametrize("getter,args,kwargs", GETTERS)
+    @patch("ga_cli.api.client._get_credentials")
+    @patch("ga_cli.api.client.build")
+    def test_allowlist_builds_guarded(
+        self, mock_build, mock_creds, getter, args, kwargs, monkeypatch
+    ):
+        monkeypatch.setenv("GA_CLI_ALLOWED_PROPERTIES", "1")
+        getter()
+        _assert_guarded_build(mock_build, mock_creds, *args, **kwargs)
+
+    @pytest.mark.parametrize("getter,args,kwargs", GETTERS)
+    @patch("ga_cli.api.client._get_credentials")
+    @patch("ga_cli.api.client.build")
+    def test_no_allowlist_builds_as_in_0_6_0(self, mock_build, mock_creds, getter, args, kwargs):
+        getter()
+        _assert_plain_build(mock_build, mock_creds, *args, **kwargs)
+
+    @patch("ga_cli.api.client._get_credentials")
+    def test_no_allowlist_honours_mtls_endpoint(self, mock_creds, monkeypatch):
+        from google.oauth2.credentials import Credentials
+
+        mock_creds.return_value = Credentials(token="t")
+        monkeypatch.setenv("GOOGLE_API_USE_MTLS_ENDPOINT", "always")
+        assert get_admin_client()._baseUrl.startswith("https://analyticsadmin.mtls.googleapis.com/")
+
+    @pytest.mark.parametrize("value", ["auto", "never"])
+    @patch("ga_cli.api.client._get_credentials")
+    @patch("ga_cli.api.client.build")
+    def test_allowlist_works_with_mtls_auto_or_never(
+        self, mock_build, mock_creds, value, monkeypatch
+    ):
+        """ga never sends a client certificate, so neither setting picks the mTLS endpoint."""
+        monkeypatch.setenv("GA_CLI_ALLOWED_PROPERTIES", "1")
+        monkeypatch.setenv("GOOGLE_API_USE_MTLS_ENDPOINT", value)
+        get_admin_client()
+        _assert_guarded_build(mock_build, mock_creds, "analyticsadmin", "v1beta")
+
+    @patch("ga_cli.api.client._get_credentials")
+    @patch("ga_cli.api.client.build")
+    def test_allowlist_refuses_mtls_always(self, mock_build, mock_creds, monkeypatch):
+        """Better than a silent switch back to the plain endpoint."""
+        monkeypatch.setenv("GA_CLI_ALLOWED_PROPERTIES", "1")
+        monkeypatch.setenv("GOOGLE_API_USE_MTLS_ENDPOINT", "always")
+        with pytest.raises(AllowlistConfigError) as exc:
+            get_admin_client()
+        assert exc.value.resource == "GOOGLE_API_USE_MTLS_ENDPOINT"
+        mock_build.assert_not_called()
 
 
 class TestMalformedAllowlist:
@@ -350,7 +429,7 @@ class TestMalformedAllowlist:
 
 
 class TestCredentialResolution:
-    """SPEC B4: the credential resolution table, for both profile kinds.
+    """0.6.0 SPEC B4: the credential resolution table, for both profile kinds.
 
     Each row configures the source it expects to win *plus every source
     below it*, so a row passes only if precedence is right.

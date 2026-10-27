@@ -132,8 +132,8 @@ class TestPersistence:
         c.properties().get(name="properties/3").execute()
 
         data = json.loads((isolated_config_dir / "profiles" / "x" / CACHE).read_text())
-        assert data["principal"] == principal_of(FakeCreds())
-        assert data["properties"] == {"1": "10", "3": "10", "2": "20"}
+        assert data["entries"][principal_of(FakeCreds())]["properties"] == {
+            "1": "10", "3": "10", "2": "20"}
         assert not (isolated_config_dir / CACHE).exists()
 
 
@@ -170,12 +170,13 @@ class TestProfilesInOneProcess:
         (isolated_config_dir / "profiles" / "a").mkdir(parents=True)
         b_cache = isolated_config_dir / "profiles" / "b" / CACHE
         b_cache.parent.mkdir(parents=True)
-        b_cache.write_text(json.dumps({
-            "principal": principal_of(FakeCreds()),
-            "fetched_at": int(time.time()),
-            "properties": {"7": "10"},
-            "names": {"7": "Only in b"},
-        }))
+        b_cache.write_text(json.dumps({"entries": {
+            principal_of(FakeCreds()): {
+                "fetched_at": int(time.time()),
+                "properties": {"7": "10"},
+                "names": {"7": "Only in b"},
+            },
+        }}))
         inner = self._api(monkeypatch, [SUMMARIES_RESP])
 
         a = self._show("a")

@@ -151,9 +151,10 @@ class TestPrincipalOf:
 # ADC credentials reach the guard
 # ---------------------------------------------------------------------------
 class TestAdcClient:
-    def test_admin_client_is_built_on_allowlist_http(self, no_gcloud_adc):
+    def test_admin_client_is_built_on_allowlist_http(self, no_gcloud_adc, monkeypatch):
         creds = _impersonated()
         _enable_adc(no_gcloud_adc, creds)
+        monkeypatch.setenv("GA_CLI_ALLOWED_PROPERTIES", "1")  # no allowlist, no guard (#44)
         http = get_admin_client()._http
         assert isinstance(http, AllowlistHttp)
         assert http.credentials is creds
@@ -250,9 +251,23 @@ class TestUnknownPrincipal:
         assert "not visible to these credentials" in str(exc.value)
         assert len(inner.request_sequence) == 2  # one lookup, one allowed call
 
+    def test_compute_engine_learns_its_email_before_the_disk_read(self):
+        """Refreshed first, so the map is saved under its email for the next process (#45).
+
+        The refresh is the one the API call would make anyway: the token is fetched once.
+        """
+        c, inner = _guarded(
+            _compute_engine(),
+            [GCE_INFO_RESP, GCE_TOKEN_RESP, SUMMARIES_RESP, _resp()],
+            _al(accounts={"10"}),
+        )
+        c.properties().get(name="properties/1").execute()
+        assert list(json.loads(get_allowlist_cache_path().read_text())["entries"]) == [SA]
+        assert len(inner.request_sequence) == 4  # metadata info + token, lookup, the call
+
     def test_known_principal_writes_disk_cache(self):
         # The control for the test above: same flow, an email the metadata server reported
         creds = _with_valid_token(_compute_engine(service_account_email=SA))
         c, _ = _guarded(creds, [SUMMARIES_RESP, _resp()], _al(accounts={"10"}))
         c.properties().get(name="properties/1").execute()
-        assert json.loads(get_allowlist_cache_path().read_text())["principal"] == SA
+        assert list(json.loads(get_allowlist_cache_path().read_text())["entries"]) == [SA]

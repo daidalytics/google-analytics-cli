@@ -139,10 +139,11 @@ class TestLoadAllowlist:
 
     @pytest.mark.parametrize(
         "text",
-        ['{"allowed_property_ids": ["1"],}', "", "[]"],
-        ids=["trailing comma", "empty file", "not an object"],
+        ['{"allowed_property_ids": ["1"],}', "[]"],
+        ids=["trailing comma", "not an object"],
     )
     def test_unreadable_config_fails_closed(self, tmp_path, text):
+        # An empty file is an empty config instead (test_config_cmd, #46)
         (tmp_path / "config.json").write_text(text)
         store.reset_cache()
         assert is_allowlist_configured()

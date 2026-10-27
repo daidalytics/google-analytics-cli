@@ -184,6 +184,30 @@ class TestExtractRefs:
         with pytest.raises(UnverifiableError):
             extract_refs(self.base + "properties/1", '{"property": "properties/1/../2"}')
 
+    @pytest.mark.parametrize("body", [
+        {"displayName": "properties/legacy"},
+        {"displayName": "accounts/42 shop", "description": "properties/999 copy"},
+        {"dimensionFilter": {"filter": {
+            "fieldName": "pagePath", "stringFilter": {"value": "properties/999"}}}},
+        {"dimensionFilter": {"filter": {
+            "fieldName": "pagePath", "inListFilter": {"values": ["accounts/42", "x"]}}}},
+        {"userQuery": "properties/999 sessions last week"},
+    ], ids=["display-name", "description", "string-filter", "in-list-filter", "chat-query"])
+    def test_free_text_fields_are_not_references(self, body):
+        """The API never reads these as resource names, so they can't deny a request (#46)."""
+        assert extract_refs(self.base + "properties/1", json.dumps(body)) == {("properties", "1")}
+
+    @pytest.mark.parametrize("body,ref", [
+        ({"parent": "accounts/2"}, ("accounts", "2")),
+        ({"audience": "properties/2/audiences/5"}, ("properties", "2")),
+        ({"sourceProperties": ["properties/2"]}, ("properties", "2")),
+        ({"title": "properties/2"}, ("properties", "2")),
+        ({"filter": {"value": "properties/2"}}, ("properties", "2")),
+    ], ids=["parent", "audience", "list", "unknown-field", "value-outside-a-filter"])
+    def test_every_other_field_is_still_checked(self, body, ref):
+        """Only the known free-text fields are skipped; anything else stays fail closed."""
+        assert ref in extract_refs(self.base + "properties/1", json.dumps(body))
+
 
 class TestClassifyRoute:
     @pytest.mark.parametrize("method,uri,route", [
@@ -263,8 +287,7 @@ class TestCache:
         cache = _cache(tmp_path, fetch)
         assert cache.lookup("2") == "20"
         assert fetch.calls == 1
-        data = json.loads((tmp_path / "allowlist-cache.json").read_text())
-        assert data["principal"] == "p1"
+        data = json.loads((tmp_path / "allowlist-cache.json").read_text())["entries"]["p1"]
         assert data["properties"] == {"1": "10", "3": "10", "2": "20"}
         assert data["names"]["1"] == "Shop A"
         assert data["account_names"]["20"] == "Client B"
@@ -298,6 +321,58 @@ class TestCache:
         _cache(tmp_path, fetch, principal="p2").lookup("1")
         assert fetch.calls == 1
 
+    def test_property_not_visible_refreshes_once_per_ttl(self, tmp_path):
+        """Not once per process: the fetch remembers what it didn't find (#45)."""
+        first = FakeFetch()
+        assert _cache(tmp_path, first).prop_map({"1", "999"}).get("999") is None
+        assert first.calls == 1
+        fetch = FakeFetch()
+        cache = _cache(tmp_path, fetch)  # the next process, within the hour
+        assert cache.prop_map({"1", "999"}).get("999") is None
+        assert cache.lookup("999") is None
+        assert fetch.calls == 0
+        assert _cache(tmp_path, fetch, now=1_000_000.0 + 3600).prop_map({"999"}) is not None
+        assert fetch.calls == 1  # expired with the map
+
+    def test_newly_expected_property_still_refreshes(self, tmp_path):
+        _cache(tmp_path, FakeFetch()).prop_map({"999"})
+        new = SUMMARIES + [{"account": "accounts/30", "propertySummaries": [
+            {"property": "properties/4"}]}]
+        fetch = FakeFetch(pages=new)
+        assert _cache(tmp_path, fetch).prop_map({"999", "4"})["4"] == "30"
+        assert fetch.calls == 1
+
+    def test_property_that_becomes_visible_leaves_the_unseen_list(self, tmp_path):
+        _cache(tmp_path, FakeFetch()).prop_map({"999"})
+        new = SUMMARIES + [{"account": "accounts/30", "propertySummaries": [
+            {"property": "properties/999"}]}]
+        _cache(tmp_path, FakeFetch(pages=new), now=1_000_000.0 + 3600).prop_map({"999"})
+        entry = json.loads((tmp_path / "allowlist-cache.json").read_text())["entries"]["p1"]
+        assert entry["properties"]["999"] == "30"
+        assert entry["unseen"] == []
+
+    def test_two_principals_share_the_file(self, tmp_path):
+        """Two identities alternating in one profile keep each other's map (#45)."""
+        _cache(tmp_path, FakeFetch(), principal="p1").lookup("1")
+        _cache(tmp_path, FakeFetch(), principal="p2").lookup("1")
+        for principal in ("p1", "p2"):
+            fetch = FakeFetch()
+            assert _cache(tmp_path, fetch, principal=principal).lookup("1") == "10"
+            assert fetch.calls == 0
+
+    def test_expired_entries_are_dropped_on_write(self, tmp_path):
+        _cache(tmp_path, FakeFetch(), principal="p1", now=1_000_000.0).lookup("1")
+        _cache(tmp_path, FakeFetch(), principal="p2", now=1_000_000.0 + 3600).lookup("1")
+        data = json.loads((tmp_path / "allowlist-cache.json").read_text())
+        assert list(data["entries"]) == ["p2"]
+
+    def test_single_principal_file_from_0_7_0_dev_is_miss(self, tmp_path):
+        (tmp_path / "allowlist-cache.json").write_text(json.dumps({
+            "principal": "p1", "fetched_at": 1_000_000, "properties": {"1": "10"}}))
+        fetch = FakeFetch()
+        assert _cache(tmp_path, fetch).lookup("1") == "10"
+        assert fetch.calls == 1
+
     def test_corrupt_file_is_miss(self, tmp_path):
         (tmp_path / "allowlist-cache.json").write_text("{not json")
         fetch = FakeFetch()
@@ -323,7 +398,7 @@ class TestCache:
         _cache(tmp_path, FakeFetch()).lookup("1")
         path = tmp_path / "allowlist-cache.json"
         data = json.loads(path.read_text())
-        data["names"] = bad
+        data["entries"]["p1"]["names"] = bad
         path.write_text(json.dumps(data))
         fetch = FakeFetch()
         assert _cache(tmp_path, fetch).lookup("1") == "10"
@@ -340,6 +415,17 @@ class TestCache:
         assert cache.prop_map({"4"})["4"] == "30"
         assert cache.prop_map({"999"}).get("999") is None
         assert fetch.calls == 1
+
+    def test_writes_through_symlink_without_temp_files(self, tmp_path):
+        """Same atomic write as config.json: a symlinked cache file stays a symlink."""
+        real = tmp_path / "elsewhere" / "allowlist-cache.json"
+        real.parent.mkdir()
+        real.write_text("{}")
+        (tmp_path / "allowlist-cache.json").symlink_to(real)
+        _cache(tmp_path, FakeFetch()).lookup("1")
+        assert (tmp_path / "allowlist-cache.json").is_symlink()
+        assert "1" in real.read_text()
+        assert sorted(p.name for p in real.parent.iterdir()) == ["allowlist-cache.json"]
 
     def test_unknown_principal_skips_disk(self, tmp_path):
         cache = _cache(tmp_path, FakeFetch(), principal=None)
@@ -398,6 +484,24 @@ class FakeCreds:
         self.token = f"t{self.refreshes + 1}"
 
 
+class MetadataCreds(FakeCreds):
+    """Compute Engine style: the account email is "default" until the first refresh."""
+
+    service_account_email = "default"
+    refresh_token = None
+    valid = False
+
+    def refresh(self, request):
+        super().refresh(request)
+        self.service_account_email = "sa@proj.iam.gserviceaccount.com"
+        self.valid = True
+
+    def before_request(self, request, method, url, headers):
+        if not self.valid:
+            self.refresh(request)
+        super().before_request(request, method, url, headers)
+
+
 def _al(accounts=None, properties=None, env_accounts=None, env_properties=None):
     sources = []
     if accounts is not None or properties is not None:
@@ -429,10 +533,10 @@ def _reset_guard_caches():
     reset_caches()
 
 
-def guarded(allowlist, responses, client=A):
+def guarded(allowlist, responses, client=A, creds=None):
     """A real client over AllowlistHttp over HttpMockSequence; returns (client, inner)."""
     inner = HttpMockSequence(responses)
-    http = AllowlistHttp(FakeCreds(), http=inner, allowlist=allowlist)
+    http = AllowlistHttp(creds or FakeCreds(), http=inner, allowlist=allowlist)
     if client == DA:
         c = build_from_document((SNAPSHOTS / "analyticsdata_v1alpha.json").read_text(), http=http)
     else:
@@ -501,6 +605,52 @@ class TestPropertyAllowlist:
         with pytest.raises(AllowlistError):
             c.properties().get(name="properties/998").execute()
         assert _sent(inner) == [("GET", "beta/accountSummaries")]
+
+    def test_client_derives_its_cache_once(self, monkeypatch):
+        """Not once per property while filtering a list (#45)."""
+        import ga_cli.api.allowlist_guard as guard
+
+        calls = []
+        real = guard.principal_of
+        monkeypatch.setattr(guard, "principal_of", lambda c: calls.append(c) or real(c))
+        listing = {"properties": [{"name": f"properties/{p}"} for p in ("1", "2", "3")]}
+        c, _ = guarded(_al(accounts={"10"}), [_resp(listing), SUMMARIES_RESP])
+        result = c.properties().list(filter="ancestor:accounts/10").execute()
+        assert [p["name"] for p in result["properties"]] == ["properties/1", "properties/3"]
+        assert len(calls) == 1
+
+    def test_metadata_credentials_fetch_once_and_persist(self, isolated_config_dir):
+        """Compute Engine names its account only after a refresh: one fetch, saved (#45)."""
+        c, inner = guarded(
+            _al(accounts={"10"}), [SUMMARIES_RESP, _resp(), _resp()], creds=MetadataCreds()
+        )
+        c.properties().get(name="properties/1").execute()
+        c.properties().get(name="properties/3").execute()
+        assert _sent(inner) == [
+            ("GET", "beta/accountSummaries"),
+            ("GET", "beta/properties/1"),
+            ("GET", "beta/properties/3"),
+        ]
+        assert "sa@proj.iam.gserviceaccount.com" in (
+            isolated_config_dir / "allowlist-cache.json").read_text()
+
+    def test_listed_property_not_visible_costs_one_lookup_per_hour(self):
+        """A root fence listing another client's property, seen from this login (#45)."""
+        c, inner = guarded(_al(properties={"1", "999"}), [_resp(TestFilter.ACCOUNTS),
+                                                        SUMMARIES_RESP])
+        assert [a["name"] for a in c.accounts().list().execute()["accounts"]] == ["accounts/10"]
+        reset_caches()  # the next process
+        c, inner = guarded(_al(properties={"1", "999"}), [_resp(TestFilter.ACCOUNTS)])
+        assert [a["name"] for a in c.accounts().list().execute()["accounts"]] == ["accounts/10"]
+        assert _sent(inner) == [("GET", "beta/accounts")]
+
+    def test_metadata_credentials_read_the_cache_in_the_next_process(self):
+        guarded(_al(accounts={"10"}), [SUMMARIES_RESP, _resp()], creds=MetadataCreds())[0] \
+            .properties().get(name="properties/1").execute()
+        reset_caches()  # a new process, with fresh credentials that say "default" again
+        c, inner = guarded(_al(accounts={"10"}), [_resp()], creds=MetadataCreds())
+        c.properties().get(name="properties/1").execute()
+        assert _sent(inner) == [("GET", "beta/properties/1")]
 
     def test_denial_of_property_only_allowlist_makes_no_lookup(self):
         c, inner = guarded(_al(properties={"1"}), [])
@@ -765,6 +915,19 @@ class TestFilter:
         assert isinstance(once, bytes)
         assert http._filter(Route.ACCOUNTS_LIST, once, self.URI) == once
 
+    @pytest.mark.parametrize(
+        "content",
+        [b"\xff\xfe not utf-8", b"<html>", b'[{"name": "accounts/20"}]', "not json"],
+        ids=["not-utf8", "html", "json-array", "str"],
+    )
+    def test_unreadable_list_response_fails_closed(self, content):
+        """A list response the filter can't read is never passed through unfiltered (#46)."""
+        http = AllowlistHttp(FakeCreds(), http=HttpMockSequence([]),
+                             allowlist=_al(accounts={"10"}))
+        with pytest.raises(AllowlistError) as exc:
+            http._filter(Route.ACCOUNTS_LIST, content, self.URI)
+        assert exc.value.resource == "/v1beta/accounts"
+
     def test_non_2xx_untouched(self):
         from googleapiclient.errors import HttpError
 
@@ -772,11 +935,6 @@ class TestFilter:
         with pytest.raises(HttpError) as exc:
             c.accounts().list().execute()
         assert b"accounts/20" in exc.value.content
-
-    def test_non_json_untouched(self):
-        http = AllowlistHttp(FakeCreds(), http=HttpMockSequence([]),
-                             allowlist=_al(accounts={"10"}))
-        assert http._filter(Route.ACCOUNTS_LIST, b"<html>", self.URI) == b"<html>"
 
     def test_paginate_all_crosses_empty_page(self):
         from ga_cli.utils.pagination import paginate_all

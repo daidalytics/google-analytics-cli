@@ -4,7 +4,8 @@ Provides authenticated clients for the Analytics Admin API and Data API.
 Uses google-api-python-client (REST-based), consistent with GTM CLI's use
 of the googleapis npm package.
 
-Credential resolution (SPEC B4), implemented by ``resolve_credentials()``:
+Credential resolution (B4 in the 0.6.0 spec, ``git show 7594078:SPEC.md``),
+implemented by ``resolve_credentials()``:
 
 Default profile:
 1. ``GA_CLI_SERVICE_ACCOUNT``
@@ -37,6 +38,7 @@ from googleapiclient.http import build_http
 
 from ..auth.credentials import get_valid_credentials, has_credentials
 from ..auth.service_account import get_service_account_credentials
+from ..config.allowlist import load_allowlist
 from ..config.constants import (
     OAUTH_SCOPES,
     get_active_profile,
@@ -46,10 +48,11 @@ from ..config.constants import (
 from ..utils.errors import (
     ADC_IMPERSONATE_COMMAND,
     ADC_LOGIN_COMMAND,
+    AllowlistConfigError,
     NotAuthenticatedError,
     ProfileNotFoundError,
 )
-from .allowlist_guard import AllowlistCache, AllowlistHttp, cache_for
+from .allowlist_guard import AllowlistCache, AllowlistHttp, cache_for, reset_caches
 
 AuthMethod = Literal["service-account", "oauth", "adc"]
 
@@ -163,12 +166,25 @@ def _get_credentials() -> Credentials:
 
 
 def _build(service: str, version: str, **kwargs) -> Resource:
-    """Build a client whose every request goes through the allowlist guard.
+    """Build a client; with an allowlist set, every request goes through the guard.
 
-    Raises AllowlistError if the configured allowlist is malformed.
+    Without one, build exactly as 0.6.0 did: passing http= makes googleapiclient skip
+    its own transport setup, including the GOOGLE_API_USE_MTLS_ENDPOINT switch (#44).
+
+    Raises AllowlistConfigError if the configured allowlist is malformed, or if it is
+    set together with GOOGLE_API_USE_MTLS_ENDPOINT=always, which the guard can't honour.
     """
     creds = _get_credentials()
-    http = AllowlistHttp(creds, http=build_http())
+    allowlist = load_allowlist()
+    if not allowlist.enabled:
+        return build(service, version, credentials=creds, **kwargs)
+    if os.environ.get("GOOGLE_API_USE_MTLS_ENDPOINT") == "always":
+        raise AllowlistConfigError(
+            "GOOGLE_API_USE_MTLS_ENDPOINT",
+            "GOOGLE_API_USE_MTLS_ENDPOINT=always isn't supported while an allowlist is set: "
+            "allowlisted requests can only go to the regular endpoint",
+        )
+    http = AllowlistHttp(creds, http=build_http(), allowlist=allowlist)
     return build(service, version, http=http, **kwargs)
 
 
@@ -237,7 +253,10 @@ def get_allowlist_cache() -> AllowlistCache:
 
 
 def clear_client_cache() -> None:
-    """Clear cached API clients (e.g., after re-authentication)."""
+    """Clear cached API clients (e.g., after re-authentication).
+
+    Also forgets the allowlist caches, which hold the old credentials (#45).
+    """
     global _cached_admin_client, _cached_admin_alpha_client
     global _cached_data_client, _cached_data_alpha_client
     global _last_auth_method
@@ -246,3 +265,4 @@ def clear_client_cache() -> None:
     _cached_data_client = None
     _cached_data_alpha_client = None
     _last_auth_method = None
+    reset_caches()

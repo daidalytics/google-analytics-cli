@@ -11,9 +11,7 @@ from __future__ import annotations
 import enum
 import hashlib
 import json
-import os
 import re
-import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
@@ -22,6 +20,7 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 from google_auth_httplib2 import AuthorizedHttp
 
 from ..config.constants import ALLOWLIST_CACHE_TTL_SECONDS, get_allowlist_cache_path
+from ..config.store import write_json_atomic
 
 GA_HOSTS = ("analyticsadmin.googleapis.com", "analyticsdata.googleapis.com")
 DISCOVERY_HOST = "www.googleapis.com"
@@ -98,12 +97,21 @@ def _path_refs(path: str, where: str) -> set[Ref]:
     return {_check_id(kind, tail, where) for kind, tail in _PATH_REF.findall(path)}
 
 
+# Body fields the API only ever reads as free text: a display name, a description, a
+# filter's match values, a chat question. A value there that starts with "properties/"
+# names no resource, so it is skipped (#46). Every other field, known or not, is checked.
+_FREE_TEXT_KEYS = frozenset(
+    {"displayName", "description", "stringFilter", "inListFilter", "userQuery"}
+)
+
+
 def _body_strings(value: Any):
     if isinstance(value, str):
         yield value
     elif isinstance(value, dict):
-        for v in value.values():
-            yield from _body_strings(v)
+        for k, v in value.items():
+            if k not in _FREE_TEXT_KEYS:
+                yield from _body_strings(v)
     elif isinstance(value, list):
         for v in value:
             yield from _body_strings(v)
@@ -142,7 +150,8 @@ def extract_refs(uri: str, body: Any = None) -> set[Ref]:
     """Collect every account/property the request names.
 
     Sources: the raw and percent-decoded path, the decoded query values, and every JSON
-    body string that starts with ``accounts/`` or ``properties/``. Raises UnverifiableError
+    body string that starts with ``accounts/`` or ``properties/``, outside the free-text
+    fields (``_FREE_TEXT_KEYS``). Raises UnverifiableError
     when a reference can't be read cleanly (e.g. ``properties/123%2F..%2F999``).
     """
     parts = urlsplit(uri)
@@ -186,6 +195,24 @@ def principal_of(credentials: Any) -> Optional[str]:
     return None
 
 
+def identify(credentials: Any, http: Any) -> Optional[str]:
+    """principal_of(), refreshing first if only a refresh names the account.
+
+    Compute Engine credentials report "default" until their first refresh, and every
+    process starts with fresh ones, so without this their map would never be read from
+    disk (#45). The token is needed for the API call anyway.
+    """
+    if (
+        principal_of(credentials) is None
+        and getattr(credentials, "service_account_email", None) == "default"
+        and not getattr(credentials, "valid", True)
+    ):
+        from google_auth_httplib2 import Request
+
+        credentials.refresh(Request(http))
+    return principal_of(credentials)
+
+
 def fetch_account_summaries(credentials: Any, http: Any) -> list[dict]:
     """All account summaries, through a plain AuthorizedHttp that bypasses the guard.
 
@@ -210,6 +237,9 @@ class AllowlistCache:
     Each property maps to the account of the summary it sits in, never to its
     ``parent`` (which is ``properties/N`` for subproperties). An unknown property
     triggers at most one refresh per process.
+
+    ``identify`` tells an unknown principal later: before reading the disk, and after a
+    fetch, which refreshes the credentials.
     """
 
     def __init__(
@@ -219,8 +249,10 @@ class AllowlistCache:
         path: Optional[Path] = None,
         ttl: int = ALLOWLIST_CACHE_TTL_SECONDS,
         clock: Callable[[], float] = time.time,
+        identify: Optional[Callable[[], Optional[str]]] = None,
     ):
         self.principal = principal
+        self._identify = identify
         self._fetch = fetch
         self._path = path
         self._ttl = ttl
@@ -230,56 +262,76 @@ class AllowlistCache:
         self.properties: dict[str, str] = {}
         self.names: dict[str, str] = {}
         self.account_names: dict[str, str] = {}
+        # Expected properties the last fetch didn't find, so later processes don't
+        # refetch for them until the map expires (#45)
+        self.unseen: set[str] = set()
         self.fetched_at: Optional[float] = None
 
     @property
     def path(self) -> Path:
         return self._path or get_allowlist_cache_path()
 
-    def _load_disk(self) -> bool:
-        if self.principal is None:
+    def _learn_principal(self) -> None:
+        if self.principal is None and self._identify is not None:
+            self.principal = self._identify()
+
+    def _fresh(self, fetched_at: Any) -> bool:
+        try:
+            age = self._clock() - float(fetched_at)
+        except (TypeError, ValueError):
             return False
+        return 0 <= age < self._ttl
+
+    def _read_entries(self) -> dict:
+        """The file's maps, one per principal (several logins can share a profile, #45)."""
         try:
             data = json.loads(self.path.read_text())
-            fetched_at = float(data["fetched_at"])
-            properties = data["properties"]
-            names = data.get("names") or {}
-            account_names = data.get("account_names") or {}
-            if data.get("principal") != self.principal or not all(
-                isinstance(d, dict) for d in (properties, names, account_names)
-            ):
-                return False
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError):
+            return {}
+        entries = data.get("entries") if isinstance(data, dict) else None
+        return entries if isinstance(entries, dict) else {}
+
+    def _load_disk(self) -> bool:
+        self._learn_principal()
+        if self.principal is None:
             return False
-        age = self._clock() - fetched_at
-        if age < 0 or age >= self._ttl:
+        entry = self._read_entries().get(self.principal)
+        try:
+            fetched_at = entry["fetched_at"]
+            properties = entry["properties"]
+            names = entry.get("names") or {}
+            account_names = entry.get("account_names") or {}
+            unseen = entry.get("unseen") or []
+        except (KeyError, TypeError, AttributeError):
             return False
+        if not self._fresh(fetched_at) or not all(
+            isinstance(d, dict) for d in (properties, names, account_names)
+        ) or not (isinstance(unseen, list) and all(isinstance(u, str) for u in unseen)):
+            return False
+        self.unseen = set(unseen)
         self.properties = {str(k): str(v) for k, v in properties.items()}
         self.names = names
         self.account_names = account_names
-        self.fetched_at = fetched_at
+        self.fetched_at = float(fetched_at)
         return True
 
     def _save_disk(self) -> None:
         if self.principal is None:
             return
-        data = {
-            "principal": self.principal,
+        # Keep other principals' maps while they're fresh; drop expired ones
+        entries = {
+            p: e for p, e in self._read_entries().items()
+            if p != self.principal and isinstance(e, dict) and self._fresh(e.get("fetched_at"))
+        }
+        entries[self.principal] = {
             "fetched_at": int(self.fetched_at or 0),
             "properties": self.properties,
             "names": self.names,
             "account_names": self.account_names,
+            "unseen": sorted(self.unseen),
         }
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".allowlist-cache.")
-            try:
-                with os.fdopen(fd, "w") as f:
-                    json.dump(data, f)
-                os.replace(tmp, self.path)
-            except BaseException:
-                Path(tmp).unlink(missing_ok=True)
-                raise
+            write_json_atomic(self.path, {"entries": entries})
         except OSError:
             pass  # best effort: the in-memory map still serves this process
 
@@ -290,6 +342,7 @@ class AllowlistCache:
         later call in the same process tries again instead of seeing an empty map.
         """
         summaries = self._fetch()
+        self._learn_principal()
         properties: dict[str, str] = {}
         names: dict[str, str] = {}
         account_names: dict[str, str] = {}
@@ -308,6 +361,7 @@ class AllowlistCache:
         self.properties = properties
         self.names = names
         self.account_names = account_names
+        self.unseen -= properties.keys()
         self.fetched_at = self._clock()
         self._loaded = True
         self._refreshed = True
@@ -324,11 +378,19 @@ class AllowlistCache:
         """The whole map, refreshed once per process if it lacks one of ``expected``.
 
         Pass the allowlisted property IDs, so a property created and allowlisted since
-        the cache was written is found without waiting for the TTL.
+        the cache was written is found without waiting for the TTL. One the last fetch
+        already didn't find (no access, or another login's) waits for the TTL instead.
         """
         self.ensure_loaded()
-        if not self._refreshed and any(pid not in self.properties for pid in expected):
+        missing = {pid for pid in expected if pid not in self.properties}
+        if not self._refreshed and missing - self.unseen:
             self.refresh()
+        if self._refreshed:
+            # This process's fetch is current: remember what it didn't find
+            missing -= self.properties.keys()
+            if missing - self.unseen:
+                self.unseen |= missing
+                self._save_disk()
         return self.properties
 
     def lookup(self, pid: str) -> Optional[str]:
@@ -347,7 +409,10 @@ def cache_for(credentials: Any, http: Any) -> AllowlistCache:
     if key not in _caches:
         # path= freezes the file: a later profile switch must not redirect this cache
         _caches[key] = AllowlistCache(
-            principal, lambda: fetch_account_summaries(credentials, http), path=path
+            principal,
+            lambda: fetch_account_summaries(credentials, http),
+            path=path,
+            identify=lambda: identify(credentials, http),
         )
     return _caches[key]
 
@@ -387,6 +452,7 @@ class AllowlistHttp(AuthorizedHttp):
 
             allowlist = load_allowlist()
         self.allowlist = allowlist
+        self._cache: Optional[AllowlistCache] = None
 
     def request(self, uri, method="GET", body=None, headers=None, *args, **kwargs):
         if not self.allowlist.enabled:
@@ -402,7 +468,10 @@ class AllowlistHttp(AuthorizedHttp):
 
     @property
     def cache(self) -> AllowlistCache:
-        return cache_for(self.credentials, self.http)
+        # Once per client: its profile and credentials don't change (#45)
+        if self._cache is None:
+            self._cache = cache_for(self.credentials, self.http)
+        return self._cache
 
     def _deny(self, resource: str, reason: str):
         from ..utils.errors import AllowlistError
@@ -501,14 +570,17 @@ class AllowlistHttp(AuthorizedHttp):
     # -- response filters -----------------------------------------------------
 
     def _filter(self, route: Route, content: Any, uri: str) -> Any:
-        """Drop disallowed items from a list response. Idempotent; keeps other keys."""
-        raw = content.decode("utf-8") if isinstance(content, bytes) else content
+        """Drop disallowed items from a list response. Idempotent; keeps other keys.
+
+        A response it can't read is denied, never passed through unfiltered.
+        """
         try:
+            raw = content.decode("utf-8") if isinstance(content, bytes) else content
             data = json.loads(raw)
-        except (ValueError, TypeError, UnicodeDecodeError):
-            return content
+        except (ValueError, TypeError):  # ValueError includes UnicodeDecodeError
+            data = None
         if not isinstance(data, dict):
-            return content
+            self._deny(urlsplit(uri).path, "can't read the list response to filter it")
 
         if route is Route.PROPERTIES_LIST:
             account = _filter_account(uri)
