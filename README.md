@@ -433,7 +433,8 @@ ga --profile client-a config set allowed_account_ids 111  # client-a: account 11
   it may hold the fence. An unreadable `~/.config/ga-cli/profiles/NAME/config.json` blocks only
   that profile.
   Every API command in a blocked profile exits 5, even if you never set an allowlist, and
-  `ga config` refuses to overwrite the unreadable file. Fix the file by hand.
+  `ga config` refuses to overwrite the unreadable file. Fix the file by hand. An empty file
+  isn't unreadable: it counts as an empty config.
 - **Environment variables:** `GA_CLI_ALLOWED_ACCOUNTS` / `GA_CLI_ALLOWED_PROPERTIES` take
   comma-separated IDs. On top of a config-file allowlist, they narrow it for one session (for
   example when launching an agent) but never widen it. An env var set to an empty string allows
@@ -447,10 +448,15 @@ ga --profile client-a config set allowed_account_ids 111  # client-a: account 11
   `~/.config/ga-cli/profiles/NAME/allowlist-cache.json` for a named one. `ga auth login` /
   `logout` clear that profile's cache. If you move a property to another account, `ga` can keep
   placing it in its old account until the cache expires, so an account allowlist may still allow
-  it (or still block it) for up to an hour. Delete the cache file to apply the move straight
-  away. With gcloud ADC credentials whose identity `ga` can't determine (for example Workload
-  Identity Federation without service-account impersonation), nothing is written to disk, so
-  each command that needs the lookup makes one extra `accountSummaries` call.
+  it (or still block it) for up to an hour. Likewise, a property `ga` already looked for and
+  couldn't see stays blocked for up to an hour after you're given access to it. Delete the cache
+  file to apply either change straight away. With gcloud ADC credentials whose identity `ga`
+  can't determine (for example Workload Identity Federation without service-account
+  impersonation), nothing is written to disk, so each command that needs the lookup makes one
+  extra `accountSummaries` call.
+- **mTLS:** with an allowlist set, `GOOGLE_API_USE_MTLS_ENDPOINT=always` isn't supported, and
+  API commands exit 5 rather than use the regular endpoint. Without an allowlist, `ga` honours
+  it as before.
 
 > **A guardrail, not a security boundary.** The allowlist stops mistakes and keeps a well-meaning
 > agent on track. It can't stop a process that wants to get around it: anything holding your
