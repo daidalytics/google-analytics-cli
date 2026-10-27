@@ -10,7 +10,9 @@ from typing import Optional
 import typer
 
 from ..config.allowlist import Allowlist, AllowlistSource, is_allowlist_configured, load_allowlist
+from ..config.constants import get_active_profile, is_named_profile, profile_exists
 from ..utils import handle_error, info, output, resolve_output_format
+from ..utils.errors import ProfileNotFoundError
 
 allowlist_app = typer.Typer(
     name="allowlist",
@@ -45,11 +47,18 @@ def _effective_properties(allowlist: Allowlist, cache) -> list[dict]:
 
 
 def build_report(allowlist: Allowlist, cache) -> dict:
+    profile = get_active_profile()
     by_name = {s.name: s for s in allowlist.sources}
+    # "profile" only in a named profile: the default profile's file is "config"
+    sources = {"config": _source_dict(by_name.get("config"))}
+    if is_named_profile():
+        sources["profile"] = _source_dict(by_name.get(f"profile {profile}"))
+    sources["env"] = _source_dict(by_name.get("env"))
     fetched_at = cache.fetched_at or 0
     return {
         "enabled": True,
-        "sources": {name: _source_dict(by_name.get(name)) for name in ("config", "env")},
+        "profile": profile,
+        "sources": sources,
         "effective": {
             "accounts": sorted(allowlist.allowed_accounts() or (), key=int),
             "properties": _effective_properties(allowlist, cache),
@@ -76,6 +85,11 @@ def show_cmd(
     """Show the active allowlist, its sources and the properties it allows."""
     try:
         effective_format = resolve_output_format(output_format)
+        # Like `config get`: a typo in --profile exits 2 instead of reading as the
+        # root allowlist alone, or as "off", or exiting 5 on an unreadable root file
+        profile = get_active_profile()
+        if not profile_exists(profile):
+            raise ProfileNotFoundError.for_profile(profile)
         if not is_allowlist_configured():
             output({"enabled": False}, effective_format)
             return
@@ -97,7 +111,13 @@ def show_cmd(
         output(
             {
                 "Enabled": "yes (a request must pass every source)",
-                "Config file": _describe_source(sources.get("config")),
+                "Profile": profile,
+                "Config file (all profiles)": _describe_source(sources.get("config")),
+                # None leaves the row out: the default profile's file is the config file
+                "Profile file": (
+                    _describe_source(sources.get(f"profile {profile}"))
+                    if is_named_profile() else None
+                ),
                 "Environment": _describe_source(sources.get("env")),
                 "Allowed accounts": ", ".join(
                     f"{a} ({cache.account_names[a]})" if cache.account_names.get(a) else a

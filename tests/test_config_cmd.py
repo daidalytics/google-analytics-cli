@@ -362,6 +362,137 @@ class TestAllowlistKeys:
 
 
 # ---------------------------------------------------------------------------
+# Allowlist keys per profile: the confirmation names the scope (SPEC D1)
+# ---------------------------------------------------------------------------
+class TestAllowlistScope:
+    GLOBAL = "(all profiles)"
+    NARROWS = "(profile client-a, narrows the global allowlist)"
+
+    def _tty(self, monkeypatch, tty=True, confirm=True):
+        import ga_cli.commands.config_cmd as config_cmd
+
+        monkeypatch.setattr(config_cmd, "_stdin_is_tty", lambda: tty)
+        mock_confirm = MagicMock()
+        mock_confirm.return_value.ask.return_value = confirm
+        monkeypatch.setattr("questionary.confirm", mock_confirm)
+        return mock_confirm
+
+    @staticmethod
+    def _text(result):
+        # Rich wraps long lines at the terminal width
+        return " ".join(result.output.split())
+
+    @staticmethod
+    def _profile_file(root):
+        return root / "profiles" / "client-a" / "config.json"
+
+    def test_default_profile_set_names_all_profiles(self, monkeypatch, tmp_path):
+        self._tty(monkeypatch)
+        result = runner.invoke(app, ["config", "set", "allowed_account_ids", "222,111"])
+        assert result.exit_code == 0, result.output
+        assert f"allowed_account_ids {self.GLOBAL}: (not set) → 111, 222" in self._text(result)
+        assert json.loads((tmp_path / "config.json").read_text()) == {
+            "allowed_account_ids": ["111", "222"]
+        }
+
+    def test_named_profile_set_writes_profile_file(self, monkeypatch, tmp_path):
+        save_config(UserConfig(allowed_account_ids=["5"]))
+        root_before = (tmp_path / "config.json").read_text()
+        self._tty(monkeypatch)
+        result = runner.invoke(
+            app, ["--profile", "client-a", "config", "set", "allowed_account_ids", "1"]
+        )
+        assert result.exit_code == 0, result.output
+        # The old value is the profile's own, not the root's
+        assert f"allowed_account_ids {self.NARROWS}: (not set) → 1" in self._text(result)
+        assert self.GLOBAL not in self._text(result)
+        assert json.loads(self._profile_file(tmp_path).read_text()) == {
+            "allowed_account_ids": ["1"]
+        }
+        assert (tmp_path / "config.json").read_text() == root_before
+
+    def test_named_profile_set_without_tty_refused(self, monkeypatch, tmp_path):
+        confirm = self._tty(monkeypatch, tty=False)
+        result = runner.invoke(
+            app, ["--profile", "client-a", "config", "set", "allowed_property_ids", "1"]
+        )
+        assert result.exit_code == 1
+        assert "can only be changed interactively" in result.output
+        assert not (tmp_path / "profiles" / "client-a").exists()
+        confirm.assert_not_called()
+
+    def test_named_profile_set_declined(self, monkeypatch, tmp_path):
+        self._tty(monkeypatch, confirm=False)
+        result = runner.invoke(
+            app, ["--profile", "client-a", "config", "set", "allowed_property_ids", "1"]
+        )
+        assert result.exit_code == 0
+        assert "Allowlist unchanged" in result.output
+        assert not self._profile_file(tmp_path).exists()
+
+    def test_named_profile_unset_names_scope(self, monkeypatch, tmp_path):
+        save_config(UserConfig(allowed_account_ids=["5"]))
+        path = self._profile_file(tmp_path)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"allowed_account_ids": ["1"]}))
+        self._tty(monkeypatch)
+        result = runner.invoke(
+            app, ["--profile", "client-a", "config", "unset", "allowed_account_ids"]
+        )
+        assert result.exit_code == 0, result.output
+        assert f"allowed_account_ids {self.NARROWS}: 1 → (not set)" in self._text(result)
+        assert json.loads(path.read_text()) == {}
+        assert json.loads((tmp_path / "config.json").read_text()) == {
+            "allowed_account_ids": ["5"]
+        }
+
+    def test_default_profile_reset_names_scope(self, monkeypatch):
+        save_config(UserConfig(allowed_account_ids=["1"], allowed_property_ids=["2"]))
+        self._tty(monkeypatch)
+        result = runner.invoke(app, ["config", "reset"])
+        assert result.exit_code == 0, result.output
+        text = self._text(result)
+        assert f"allowed_account_ids {self.GLOBAL}: 1 → (not set)" in text
+        assert f"allowed_property_ids {self.GLOBAL}: 2 → (not set)" in text
+
+    def test_named_profile_reset_names_scope(self, monkeypatch, tmp_path):
+        path = self._profile_file(tmp_path)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"allowed_property_ids": ["2"]}))
+        self._tty(monkeypatch)
+        result = runner.invoke(app, ["--profile", "client-a", "config", "reset"])
+        assert result.exit_code == 0, result.output
+        assert f"allowed_property_ids {self.NARROWS}: 2 → (not set)" in self._text(result)
+        assert json.loads(path.read_text()) == {}
+
+    def test_named_profile_unreadable_file_refused(self, monkeypatch, tmp_path):
+        path = self._profile_file(tmp_path)
+        path.parent.mkdir(parents=True)
+        path.write_text("{oops")
+        confirm = self._tty(monkeypatch)
+        result = runner.invoke(
+            app, ["--profile", "client-a", "config", "set", "allowed_account_ids", "1"]
+        )
+        assert result.exit_code == 1
+        assert "Fix the file first" in self._text(result)
+        assert path.read_text() == "{oops"
+        confirm.assert_not_called()
+
+    def test_named_profile_writes_past_unreadable_root(self, monkeypatch, tmp_path):
+        """Only the unreadable file is protected; the profile's own file isn't it."""
+        (tmp_path / "config.json").write_text("{oops")
+        self._tty(monkeypatch)
+        result = runner.invoke(
+            app, ["--profile", "client-a", "config", "set", "allowed_account_ids", "1"]
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(self._profile_file(tmp_path).read_text()) == {
+            "allowed_account_ids": ["1"]
+        }
+        assert (tmp_path / "config.json").read_text() == "{oops"
+
+
+# ---------------------------------------------------------------------------
 # Unreadable config.json: never overwritten
 # ---------------------------------------------------------------------------
 class TestUnreadableConfig:

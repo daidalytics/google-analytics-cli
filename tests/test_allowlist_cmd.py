@@ -142,3 +142,133 @@ class TestShowEnabled:
         err = json.loads(result.stderr)
         assert err["category"] == "allowlist_error"
         assert err["resource"] == "config.json"
+
+
+def _write_profile_config(root, profile, data):
+    path = root / "profiles" / profile / "config.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(data if isinstance(data, str) else json.dumps(data))
+    return path
+
+
+def _show_in(profile, *args):
+    return runner.invoke(app, ["--profile", profile, "allowlist", "show", *args])
+
+
+class TestShowProfiles:
+    """The root config.json is the fence for every profile; a profile narrows it."""
+
+    def test_default_profile_has_no_profile_source(self, api):
+        save_config(UserConfig(allowed_account_ids=["10"]))
+        data = json.loads(_show("-o", "json").stdout)
+        assert list(data) == ["enabled", "profile", "sources", "effective", "cache"]
+        assert data["profile"] == "default"
+        assert data["sources"] == {
+            "config": {"accounts": ["10"], "properties": None},
+            "env": None,
+        }
+
+    def test_named_profile_json(self, api, tmp_path):
+        save_config(UserConfig(allowed_account_ids=["10", "20"]))
+        _write_profile_config(tmp_path, "client-a", {"allowed_account_ids": ["10"]})
+        result = _show_in("client-a", "-o", "json")
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert data["enabled"] is True
+        assert data["profile"] == "client-a"
+        assert data["sources"] == {
+            "config": {"accounts": ["10", "20"], "properties": None},
+            "profile": {"accounts": ["10"], "properties": None},
+            "env": None,
+        }
+        assert list(data["sources"]) == ["config", "profile", "env"]
+        assert data["effective"]["accounts"] == ["10"]
+        assert [p["id"] for p in data["effective"]["properties"]] == ["1", "3"]
+
+    def test_named_profile_without_own_keys(self, api, tmp_path):
+        save_config(UserConfig(allowed_account_ids=["20"]))
+        _write_profile_config(tmp_path, "client-a", {"default_property_id": "2"})
+        result = _show_in("client-a", "-o", "json")
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert data["sources"]["profile"] is None
+        assert data["effective"]["accounts"] == ["20"]
+        assert [p["id"] for p in data["effective"]["properties"]] == ["2"]
+
+    def test_named_profile_guard_off(self, tmp_path, monkeypatch):
+        (tmp_path / "profiles" / "client-a").mkdir(parents=True)
+        monkeypatch.setattr(
+            client_mod, "_get_credentials", lambda: pytest.fail("no API call expected")
+        )
+        result = _show_in("client-a", "-o", "json")
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout) == {"enabled": False}
+
+    def test_named_profile_table(self, api, tmp_path):
+        save_config(UserConfig(allowed_account_ids=["10", "20"]))
+        _write_profile_config(tmp_path, "client-a", {"allowed_account_ids": ["10"]})
+        result = _show_in("client-a")
+        assert result.exit_code == 0, result.output
+        text = " ".join(result.stdout.split())
+        assert "client-a" in text
+        assert "accounts 10, 20" in text
+        assert "Profile File" in text  # key/value tables title-case the keys
+        assert "Shop A" in text and "Shop B" not in text
+
+    def test_default_profile_table_has_no_profile_file_row(self, api):
+        save_config(UserConfig(allowed_account_ids=["10"]))
+        result = _show()
+        assert result.exit_code == 0, result.output
+        assert "Profile File" not in result.stdout
+
+
+class TestShowUnknownProfile:
+    """A typo in --profile exits 2 before any credential or network access."""
+
+    @pytest.fixture(autouse=True)
+    def no_network(self, monkeypatch):
+        monkeypatch.setattr(
+            client_mod, "_get_credentials", lambda: pytest.fail("no credentials expected")
+        )
+        monkeypatch.setattr(client_mod, "build_http", lambda: pytest.fail("no http expected"))
+
+    def _assert_not_found(self, result, tmp_path):
+        assert result.exit_code == 2
+        assert "Profile 'clinet-a' does not exist" in result.output
+        assert not (tmp_path / "profiles" / "clinet-a").exists()
+
+    def test_guard_on(self, tmp_path):
+        save_config(UserConfig(allowed_account_ids=["10"]))
+        self._assert_not_found(_show_in("clinet-a"), tmp_path)
+
+    def test_guard_off(self, tmp_path):
+        self._assert_not_found(_show_in("clinet-a"), tmp_path)
+
+    def test_json_error(self, tmp_path):
+        result = _show_in("clinet-a", "-o", "json")
+        self._assert_not_found(result, tmp_path)
+        assert json.loads(result.stderr)["category"] == "auth_error"
+
+    def test_unreadable_root_still_exits_2(self, tmp_path):
+        (tmp_path / "config.json").write_text("{oops")
+        self._assert_not_found(_show_in("clinet-a", "-o", "json"), tmp_path)
+
+    def test_via_env_var(self, tmp_path, monkeypatch):
+        save_config(UserConfig(allowed_account_ids=["10"]))
+        monkeypatch.setenv("GA_CLI_PROFILE", "clinet-a")
+        self._assert_not_found(_show(), tmp_path)
+
+
+class TestShowUnreadableProfileConfig:
+    def test_unreadable_profile_file_exits_5(self, tmp_path):
+        _write_profile_config(tmp_path, "client-a", "{oops")
+        result = _show_in("client-a", "-o", "json")
+        assert result.exit_code == 5
+        assert json.loads(result.stderr)["resource"] == "profiles/client-a/config.json"
+
+    def test_unreadable_root_exits_5_in_named_profile(self, tmp_path):
+        (tmp_path / "config.json").write_text("{oops")
+        _write_profile_config(tmp_path, "client-a", {})
+        result = _show_in("client-a", "-o", "json")
+        assert result.exit_code == 5
+        assert json.loads(result.stderr)["resource"] == "config.json"
