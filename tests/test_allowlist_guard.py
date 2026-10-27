@@ -287,8 +287,7 @@ class TestCache:
         cache = _cache(tmp_path, fetch)
         assert cache.lookup("2") == "20"
         assert fetch.calls == 1
-        data = json.loads((tmp_path / "allowlist-cache.json").read_text())
-        assert data["principal"] == "p1"
+        data = json.loads((tmp_path / "allowlist-cache.json").read_text())["entries"]["p1"]
         assert data["properties"] == {"1": "10", "3": "10", "2": "20"}
         assert data["names"]["1"] == "Shop A"
         assert data["account_names"]["20"] == "Client B"
@@ -322,6 +321,28 @@ class TestCache:
         _cache(tmp_path, fetch, principal="p2").lookup("1")
         assert fetch.calls == 1
 
+    def test_two_principals_share_the_file(self, tmp_path):
+        """Two identities alternating in one profile keep each other's map (#45)."""
+        _cache(tmp_path, FakeFetch(), principal="p1").lookup("1")
+        _cache(tmp_path, FakeFetch(), principal="p2").lookup("1")
+        for principal in ("p1", "p2"):
+            fetch = FakeFetch()
+            assert _cache(tmp_path, fetch, principal=principal).lookup("1") == "10"
+            assert fetch.calls == 0
+
+    def test_expired_entries_are_dropped_on_write(self, tmp_path):
+        _cache(tmp_path, FakeFetch(), principal="p1", now=1_000_000.0).lookup("1")
+        _cache(tmp_path, FakeFetch(), principal="p2", now=1_000_000.0 + 3600).lookup("1")
+        data = json.loads((tmp_path / "allowlist-cache.json").read_text())
+        assert list(data["entries"]) == ["p2"]
+
+    def test_single_principal_file_from_0_7_0_dev_is_miss(self, tmp_path):
+        (tmp_path / "allowlist-cache.json").write_text(json.dumps({
+            "principal": "p1", "fetched_at": 1_000_000, "properties": {"1": "10"}}))
+        fetch = FakeFetch()
+        assert _cache(tmp_path, fetch).lookup("1") == "10"
+        assert fetch.calls == 1
+
     def test_corrupt_file_is_miss(self, tmp_path):
         (tmp_path / "allowlist-cache.json").write_text("{not json")
         fetch = FakeFetch()
@@ -347,7 +368,7 @@ class TestCache:
         _cache(tmp_path, FakeFetch()).lookup("1")
         path = tmp_path / "allowlist-cache.json"
         data = json.loads(path.read_text())
-        data["names"] = bad
+        data["entries"]["p1"]["names"] = bad
         path.write_text(json.dumps(data))
         fetch = FakeFetch()
         assert _cache(tmp_path, fetch).lookup("1") == "10"

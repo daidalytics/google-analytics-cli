@@ -272,43 +272,60 @@ class AllowlistCache:
         if self.principal is None and self._identify is not None:
             self.principal = self._identify()
 
+    def _fresh(self, fetched_at: Any) -> bool:
+        try:
+            age = self._clock() - float(fetched_at)
+        except (TypeError, ValueError):
+            return False
+        return 0 <= age < self._ttl
+
+    def _read_entries(self) -> dict:
+        """The file's maps, one per principal (several logins can share a profile, #45)."""
+        try:
+            data = json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            return {}
+        entries = data.get("entries") if isinstance(data, dict) else None
+        return entries if isinstance(entries, dict) else {}
+
     def _load_disk(self) -> bool:
         self._learn_principal()
         if self.principal is None:
             return False
+        entry = self._read_entries().get(self.principal)
         try:
-            data = json.loads(self.path.read_text())
-            fetched_at = float(data["fetched_at"])
-            properties = data["properties"]
-            names = data.get("names") or {}
-            account_names = data.get("account_names") or {}
-            if data.get("principal") != self.principal or not all(
-                isinstance(d, dict) for d in (properties, names, account_names)
-            ):
-                return False
-        except (OSError, ValueError, KeyError, TypeError):
+            fetched_at = entry["fetched_at"]
+            properties = entry["properties"]
+            names = entry.get("names") or {}
+            account_names = entry.get("account_names") or {}
+        except (KeyError, TypeError, AttributeError):
             return False
-        age = self._clock() - fetched_at
-        if age < 0 or age >= self._ttl:
+        if not self._fresh(fetched_at) or not all(
+            isinstance(d, dict) for d in (properties, names, account_names)
+        ):
             return False
         self.properties = {str(k): str(v) for k, v in properties.items()}
         self.names = names
         self.account_names = account_names
-        self.fetched_at = fetched_at
+        self.fetched_at = float(fetched_at)
         return True
 
     def _save_disk(self) -> None:
         if self.principal is None:
             return
-        data = {
-            "principal": self.principal,
+        # Keep other principals' maps while they're fresh; drop expired ones
+        entries = {
+            p: e for p, e in self._read_entries().items()
+            if p != self.principal and isinstance(e, dict) and self._fresh(e.get("fetched_at"))
+        }
+        entries[self.principal] = {
             "fetched_at": int(self.fetched_at or 0),
             "properties": self.properties,
             "names": self.names,
             "account_names": self.account_names,
         }
         try:
-            write_json_atomic(self.path, data)
+            write_json_atomic(self.path, {"entries": entries})
         except OSError:
             pass  # best effort: the in-memory map still serves this process
 

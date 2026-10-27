@@ -99,12 +99,13 @@ class TestShowEnabled:
 
     def test_fresh_cache_makes_no_call(self, api, tmp_path, monkeypatch):
         monkeypatch.setenv("GA_CLI_ALLOWED_ACCOUNTS", "10")
-        (tmp_path / "allowlist-cache.json").write_text(json.dumps({
-            "principal": principal_of(FakeCreds()),
-            "fetched_at": int(time.time()) - 60,
-            "properties": {"1": "10"},
-            "names": {"1": "Shop A"},
-        }))
+        (tmp_path / "allowlist-cache.json").write_text(json.dumps({"entries": {
+            principal_of(FakeCreds()): {
+                "fetched_at": int(time.time()) - 60,
+                "properties": {"1": "10"},
+                "names": {"1": "Shop A"},
+            },
+        }}))
         data = json.loads(_show("-o", "json").stdout)
         assert data["effective"]["properties"] == [
             {"id": "1", "account": "10", "displayName": "Shop A"}]
@@ -113,11 +114,12 @@ class TestShowEnabled:
 
     def test_stale_cache_is_refreshed(self, api, tmp_path, monkeypatch):
         monkeypatch.setenv("GA_CLI_ALLOWED_ACCOUNTS", "10")
-        (tmp_path / "allowlist-cache.json").write_text(json.dumps({
-            "principal": principal_of(FakeCreds()),
-            "fetched_at": int(time.time()) - 7200,
-            "properties": {"1": "10"},
-        }))
+        (tmp_path / "allowlist-cache.json").write_text(json.dumps({"entries": {
+            principal_of(FakeCreds()): {
+                "fetched_at": int(time.time()) - 7200,
+                "properties": {"1": "10"},
+            },
+        }}))
         data = json.loads(_show("-o", "json").stdout)
         assert [p["id"] for p in data["effective"]["properties"]] == ["1", "3"]
         assert len(api.request_sequence) == 1
