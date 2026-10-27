@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from .constants import get_config_path
+from .constants import get_config_dir, get_config_path
 
 OutputFormat = Literal["json", "table", "compact"]
 
@@ -38,42 +38,41 @@ class ConfigFileError(Exception):
     """config.json exists but couldn't be read, so it won't be overwritten."""
 
 
-# In-memory cache (same pattern as GTM CLI). It remembers which file it came
-# from, so switching profiles (which changes get_config_path()) can never serve
-# another profile's config.
-_cached_config: Optional[UserConfig] = None
-_cached_config_path: Optional[Path] = None
-# Why the cached file couldn't be read; None when it was read or doesn't exist
-_config_error: Optional[str] = None
+# In-memory cache (same pattern as GTM CLI), keyed by the file each entry came
+# from: the allowlist reads the root config.json next to a named profile's, and
+# switching profiles can never serve another profile's config. Each entry holds
+# the config and why the file couldn't be read (None when it was read or doesn't
+# exist).
+_cache: dict[Path, tuple[UserConfig, Optional[str]]] = {}
 
 
 def reset_cache() -> None:
     """Forget everything cached in memory (tests, and anything that edits the file directly)."""
-    global _cached_config, _cached_config_path, _config_error
-    _cached_config = None
-    _cached_config_path = None
-    _config_error = None
+    _cache.clear()
 
 
-def load_config() -> UserConfig:
-    """Load config from disk, merge with defaults, cache in memory.
+def get_root_config_path() -> Path:
+    """The config root's config.json: the default profile's, and the global allowlist's."""
+    return get_config_dir() / "config.json"
+
+
+def load_config_at(path: Path) -> UserConfig:
+    """Load the config.json at ``path``, merged with defaults and cached in memory.
 
     An unreadable file also loads as the defaults, so commands that only use defaults
-    keep working, but config_error() reports it: the allowlist fails closed on it and
-    save_config won't overwrite it.
+    keep working, but config_error(path) reports it: the allowlist fails closed on it
+    and save_config won't overwrite it.
     """
-    global _cached_config, _cached_config_path, _config_error
-    config_path = get_config_path()
-    if _cached_config is not None and _cached_config_path == config_path:
-        return _cached_config
+    cached = _cache.get(path)
+    if cached is not None:
+        return cached[0]
 
-    _cached_config_path = config_path
-    _config_error = None
+    reason = None
     try:
-        data = json.loads(config_path.read_text())
+        data = json.loads(path.read_text())
         if not isinstance(data, dict):
             raise ValueError("expected a JSON object")
-        _cached_config = UserConfig(
+        config = UserConfig(
             default_property_id=data.get("default_property_id"),
             default_account_id=data.get("default_account_id"),
             output_format=data.get("output_format"),
@@ -81,18 +80,28 @@ def load_config() -> UserConfig:
             allowed_property_ids=data.get("allowed_property_ids"),
         )
     except FileNotFoundError:
-        _cached_config = UserConfig()
+        config = UserConfig()
     except (OSError, ValueError) as e:  # includes JSONDecodeError and UnicodeDecodeError
-        _config_error = f"Can't read {config_path} ({e})"
-        _cached_config = UserConfig()
+        reason = f"Can't read {path} ({e})"
+        config = UserConfig()
 
-    return _cached_config
+    _cache[path] = (config, reason)
+    return config
 
 
-def config_error() -> Optional[str]:
-    """Why config.json couldn't be read, or None if it was read or doesn't exist."""
-    load_config()
-    return _config_error
+def load_config() -> UserConfig:
+    """Load the active profile's config.json (see load_config_at)."""
+    return load_config_at(get_config_path())
+
+
+def config_error(path: Optional[Path] = None) -> Optional[str]:
+    """Why a config.json couldn't be read, or None if it was read or doesn't exist.
+
+    ``path`` defaults to the active profile's config.json.
+    """
+    path = get_config_path() if path is None else path
+    load_config_at(path)
+    return _cache[path][1]
 
 
 def save_config(config: UserConfig) -> None:
@@ -102,11 +111,10 @@ def save_config(config: UserConfig) -> None:
     instead of overwriting a config.json that couldn't be read, which would silently
     drop any allowlist in it.
     """
-    global _cached_config, _cached_config_path
-    reason = config_error()
+    config_path = get_config_path()
+    reason = config_error(config_path)
     if reason:
         raise ConfigFileError(reason)
-    config_path = get_config_path()
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Only write non-None values
@@ -122,8 +130,7 @@ def save_config(config: UserConfig) -> None:
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
-    _cached_config = config
-    _cached_config_path = config_path
+    _cache[config_path] = (config, None)
 
 
 def update_config(**updates: object) -> UserConfig:

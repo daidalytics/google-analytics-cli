@@ -387,6 +387,33 @@ class TestAllowlistIntegration:
         assert result.exit_code == 0
 
 
+class TestAllowlistStatusAcrossProfiles:
+    """The root config.json's allowlist applies to every profile (SPEC D1)."""
+
+    def test_named_profile_enabled_by_root_allowlist(self, isolated_config_dir):
+        (isolated_config_dir / "config.json").write_text(json.dumps({"allowed_account_ids": ["1"]}))
+        (isolated_config_dir / "profiles" / "client-a").mkdir(parents=True)
+
+        data = _status_json("--profile", "client-a")
+
+        assert data["profile"] == "client-a"
+        assert data["allowlist"] == {"enabled": True}
+
+    def test_named_profile_own_allowlist_only_there(self, isolated_config_dir):
+        profile_dir = isolated_config_dir / "profiles" / "client-a"
+        profile_dir.mkdir(parents=True)
+        (profile_dir / "config.json").write_text(json.dumps({"allowed_property_ids": ["1"]}))
+
+        assert _status_json("--profile", "client-a")["allowlist"] == {"enabled": True}
+        assert _status_json()["allowlist"] == {"enabled": False}
+
+    def test_named_profile_unreadable_root_counts_as_enabled(self, isolated_config_dir):
+        (isolated_config_dir / "config.json").write_text("{oops")
+        (isolated_config_dir / "profiles" / "client-a").mkdir(parents=True)
+
+        assert _status_json("--profile", "client-a")["allowlist"] == {"enabled": True}
+
+
 class FakeADCCredentials:
     """Stands in for what google.auth.default() returns (gcloud user ADC)."""
 

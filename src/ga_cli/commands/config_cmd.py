@@ -9,7 +9,7 @@ from typing import Optional
 import typer
 
 from ..config.allowlist import parse_ids
-from ..config.constants import get_active_profile, profile_exists
+from ..config.constants import get_active_profile, is_named_profile, profile_exists
 from ..config.store import (
     ALLOWLIST_CONFIG_KEYS,
     VALID_CONFIG_KEYS,
@@ -67,13 +67,21 @@ def _require_readable_config() -> None:
         raise typer.Exit(1)
 
 
+def _allowlist_scope() -> str:
+    """Which profiles the active config.json's allowlist keys apply to."""
+    if is_named_profile():
+        return f"profile {get_active_profile()}, narrows the global allowlist"
+    return "all profiles"
+
+
 def _confirm_allowlist_change(changes: dict[str, tuple]) -> bool:
     """Show old → new and ask; False if the user declines. Terminal only."""
     _require_interactive()
     import questionary
 
+    scope = _allowlist_scope()
     for key, (old, new) in changes.items():
-        info(f"{key}: {_format_ids(old)} → {_format_ids(new)}")
+        info(f"{key} ({scope}): {_format_ids(old)} → {_format_ids(new)}")
     return bool(questionary.confirm("Change the allowlist?", default=False).ask())
 
 
