@@ -56,6 +56,6 @@ Legend: `∥` = runs in parallel with its siblings, each in its own worktree age
 ## Wave 3 (orchestrator, ask first)
 
 - [x] Push `feat/allowlist` to `origin`; open the new PR crediting @davidher-mann and #33 · #43; CI green on 3.10, 3.12, 3.13
-- [ ] Close #33 with a link and thanks
+- [x] Close #33 with a link and thanks
 - [x] Local `CLAUDE.md`: SPEC B4 pointer, allowlist convention, architecture tree
 - [x] SPEC status + this checklist updated once PR CI passes
