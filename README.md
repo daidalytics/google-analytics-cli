@@ -230,6 +230,7 @@ ga profiles delete old-client
 - **A named profile never falls back.** It uses only its own stored credentials and ignores `GA_CLI_SERVICE_ACCOUNT`, `GOOGLE_APPLICATION_CREDENTIALS`, the default profile, and gcloud ADC. An unknown profile name is an error (exit code 2) that lists the known profiles.
 - **The default profile is your existing setup:** the files directly in `~/.config/ga-cli/`. Nothing is migrated, and without `--profile` everything works as before. Named profiles live in `~/.config/ga-cli/profiles/NAME/`, and `ga --profile NAME config path` prints a profile's config file.
 - Profile names use letters, digits, `.`, `_`, and `-`, starting with a letter or digit. `default` means the default profile.
+- **An allowlist in the default profile applies to every profile.** A named profile's own allowlist can only narrow it. See [Allowlist](#allowlist).
 
 ### gcloud Application Default Credentials
 
@@ -398,35 +399,68 @@ ga config set allowed_property_ids 250400352,250400353 # or single properties
 ga allowlist show                                      # what is allowed right now
 ```
 
+An allowlist can come from three sources, and a request must pass every source that is set:
+
+| Source | Set with | Stored in | Applies to |
+|--------|----------|-----------|------------|
+| `config` | `ga config set allowed_…` in the default profile | `~/.config/ga-cli/config.json` | every profile |
+| `profile NAME` | `ga --profile NAME config set allowed_…` | `~/.config/ga-cli/profiles/NAME/config.json` | only that profile |
+| `env` | `GA_CLI_ALLOWED_ACCOUNTS` / `GA_CLI_ALLOWED_PROPERTIES` | the environment | every profile |
+
+The default profile's allowlist is a fence around every profile, so `--profile` and
+`GA_CLI_PROFILE` can't get past it. A named profile's own allowlist and the env vars can only
+narrow it. This also means that an allowlist you set in the default profile binds all your named
+profiles.
+
+```bash
+ga config set allowed_account_ids 111,222                 # all profiles: accounts 111 and 222
+ga --profile client-a config set allowed_account_ids 111  # client-a: account 111 only
+```
+
 - **Checked before sending:** every API request is checked before it is sent. A blocked request
-  exits with code 5 (`allowlist_error`, with the blocked `resource` in the JSON error).
-  `accounts list`, `account-summaries list` and `properties list` only show allowed items.
+  exits with code 5 (`allowlist_error`). The JSON error (`-o json`, or on a pipe) names the
+  blocked `resource`, and a separate `hint` field says to run `ga allowlist show`. `accounts list`,
+  `account-summaries list` and `properties list` only show allowed items.
 - **Property-only allowlists:** a property on the allowlist doesn't allow account-level commands
   (`accounts get`, account access bindings, account access reports) on its parent account.
   Allowlist the account for those.
 - **Interactive only:** `ga config set` / `unset` on the allowlist keys, and `ga config reset`
-  while an allowlist is set, need a terminal and a confirmation. There is no flag to override
-  the allowlist.
-- **Unreadable config file:** if `config.json` isn't valid JSON, `ga` can't tell whether it holds
-  an allowlist. Every API command then exits 5, even if you never set one, and `ga config`
-  refuses to overwrite the file. Fix the file by hand.
+  while an allowlist is set, need a terminal and a confirmation. The confirmation names the
+  scope: "all profiles" in the default profile, or "profile NAME, narrows the global allowlist".
+  There is no flag to override the allowlist.
+- **Unreadable config file:** if a `config.json` isn't valid JSON, `ga` can't tell whether it
+  holds an allowlist. An unreadable `~/.config/ga-cli/config.json` blocks every profile, because
+  it may hold the fence. An unreadable `~/.config/ga-cli/profiles/NAME/config.json` blocks only
+  that profile.
+  Every API command in a blocked profile exits 5, even if you never set an allowlist, and
+  `ga config` refuses to overwrite the unreadable file. Fix the file by hand.
 - **Environment variables:** `GA_CLI_ALLOWED_ACCOUNTS` / `GA_CLI_ALLOWED_PROPERTIES` take
-  comma-separated IDs. With both config and env set, a request must pass **both**, so env can
-  narrow the config allowlist for one session (for example when launching an agent) but never
-  widen it. An env var set to an empty string allows nothing.
+  comma-separated IDs. On top of a config-file allowlist, they narrow it for one session (for
+  example when launching an agent) but never widen it. An env var set to an empty string allows
+  nothing.
+- **Pinning an agent:** a profile's own allowlist protects against mistakes, not against an agent
+  that switches profile. To pin an agent to one client, use the default profile's allowlist, or
+  set `GA_CLI_ALLOWED_*` when you launch the agent.
 - **Property → account cache:** to place a property in its account, `ga` caches the result of one
-  `accountSummaries` call for an hour (`~/.config/ga-cli/allowlist-cache.json`, cleared by
-  `ga auth login` / `logout`). If you move a property to another account, `ga` can keep placing
-  it in its old account until the cache expires, so an account allowlist may still allow it (or
-  still block it) for up to an hour. Delete the cache file to apply the move straight away.
+  `accountSummaries` call for an hour. Each profile has its own cache:
+  `~/.config/ga-cli/allowlist-cache.json` for the default profile and
+  `~/.config/ga-cli/profiles/NAME/allowlist-cache.json` for a named one. `ga auth login` /
+  `logout` clear that profile's cache. If you move a property to another account, `ga` can keep
+  placing it in its old account until the cache expires, so an account allowlist may still allow
+  it (or still block it) for up to an hour. Delete the cache file to apply the move straight
+  away. With gcloud ADC credentials whose identity `ga` can't determine (for example Workload
+  Identity Federation without service-account impersonation), nothing is written to disk, so
+  each command that needs the lookup makes one extra `accountSummaries` call.
 
 > **A guardrail, not a security boundary.** The allowlist stops mistakes and keeps a well-meaning
 > agent on track. It can't stop a process that wants to get around it: anything holding your
 > token can call the API directly, edit `config.json`, point `GA_CLI_CONFIG_DIR` elsewhere, or fake
-> a terminal. An allowlist set only through env vars is advisory, because the agent's shell can
-> unset them; put the allowlist in the config file and use env only to narrow it. For a hard
-> boundary, give the agent a **service account** that has only been granted access to the
-> allowed accounts or properties in GA, and log in with `ga auth login --service-account`.
+> a terminal. A named profile's own allowlist doesn't bind other profiles, so an agent can get past
+> it by switching `--profile` or `GA_CLI_PROFILE`. An allowlist set only through env vars is
+> advisory, because the agent's shell can unset them; put the allowlist in the default profile's
+> config file and use env only to narrow it. For a hard boundary, give the agent a **service
+> account** that has only been granted access to the allowed accounts or properties in GA, and
+> log in with `ga auth login --service-account`.
 
 ## Global Options
 
@@ -458,9 +492,9 @@ ga completions fish > ~/.config/fish/completions/ga.fish
 | `GA_CLI_SERVICE_ACCOUNT` | Path to service account key file (default profile only) |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Standard GCP credential path (default profile only): a service account key, or any other ADC credential file such as a Workload Identity Federation config, which is used via ADC |
 | `GA_CLI_PROFILE` | Named profile to use, like `--profile` (which takes precedence) |
+| `GA_CLI_ALLOWED_ACCOUNTS` | Comma-separated allowed account IDs; only narrows the allowlist, in every profile (see [Allowlist](#allowlist)) |
+| `GA_CLI_ALLOWED_PROPERTIES` | Comma-separated allowed property IDs; only narrows the allowlist, in every profile |
 | `GA_CLI_CONFIG_DIR` | Override config directory |
-| `GA_CLI_ALLOWED_ACCOUNTS` | Comma-separated allowlisted account IDs; narrows the config allowlist (see [Allowlist](#allowlist)) |
-| `GA_CLI_ALLOWED_PROPERTIES` | Comma-separated allowlisted property IDs; narrows the config allowlist |
 | `NO_COLOR` | Disable colored output |
 
 ## CI/CD Integration

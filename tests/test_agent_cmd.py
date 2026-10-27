@@ -154,6 +154,14 @@ class TestAgentGuideSection:
         assert "Custom Dimensions" in result.output
 
 
+def _guide_section(heading: str) -> str:
+    """The overview guide's text from `## heading` up to the next `## ` heading."""
+    output = runner.invoke(app, ["agent", "guide"]).output
+    start = output.index(f"## {heading}\n")
+    end = output.find("\n## ", start + 1)
+    return output[start:] if end == -1 else output[start:end]
+
+
 class TestAgentGuideAllowlist:
     def test_guide_documents_allowlist(self):
         result = runner.invoke(app, ["agent", "guide"])
@@ -173,6 +181,64 @@ class TestAgentGuideAllowlist:
             (4, "network_error"), (5, "allowlist_error"),
         ]:
             assert f"| {code} | `{category}` |" in result.output
+
+    def test_allowlist_names_all_three_sources(self):
+        section = _guide_section("Allowlist")
+
+        assert "| `config` |" in section
+        assert "| `profile NAME` |" in section
+        assert "| `env` |" in section
+
+    def test_allowlist_states_the_profile_rule(self):
+        """The default profile's allowlist binds every profile; a profile's own only narrows."""
+        section = _guide_section("Allowlist")
+        config_row = next(line for line in section.splitlines() if line.startswith("| `config` |"))
+        profile_row = next(
+            line for line in section.splitlines() if line.startswith("| `profile NAME` |")
+        )
+
+        assert "default profile" in config_row
+        assert "every profile" in config_row
+        assert "ga --profile NAME config set" in profile_row
+        assert "narrows" in profile_row
+        assert "can never widen" in section
+        assert "`--profile`" in section
+        assert "`GA_CLI_PROFILE`" in section
+
+    def test_allowlist_says_not_to_switch_profile_on_exit_5(self):
+        section = _guide_section("Allowlist")
+
+        assert "another `--profile`" in section
+        assert "ga auth login" in section
+
+    def test_error_shape_mentions_resource_and_hint(self):
+        section = _guide_section("Errors and exit codes")
+
+        assert '"resource"' in section
+        assert '"hint"' in section
+
+    def test_exit_codes_cover_profile_errors(self):
+        rows = {
+            line.split("|")[1].strip(): line
+            for line in _guide_section("Errors and exit codes").splitlines()
+            if line.startswith("| ") and line.split("|")[1].strip().isdigit()
+        }
+
+        assert "invalid profile name" in rows["1"]
+        assert "unknown profile" in rows["2"]
+
+    def test_global_flags_list_profile(self):
+        assert "| `--profile NAME` |" in _guide_section("Global Flags")
+
+    def test_env_vars_list_profile_next_to_allowlist_vars(self):
+        names = [
+            line.split("`")[1]
+            for line in _guide_section("Environment Variables").splitlines()
+            if line.startswith("| `")
+        ]
+
+        i = names.index("GA_CLI_PROFILE")
+        assert names[i + 1:i + 3] == ["GA_CLI_ALLOWED_ACCOUNTS", "GA_CLI_ALLOWED_PROPERTIES"]
 
     def test_exit_codes_match_classify_error_docstring(self):
         from ga_cli.utils.errors import classify_error
