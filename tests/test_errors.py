@@ -9,7 +9,9 @@ from ga_cli.utils.errors import (
     ADC_IMPERSONATE_COMMAND,
     ADC_LOGIN_COMMAND,
     ADC_SCOPE_HINT,
+    ALLOWLIST_CONFIG_HINT,
     ALLOWLIST_HINT,
+    AllowlistConfigError,
     AllowlistError,
     NotAuthenticatedError,
     classify_error,
@@ -589,6 +591,18 @@ class TestAllowlistError:
     def test_hint_tells_agent_to_ask_user(self):
         assert "ga allowlist show" in ALLOWLIST_HINT
         assert "only the user can change the allowlist" in ALLOWLIST_HINT
+
+    def test_config_error_is_an_allowlist_error(self):
+        err = AllowlistConfigError("config.json", "x")
+        assert isinstance(err, AllowlistError)
+        assert err.resource == "config.json"
+        assert classify_error(err) == (5, "allowlist_error")
+
+    def test_config_error_hint_does_not_point_at_allowlist_show(self):
+        """`ga allowlist show` exits 5 as well while the allowlist can't be loaded."""
+        assert error_hint(AllowlistConfigError("config.json", "x")) == ALLOWLIST_CONFIG_HINT
+        assert "ga allowlist show" not in ALLOWLIST_CONFIG_HINT
+        assert "only the user can change the allowlist" in ALLOWLIST_CONFIG_HINT
 
     def test_json_payload_has_resource_and_hint(self, capsys):
         set_output_format("json")

@@ -11,6 +11,7 @@ from ga_cli.api import client as client_mod
 from ga_cli.api.allowlist_guard import principal_of, reset_caches
 from ga_cli.config.store import UserConfig, save_config
 from ga_cli.main import app
+from ga_cli.utils.errors import ALLOWLIST_CONFIG_HINT
 
 runner = CliRunner()
 
@@ -133,7 +134,10 @@ class TestShowEnabled:
         monkeypatch.setenv("GA_CLI_ALLOWED_ACCOUNTS", "x")
         result = _show("-o", "json")
         assert result.exit_code == 5
-        assert json.loads(result.stderr)["category"] == "allowlist_error"
+        err = json.loads(result.stderr)
+        assert err["category"] == "allowlist_error"
+        # Not ALLOWLIST_HINT: it would send the agent back to this same failing command
+        assert err["hint"] == ALLOWLIST_CONFIG_HINT
 
     def test_unreadable_config_exits_5(self, tmp_path):
         (tmp_path / "config.json").write_text('{"allowed_account_ids": ["10"],}')
@@ -142,6 +146,7 @@ class TestShowEnabled:
         err = json.loads(result.stderr)
         assert err["category"] == "allowlist_error"
         assert err["resource"] == "config.json"
+        assert err["hint"] == ALLOWLIST_CONFIG_HINT
 
 
 def _write_profile_config(root, profile, data):

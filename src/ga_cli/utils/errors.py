@@ -17,6 +17,11 @@ ALLOWLIST_HINT = (
     "Run 'ga allowlist show' for the allowed properties; "
     "only the user can change the allowlist."
 )
+# Not ALLOWLIST_HINT: `ga allowlist show` fails the same way until this is fixed
+ALLOWLIST_CONFIG_HINT = (
+    "Requests stay blocked until the user fixes the file or setting named in the message; "
+    "only the user can change the allowlist."
+)
 
 
 class AllowlistError(Exception):
@@ -31,6 +36,13 @@ class AllowlistError(Exception):
         self.resource = resource
         self.reason = reason
         super().__init__(reason)
+
+
+class AllowlistConfigError(AllowlistError):
+    """The allowlist itself can't be loaded: a malformed entry or an unreadable config.json.
+
+    ``error_hint()`` supplies ``ALLOWLIST_CONFIG_HINT`` instead of ``ALLOWLIST_HINT``.
+    """
 
 
 # Creates gcloud Application Default Credentials that carry the scopes GA needs.
@@ -211,13 +223,16 @@ def _error_reasons(err: Exception) -> set[str]:
 def error_hint(err: Exception) -> str | None:
     """Advice to show alongside an error, or None.
 
-    - ``AllowlistError``: ``ALLOWLIST_HINT``.
+    - ``AllowlistConfigError``: ``ALLOWLIST_CONFIG_HINT``.
+    - Any other ``AllowlistError``: ``ALLOWLIST_HINT``.
     - A 403 ``ACCESS_TOKEN_SCOPE_INSUFFICIENT`` while the credentials came from
       gcloud ADC: ``ADC_SCOPE_HINT``. User ADC ignores the scopes a client asks
       for unless it was created with them (SPEC B4), so the fix is a re-login.
     """
     from googleapiclient.errors import HttpError
 
+    if isinstance(err, AllowlistConfigError):
+        return ALLOWLIST_CONFIG_HINT
     if isinstance(err, AllowlistError):
         return ALLOWLIST_HINT
     if not isinstance(err, HttpError) or err.resp.status != 403:

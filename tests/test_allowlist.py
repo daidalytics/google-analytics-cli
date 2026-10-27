@@ -13,7 +13,7 @@ from ga_cli.config.allowlist import (
     parse_ids,
 )
 from ga_cli.config.constants import get_config_path, set_active_profile
-from ga_cli.utils.errors import AllowlistError
+from ga_cli.utils.errors import AllowlistConfigError, AllowlistError
 
 
 def _write_config(tmp_path, data):
@@ -65,6 +65,12 @@ class TestParseIds:
     def test_non_string_item_rejected(self):
         with pytest.raises(AllowlistError):
             parse_ids([123], "accounts", "x")  # type: ignore[list-item]
+
+    @pytest.mark.parametrize("value", ["properties/123", "abc", 123, [123]])
+    def test_every_rejection_is_a_config_error(self, value):
+        """A malformed entry means the allowlist itself can't be loaded."""
+        with pytest.raises(AllowlistConfigError):
+            parse_ids(value, "accounts", "x")
 
 
 class TestLoadAllowlist:

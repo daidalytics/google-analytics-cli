@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Optional, Union
 
-from ..utils.errors import AllowlistError
+from ..utils.errors import AllowlistConfigError
 
 ENV_ACCOUNTS = "GA_CLI_ALLOWED_ACCOUNTS"
 ENV_PROPERTIES = "GA_CLI_ALLOWED_PROPERTIES"
@@ -36,18 +36,20 @@ def parse_ids(value: Union[str, Iterable[str]], kind: str, origin: str) -> froze
 
     ``kind`` is "accounts" or "properties"; the matching ``accounts/`` or ``properties/``
     prefix is stripped. Blank entries are ignored. Anything else that isn't numeric
-    raises AllowlistError naming ``origin``.
+    raises AllowlistConfigError naming ``origin``.
     """
     if isinstance(value, str):
         items = value.split(",")
     elif isinstance(value, (list, tuple, set, frozenset)):
         items = list(value)
     else:
-        raise AllowlistError(origin, f"Invalid {kind} list in {origin}: expected a list of IDs")
+        raise AllowlistConfigError(
+            origin, f"Invalid {kind} list in {origin}: expected a list of IDs"
+        )
     ids = set()
     for raw in items:
         if not isinstance(raw, str):
-            raise AllowlistError(origin, f"Invalid {kind} entry {raw!r} in {origin}")
+            raise AllowlistConfigError(origin, f"Invalid {kind} entry {raw!r} in {origin}")
         entry = raw.strip()
         if not entry:
             continue
@@ -55,7 +57,7 @@ def parse_ids(value: Union[str, Iterable[str]], kind: str, origin: str) -> froze
         if entry.startswith(prefix):
             entry = entry[len(prefix):]
         if not _DIGITS.match(entry):
-            raise AllowlistError(
+            raise AllowlistConfigError(
                 origin,
                 f"Invalid {kind} ID {raw.strip()!r} in {origin}: expected a numeric ID",
             )
@@ -186,7 +188,7 @@ def _file_source(name: str, resource: str, path: Path) -> Optional[AllowlistSour
     config = load_config_at(path)
     reason = config_error(path)
     if reason:
-        raise AllowlistError(resource, f"{reason}, so the allowlist can't be checked")
+        raise AllowlistConfigError(resource, f"{reason}, so the allowlist can't be checked")
     origin = "config key" if name == "config" else f"{name} config key"
     return _source(
         name,
@@ -199,7 +201,7 @@ def _file_source(name: str, resource: str, path: Path) -> Optional[AllowlistSour
 def load_allowlist() -> Allowlist:
     """Build the effective allowlist: root config ∩ named profile's config ∩ env.
 
-    Raises AllowlistError if any configured entry is malformed, or if a config.json
+    Raises AllowlistConfigError if any configured entry is malformed, or if a config.json
     can't be read: it may hold an allowlist, so the guard fails closed. An unreadable
     root file blocks every profile; a named profile's blocks only that profile.
     """

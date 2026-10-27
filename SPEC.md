@@ -172,6 +172,9 @@ line in text output), and *the message itself is never altered*. The PR instead 
 - `AllowlistError(resource, reason)`: the message is the reason only.
 - `error_hint()` returns `ALLOWLIST_HINT` for an `AllowlistError`. `handle_error` already
   emits it as `"hint"` in JSON and as a second line in text.
+- An allowlist that can't be loaded (an unreadable `config.json` or a malformed entry) raises
+  `AllowlistConfigError`, a subclass, and gets `ALLOWLIST_CONFIG_HINT` instead: `ga allowlist
+  show` fails the same way then, so the hint can't point at it (user, 2026-10-27).
 - `classify_error`: `AllowlistError` is still checked first and returns `(5, "allowlist_error")`.
   The payload keeps `"resource"`.
 
