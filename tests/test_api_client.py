@@ -418,7 +418,7 @@ class TestMalformedAllowlist:
 
 
 class TestCredentialResolution:
-    """SPEC B4: the credential resolution table, for both profile kinds.
+    """0.6.0 SPEC B4: the credential resolution table, for both profile kinds.
 
     Each row configures the source it expects to win *plus every source
     below it*, so a row passes only if precedence is right.

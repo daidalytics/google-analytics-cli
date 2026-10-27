@@ -4,7 +4,8 @@ Provides authenticated clients for the Analytics Admin API and Data API.
 Uses google-api-python-client (REST-based), consistent with GTM CLI's use
 of the googleapis npm package.
 
-Credential resolution (SPEC B4), implemented by ``resolve_credentials()``:
+Credential resolution (B4 in the 0.6.0 spec, ``git show 7594078:SPEC.md``),
+implemented by ``resolve_credentials()``:
 
 Default profile:
 1. ``GA_CLI_SERVICE_ACCOUNT``
