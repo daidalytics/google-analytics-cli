@@ -171,9 +171,14 @@ def change_history_property(body: Any) -> Optional[str]:
 
 
 def principal_of(credentials: Any) -> Optional[str]:
-    """Identify whose property map the cache holds; None if it can't be told."""
+    """Identify whose property map the cache holds; None if it can't be told.
+
+    A service account (key, impersonated, or behind Workload Identity Federation) is its
+    email, and a user is a hash of the refresh token. An email without "@" is unknown:
+    Compute Engine reports "default" until its first refresh.
+    """
     email = getattr(credentials, "service_account_email", None)
-    if isinstance(email, str) and email:
+    if isinstance(email, str) and "@" in email:
         return email
     token = getattr(credentials, "refresh_token", None)
     if isinstance(token, str) and token:
