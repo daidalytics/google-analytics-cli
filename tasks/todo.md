@@ -43,7 +43,7 @@ Legend: `∥` = runs in parallel with its siblings, each in its own worktree age
 - [x] ∥ Orchestrator docs-vs-behaviour check against a scratch config dir · every README / SKILL.md / `agent guide` claim checked holds
       · offline run: a throwaway service-account key whose `token_uri` points at a dead local port, so a request that passes the guard fails locally
       · root fence under `--profile` and `GA_CLI_PROFILE`; a profile and env only narrow; empty env allows nothing; unreadable root blocks every profile, an unreadable profile file only that one; non-TTY `config set/unset/reset` refused; `auth logout` clears only its profile's cache; audience-exports create blocked (also via `--audience-id properties/P/…`), `--dry-run` sends nothing; `allowlist show` JSON and table match the T2b contract; `profiles delete` needs no TTY
-      · nit, not changed: for an unreadable `config.json` the exit-5 `hint` still says to run `ga allowlist show`, which exits 5 in that state too
+      · nit: for an unreadable `config.json` the exit-5 `hint` said to run `ga allowlist show`, which exits 5 in that state too · fixed in `3f762af` (user's go-ahead): `AllowlistConfigError` + `ALLOWLIST_CONFIG_HINT` for unreadable files and malformed entries, SPEC D4 updated; 1792 green
       · the first run's proxy-only sandbox leaked ~5 token requests for the fake service account to `oauth2.googleapis.com` (httplib2 ignores proxies without PySocks); all rejected, no GA API call; fixed before the rerun
 
 - [ ] **CHECKPOINT W** · suite + ruff + drift green · live read-only check (**ask first**, which property) · **human review**
@@ -51,6 +51,7 @@ Legend: `∥` = runs in parallel with its siblings, each in its own worktree age
       · [x] live read-only check on 250400352 (user re-authenticated as gunnar.griese.gg@gmail.com, OAuth, default profile), env-only allowlist so `config.json` stayed untouched:
         allowed `reports run` returns rows · `-p 123456789` exits 5 with `resource` + `hint` · `allowlist show` resolves 250400352 → account 143775840 via a live `accountSummaries` · property-only allowlist denies `accounts get -a 143775840` · `GA_CLI_ALLOWED_ACCOUNTS=143775840` filters `accounts list` 35 → 1 and allows the report
       · [ ] human review
+      · task worktrees and their branches removed after the merges (user's go-ahead)
 
 ## Wave 3 (orchestrator, ask first)
 
