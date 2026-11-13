@@ -5,7 +5,7 @@
   "plugins": [
     {
       "name": "google-analytics-cli",
-      "source": "./",
+      "source": "./plugin",
       "description": "Google Analytics 4 skill for AI agents, driving the ga CLI"
     }
   ]

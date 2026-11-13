@@ -11,7 +11,7 @@ description: "Answer Google Analytics 4 questions and manage GA4 configuration b
 
 Use `ga` if it's on PATH (`command -v ga`). Otherwise substitute `uvx google-analytics-cli` for `ga` in every command in this skill and its references: `ga reports run …` becomes `uvx google-analytics-cli reports run …`. Auth and config live in `~/.config/ga-cli/` either way, so the two are interchangeable. Substitute in each command rather than setting an alias or variable — shell state doesn't persist between your tool calls.
 
-If neither `ga` nor `uv` exists, tell the user to install one (`uv tool install google-analytics-cli` or `curl -LsSf https://astral.sh/uv/install.sh | sh`) and stop.
+If neither `ga` nor `uv` exists, tell the user to install one (`uv tool install google-analytics-cli`; uv itself: https://docs.astral.sh/uv/getting-started/installation/) and stop.
 
 ## Get the syntax from the reference, not from `--help`
 

@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PLUGIN_DIR = REPO_ROOT / ".claude-plugin"
+PLUGIN_DIR = REPO_ROOT / "plugin" / ".claude-plugin"
 PLUGIN_JSON = PLUGIN_DIR / "plugin.json"
-MARKETPLACE_JSON = PLUGIN_DIR / "marketplace.json"
+MARKETPLACE_JSON = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 PLUGIN_ICON = PLUGIN_DIR / "icon.png"
 
 PACKAGE_NAME = "google-analytics-cli"
@@ -71,7 +71,7 @@ class TestPluginJson:
         package_version = version(PACKAGE_NAME)
 
         assert plugin.get("version") == package_version, (
-            f".claude-plugin/plugin.json version is {plugin.get('version')!r} but "
+            f"plugin/.claude-plugin/plugin.json version is {plugin.get('version')!r} but "
             f"pyproject.toml version is {package_version!r}. Bump both files together "
             "in the release commit: Claude Code only offers plugin updates when the "
             "plugin.json version changes."
@@ -93,7 +93,7 @@ class TestMarketplaceJson:
         assert len(plugins) == 1
         entry = plugins[0]
         assert entry["name"] == PACKAGE_NAME
-        assert entry["source"] == "./"
+        assert entry["source"] == "./plugin"
         assert isinstance(entry.get("description"), str)
         assert entry["description"].strip()
 
@@ -103,7 +103,7 @@ class TestMarketplaceJson:
 
 
 class TestPluginIcon:
-    """The developer portal takes .claude-plugin/icon.png as the listing icon the first
+    """The developer portal takes plugin/.claude-plugin/icon.png as the listing icon the first
     time the plugin is saved or submitted, and never updates it afterwards. It must be a
     square PNG or JPEG of 512-2048 px per side and under 2 MB (no SVG or WebP)."""
 

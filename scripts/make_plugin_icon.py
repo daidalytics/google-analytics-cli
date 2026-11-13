@@ -1,4 +1,4 @@
-"""Render the Claude Code plugin icon (.claude-plugin/icon.png).
+"""Render the Claude Code plugin icon (plugin/.claude-plugin/icon.png).
 
 A white prompt chevron and a rising amber trend line on navy, in the colors of
 the CLI's OAuth success page. Dev-only; Pillow is not a project dependency:
@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw
 SIZE = 1024  # output px per side (portal accepts 512-2048)
 SS = 4  # supersampling factor, for clean anti-aliased edges
 NAVY, WHITE, AMBER = "#1a1a2e", "#ffffff", "#dd973a"
-OUTPUT = Path(__file__).resolve().parent.parent / ".claude-plugin" / "icon.png"
+OUTPUT = Path(__file__).resolve().parent.parent / "plugin" / ".claude-plugin" / "icon.png"
 
 
 def _dot(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: str) -> None:

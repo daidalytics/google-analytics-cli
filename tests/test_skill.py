@@ -1,4 +1,4 @@
-"""Guard tests for the agent skill shipped in skills/ga-cli/.
+"""Guard tests for the agent skill shipped in plugin/skills/ga-cli/.
 
 The skill is copied verbatim to every user by `npx skills add` and the Claude
 Code plugin, so these tests keep it honest: valid frontmatter, a generated
@@ -20,7 +20,7 @@ from ga_cli.main import app
 from ga_cli.utils.describe import build_cli_schema
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SKILLS_ROOT = REPO_ROOT / "skills"
+SKILLS_ROOT = REPO_ROOT / "plugin" / "skills"
 SKILL_DIR = SKILLS_ROOT / "ga-cli"
 SKILL_MD = SKILL_DIR / "SKILL.md"
 
@@ -144,7 +144,7 @@ class TestGeneratedReference:
         committed = gen_skill_reference.extract_block(gen_skill_reference.COMMANDS_MD.read_text())
         fresh = gen_skill_reference.render(schema)
         assert committed == fresh, (
-            "skills/ga-cli/references/commands.md is out of date with the CLI. "
+            "plugin/skills/ga-cli/references/commands.md is out of date with the CLI. "
             "Run: uv run python scripts/gen_skill_reference.py --write"
         )
 

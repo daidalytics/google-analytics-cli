@@ -3,7 +3,7 @@
 
 Hand-written command references drift and get flags wrong (an early draft of
 the skill shipped a non-existent `ga property-settings get`). This renders the
-per-group listing in skills/ga-cli/references/commands.md from the CLI's own
+per-group listing in plugin/skills/ga-cli/references/commands.md from the CLI's own
 schema, built in-process via build_cli_schema() so it reflects the checked-out
 code rather than whatever `ga` is on PATH.
 
@@ -24,7 +24,7 @@ from collections import defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-COMMANDS_MD = REPO_ROOT / "skills" / "ga-cli" / "references" / "commands.md"
+COMMANDS_MD = REPO_ROOT / "plugin" / "skills" / "ga-cli" / "references" / "commands.md"
 
 BEGIN_MARKER = "<!-- BEGIN GENERATED: ga --describe -->"
 END_MARKER = "<!-- END GENERATED -->"
